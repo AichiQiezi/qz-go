@@ -20,8 +20,3 @@ func TestTryPassword2(t *testing.T) {
 	fmt.Println(password2)
 	require.NoError(t, err)
 }
-
-func TestRetry(t *testing.T) {
-	InitDB()
-	retryFailedAttempts()
-}

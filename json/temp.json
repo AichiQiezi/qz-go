@@ -1,0 +1,644 @@
+{
+  "code": 1,
+  "msg": {
+    "text": "操作成功",
+    "code": 0
+  },
+  "data": {
+    "qrcode_data": {
+      "code": 1,
+      "msg": {
+        "text": "操作成功",
+        "code": "0"
+      },
+      "data": {
+        "need_check": 0,
+        "qrcode_msg": {
+          "qrcode_record": {
+            "id": 289958583,
+            "coding": "qLhqfi1",
+            "wx_url": "",
+            "web_url": "https:\/\/qr71.cn\/orHY8H\/qLhqfi1",
+            "wxcode_url": "",
+            "qrcode_url": "https:\/\/ncstatic.clewm.net\/qrcodeurl\/2025\/03\/20\/e1ad0e54ef5bb44e7a73ee1af93a78bc.png",
+            "list_name": "希丝奈25年3月舰长音声领取",
+            "qrcode_name": "",
+            "scene_module_id": 0,
+            "desc": "",
+            "category_id": 43058028,
+            "tpl_id": 64259179,
+            "identity_id": 0,
+            "org_id": 79616739,
+            "update_time": 1742410194,
+            "create_time": 1740761506,
+            "status": 0,
+            "preset_case": 0,
+            "show_org_dest": 0,
+            "can_scan_update": 0,
+            "is_mobile_updated": 0,
+            "create_from": 108,
+            "tpl_qrcode_status": 0,
+            "tpl_qrcode_updated": 0,
+            "batch_id": 0,
+            "log_status": 0,
+            "excel_status": 0,
+            "tpl_name": "",
+            "batch_name": "",
+            "route_type": 3,
+            "record_summary_status": 1,
+            "project_id": 13387,
+            "qrcode_sort": 0,
+            "share_qrcode_url": "https:\/\/ncstatic.clewm.net\/qrcodeurl\/2025\/03\/20\/74341405cdd10aa6327790381461cde2.png",
+            "qrstyle_url": "",
+            "top_style": [],
+            "record_add_status": 0,
+            "component_value_empty": 1
+          },
+          "qrcode_compontent": [
+            {
+              "id": 361494485,
+              "qrcode_id": 289958583,
+              "component_code": "text",
+              "identity_id": 0,
+              "sort": 0,
+              "status": 0,
+              "tpl_com_id": 311168763,
+              "org_id": 79616739,
+              "batch_id": 0,
+              "component_status": 0,
+              "template_component_info": "",
+              "form_component_id": 0,
+              "form_component_title": "",
+              "attribute_list": [
+                {
+                  "content_html": {
+                    "id": 164113465,
+                    "value": "<p><br><\/p>",
+                    "status": 0,
+                    "attribute_id": 4,
+                    "group_id": 0,
+                    "real_group_id": 7,
+                    "tpl_com_id": 311168763,
+                    "name": "文本 html 片段",
+                    "is_default_value": 0,
+                    "multiple_id": "155148411",
+                    "attribute_multiple_id": 1
+                  }
+                }
+              ],
+              "group_count": 1,
+              "encryption": "c923de231f4fe5b7a526f5e7de83dd9c"
+            },
+            {
+              "id": 366294100,
+              "qrcode_id": 289958583,
+              "component_code": "file",
+              "identity_id": 0,
+              "sort": 1,
+              "status": 0,
+              "tpl_com_id": 315941490,
+              "org_id": 79616739,
+              "batch_id": 0,
+              "component_status": 0,
+              "template_component_info": "",
+              "form_component_id": 0,
+              "form_component_title": "",
+              "attribute_list": [
+                {
+                  "file_name": {
+                    "id": 303798552,
+                    "value": "三月音声+后缀rar",
+                    "status": 0,
+                    "attribute_id": 16,
+                    "group_id": 0,
+                    "real_group_id": 1,
+                    "tpl_com_id": 315941490,
+                    "name": "文件名称",
+                    "is_default_value": 0
+                  },
+                  "file_size": {
+                    "id": 303798553,
+                    "value": "320.96 M",
+                    "status": 0,
+                    "attribute_id": 17,
+                    "group_id": 0,
+                    "real_group_id": 1,
+                    "tpl_com_id": 315941490,
+                    "name": "文件大小",
+                    "is_default_value": 0
+                  },
+                  "file_url": {
+                    "id": 303798554,
+                    "value": "https:\/\/ncstatic.clewm.net\/rsrc\/2025\/0320\/02\/fda924997ea27fa3614b2be2e28a7c13.",
+                    "status": 0,
+                    "attribute_id": 18,
+                    "group_id": 0,
+                    "real_group_id": 1,
+                    "tpl_com_id": 315941490,
+                    "name": "文件地址",
+                    "is_default_value": 0,
+                    "source_id": 1952819087
+                  },
+                  "can_download": {
+                    "id": 303798555,
+                    "value": "1",
+                    "status": 0,
+                    "attribute_id": 109,
+                    "group_id": 0,
+                    "real_group_id": 1,
+                    "tpl_com_id": 315941490,
+                    "name": "是否允许下载",
+                    "is_default_value": 0
+                  },
+                  "file_register_time": {
+                    "id": 303798556,
+                    "value": "",
+                    "status": 0,
+                    "attribute_id": 152,
+                    "group_id": 0,
+                    "real_group_id": 1,
+                    "tpl_com_id": 315941490,
+                    "name": "文件阅读时长",
+                    "is_default_value": 0,
+                    "source_id": null
+                  },
+                  "file_preview_hide_menu": {
+                    "id": 303798557,
+                    "value": "0",
+                    "status": 0,
+                    "attribute_id": 157,
+                    "group_id": 0,
+                    "real_group_id": 1,
+                    "tpl_com_id": 315941490,
+                    "name": "文件预览隐藏菜单",
+                    "is_default_value": 0
+                  },
+                  "file_preview_mode": {
+                    "id": 303798558,
+                    "value": "2",
+                    "status": 0,
+                    "attribute_id": 158,
+                    "group_id": 0,
+                    "real_group_id": 1,
+                    "tpl_com_id": 315941490,
+                    "name": "文件预览方式",
+                    "is_default_value": 0
+                  },
+                  "file_style": {
+                    "id": 303798559,
+                    "value": "",
+                    "status": 0,
+                    "attribute_id": 160,
+                    "group_id": 0,
+                    "real_group_id": 1,
+                    "tpl_com_id": 315941490,
+                    "name": "文件样式",
+                    "is_default_value": 0
+                  },
+                  "can_share": {
+                    "id": 303798560,
+                    "value": "1",
+                    "status": 0,
+                    "attribute_id": 163,
+                    "group_id": 0,
+                    "real_group_id": 1,
+                    "tpl_com_id": 315941490,
+                    "name": "是否允许分享",
+                    "is_default_value": 0
+                  },
+                  "open_readregister": {
+                    "id": 303798561,
+                    "value": "0",
+                    "status": 0,
+                    "attribute_id": 164,
+                    "group_id": 0,
+                    "real_group_id": 1,
+                    "tpl_com_id": 315941490,
+                    "name": "开启文件签阅",
+                    "is_default_value": 0
+                  },
+                  "can_preview": {
+                    "value": 0,
+                    "type": "fileType"
+                  },
+                  "can_wxwork_download": false
+                }
+              ],
+              "group_count": 1,
+              "encryption": "6501c447c7205c41ce0e7471e358ea96"
+            },
+            {
+              "id": 366294101,
+              "qrcode_id": 289958583,
+              "component_code": "text",
+              "identity_id": 0,
+              "sort": 2,
+              "status": 0,
+              "tpl_com_id": 315941491,
+              "org_id": 79616739,
+              "batch_id": 0,
+              "component_status": 0,
+              "template_component_info": "",
+              "form_component_id": 0,
+              "form_component_title": "",
+              "attribute_list": [
+                {
+                  "content_html": {
+                    "id": 166394341,
+                    "value": "<p><br><\/p><p><br><\/p><p><br><\/p><p><br><\/p><p style=\"background-color:#ffffff; color:rgba(0, 0, 0, 0.85); margin-left:0rem; margin-right:0rem\"><span style=\"background-color:#ffffff\"><strong><span style=\"color:#ff0000; font-size:0.682667rem\">1.请勿直接在线解<\/span><\/strong><\/span><\/p><p><br><\/p><p style=\"background-color:#ffffff; color:rgba(0, 0, 0, 0.85); margin-left:0rem; margin-right:0rem\"><span style=\"background-color:#ffffff\"><strong><span style=\"color:#ff0000; font-size:0.682667rem\">压,避免文件被爆破<\/span><\/strong><\/span><\/p><p><br><\/p><p style=\"background-color:#ffffff; color:rgba(0, 0, 0, 0.85); margin-left:0rem; margin-right:0rem\"><br><\/p><p style=\"background-color:#ffffff; margin-left:0rem; margin-right:0rem\"><span style=\"color:#ff0000\"><strong>2.如发现无法下载<\/strong><\/span><\/p><p><br><\/p><p style=\"background-color:#ffffff; margin-left:0rem; margin-right:0rem\"><span style=\"color:#ff0000\"><strong>请联系士大夫<\/strong><\/span><\/p>",
+                    "status": 0,
+                    "attribute_id": 4,
+                    "group_id": 0,
+                    "real_group_id": 1,
+                    "tpl_com_id": 315941491,
+                    "name": "文本 html 片段",
+                    "is_default_value": 0,
+                    "multiple_id": "157430017",
+                    "attribute_multiple_id": 1
+                  }
+                }
+              ],
+              "group_count": 1,
+              "encryption": "c13477c87740c19abf7588bb7b29171d"
+            }
+          ],
+          "qrcode_top_component": [
+            {
+              "id": 361494486,
+              "qrcode_id": 289958583,
+              "component_code": "text",
+              "identity_id": 0,
+              "sort": 3,
+              "status": 0,
+              "tpl_com_id": 311168764,
+              "org_id": 79616739,
+              "batch_id": 0,
+              "component_status": 1,
+              "template_component_info": "",
+              "form_component_id": 0,
+              "form_component_title": "",
+              "attribute_list": [
+                {
+                  "content_html": {
+                    "id": 164113466,
+                    "value": "希丝奈25年3月舰长音声领取",
+                    "status": 0,
+                    "attribute_id": 4,
+                    "group_id": 0,
+                    "real_group_id": 7,
+                    "tpl_com_id": 311168764,
+                    "name": "文本 html 片段",
+                    "is_default_value": 0,
+                    "multiple_id": "155148412",
+                    "attribute_multiple_id": 1
+                  }
+                }
+              ],
+              "group_count": 1,
+              "encryption": "2a23f8255da8485df1a2bda5059db575"
+            },
+            {
+              "id": 366294103,
+              "qrcode_id": 289958583,
+              "component_code": "recordlog",
+              "identity_id": 0,
+              "sort": 4,
+              "status": 2,
+              "tpl_com_id": 315941493,
+              "org_id": 79616739,
+              "batch_id": 0,
+              "component_status": 1,
+              "template_component_info": "",
+              "form_component_id": 0,
+              "form_component_title": ""
+            }
+          ],
+          "redis_edition": 3,
+          "record_tpl_token": [],
+          "direct_preview_file_url": "",
+          "visible_auth_info": {
+            "open_auth": 1,
+            "user_info": {
+              "user_id": 0,
+              "member_id": 0
+            },
+            "has_power_comps": [
+              134577091
+            ],
+            "edit_need_audit": 0,
+            "open_password_info": {
+              "psw_tip": "请填写主播给出的密码，密码在主播私信",
+              "status": true
+            },
+            "open_location_info": [],
+            "open_time_info": [],
+            "data_authtype": 3,
+            "auth_list": [
+              {
+                "id": 134577091,
+                "data_id": 289958583,
+                "data_type": 1,
+                "privi_type": "visible",
+                "auth_type": 3,
+                "code_id": 289958583,
+                "org_id": 79616739,
+                "limit_id": 0,
+                "update_time": 1740761506,
+                "hide_nopower": 0,
+                "has_detail": true,
+                "password": "",
+                "psw_tip": "请填写主播给出的密码，密码在主播私信"
+              }
+            ],
+            "first_edituser_ass_id": [],
+            "power_status": 15,
+            "need_user_auth": 0,
+            "auth_limit": [],
+            "need_join_member": 0,
+            "need_join_auth_member": 0
+          },
+          "open_methods": {
+            "scan": true,
+            "press": true,
+            "share": true,
+            "other_app": true
+          },
+          "valid_time": {
+            "start_time": "",
+            "end_time": "",
+            "valid_days_num": -2
+          },
+          "cover_image": {
+            "type": 0,
+            "url": "",
+            "as_share_img": 0
+          }
+        },
+        "status_code": "qrcode_0_success",
+        "org_msg": {
+          "id": 79616739,
+          "user_id": 79535203,
+          "name": "虚空信标",
+          "coding": "orHY8H",
+          "org_dest_qrcode": 0,
+          "status": 0,
+          "is_auth": 1,
+          "show_dest_qrcode": 0,
+          "logo_path": "",
+          "memo": "",
+          "social_code": "",
+          "auth_type": 0,
+          "auth_status": 1,
+          "auth_used": "",
+          "auth_message": "",
+          "auth_request_time": 0,
+          "auth_deal_time": 0,
+          "auth_file_prove": "",
+          "auth_file_other": "",
+          "open_id": "",
+          "target_record_id": 0,
+          "route_type": 3,
+          "private_xcx_status": 0,
+          "custom_route_type": 1,
+          "subscribe_wxacode": "",
+          "capacity_time": 1744349369,
+          "capacity_publickey": "b618ebdaf27105d06c833b6ca4301138",
+          "build_module_weburl_time": 1744349369,
+          "build_module_weburl_publickey": "8f4e38b201f1daf18ae0dc36c68f1e3b",
+          "for_external_name": "虚空信标",
+          "org_manger_name": ""
+        },
+        "qrcode_addition_msg": {
+          "qrcode_id": 289958583,
+          "auth_set_subject": 1,
+          "is_mobile_updated": 0,
+          "log_msg_tag": "",
+          "expand_log": 4,
+          "disabled_open_methods": 0,
+          "cover_image": "",
+          "remarks": "",
+          "is_disabled": 0,
+          "start_time": 0,
+          "end_time": 0,
+          "valid_days_num": -2,
+          "expand_btn": "填写表单",
+          "cvid": 1037036385,
+          "show_collect": 3,
+          "show_share": 2,
+          "show_record_editlog": 0,
+          "recordview_position": 4,
+          "record_summary_title": "",
+          "show_homepage": 2,
+          "show_bottom_homepage": 2,
+          "bottom_homepage_meta": "{\"remark\":\"\",\"jump_type\":1,\"jump_link\":\"\",\"logo\":\"\",\"title\":\"虚空信标\"}",
+          "open_codereview": 0,
+          "default_qrlabel_show_type": 0,
+          "share_style": 0,
+          "open_readregister": 0,
+          "open_direct_preview": 0,
+          "soncode_edit_position": 0,
+          "state_show_mode": 4,
+          "record_summary_status": 1,
+          "subscribe_status": 0,
+          "show_manage": 2,
+          "show_font_size": 2,
+          "show_tabbar": 0,
+          "has_subscribed": 0,
+          "can_subscribe": 0
+        },
+        "subscribe_auth_info": {
+          "auth_list": [
+            {
+              "data_id": 289958583,
+              "org_id": 79616739,
+              "data_type": 13,
+              "auth_type": 1,
+              "privi_type": "edit",
+              "group_list": [
+                {
+                  "id": 71604747,
+                  "org_id": 79616739,
+                  "group_name": "所有成员",
+                  "group_type": 4,
+                  "status": 0,
+                  "is_default": 1,
+                  "add_time": 1701618013,
+                  "category_id": 0,
+                  "target_id": 0,
+                  "coding": "",
+                  "web_url": "",
+                  "group_memo": "",
+                  "qrcode_id": 0,
+                  "need_send_tip": 1,
+                  "tpl_id": 0
+                }
+              ]
+            }
+          ],
+          "data_authtype": 1,
+          "need_join_member": 1,
+          "need_user_auth": 1,
+          "power_status": 16
+        },
+        "preview_token": {
+          "time": 1744349369,
+          "signature": "e3b0d919cbea529fe23ceac7b3603882"
+        },
+        "project_valid": {
+          "project_id": 13387,
+          "project_time": 1744349369,
+          "project_publickey": "363385384afc87ea586712d343c224e7"
+        }
+      },
+      "url": "",
+      "wait": 3
+    },
+    "tpl_data": {
+      "code": 1,
+      "msg": {
+        "text": "操作成功",
+        "code": 0
+      },
+      "data": {
+        "total_tpls": 0,
+        "origin_tpl_list": [],
+        "read": [],
+        "hide": 0,
+        "rule_result": [],
+        "expand_log": 4,
+        "log_msg_tag": "",
+        "record_summary_title": null,
+        "open_codereview": 0,
+        "open_readregister": 0,
+        "open_direct_preview": 0,
+        "state_show_mode": 4,
+        "record_summary_status": 1,
+        "expand_btn": "填写表单",
+        "show_record_editlog": 0,
+        "recordview_position": 4,
+        "recordview_extend": {
+          "ext_info": {
+            "recordview_position": 4,
+            "nums": 3,
+            "content_type": [
+              1,
+              2,
+              3
+            ],
+            "content_position": 1
+          },
+          "operation_ext_info": {
+            "btn_color": "",
+            "btn_border_radius": 4,
+            "btn_background": 0,
+            "btn_font_color": "",
+            "btn_color_picker_img": "",
+            "btn_img_main_colors": "",
+            "btn_color_from": 0,
+            "content_position": 1
+          },
+          "statistics_configs": []
+        },
+        "log_status": 0
+      },
+      "url": "",
+      "wait": 3
+    },
+    "state_data": {
+      "code": 1,
+      "msg": {
+        "text": "操作成功",
+        "code": 0
+      },
+      "data": [],
+      "url": "",
+      "wait": 3
+    },
+    "operation_data": {
+      "code": 1,
+      "msg": "",
+      "data": [],
+      "url": "",
+      "wait": 3
+    },
+    "qrcode_properties_data": {
+      "code": 1,
+      "msg": {
+        "text": "操作成功",
+        "code": 0
+      },
+      "data": {
+        "org_msg": {
+          "edition_id": 3,
+          "from_edition_id": 3,
+          "is_paid_user": 1,
+          "media_flow_limited": 1,
+          "media_flow_total": "860160.00000000",
+          "media_flow_used": "0.00000000",
+          "org_dest_qrcode_route": "",
+          "homepage_qrcode_url": ""
+        },
+        "qrcode_msg": {
+          "auth_info": [],
+          "is_collect": 0,
+          "case_bg_path": "",
+          "is_special_code": 0,
+          "is_org_dest_qrcode": 0,
+          "show_collect": 1,
+          "show_manage": 1,
+          "show_font_size": 2,
+          "show_share": 1,
+          "show_homepage": 0,
+          "show_bottom_homepage": 0,
+          "show_powered_by": 0,
+          "share_style": 0,
+          "bottom_homepage_meta": {
+            "remark": "",
+            "jump_type": 1,
+            "jump_link": "",
+            "title": "虚空信标",
+            "logo": ""
+          },
+          "log_status": 0,
+          "powered_by_style_version": "",
+          "powered_by_style_versions": {
+            "powerby_style_20240717": "",
+            "powerby_style_20250226": "",
+            "powerby_style_20250310": ""
+          },
+          "show_complain": 1,
+          "soncode_edit_position": 0,
+          "state_show_mode": 4,
+          "record_summary_status": 1,
+          "show_org_card": 0
+        },
+        "record_msg": {
+          "log_status": 0,
+          "log_msg_tag": "",
+          "expand_log": 4,
+          "show_record_editlog": 0,
+          "recordview_position": 4,
+          "open_codereview": 0,
+          "open_readregister": 0,
+          "state_show_mode": 4,
+          "record_summary_status": 1
+        },
+        "low_quality": 0,
+        "encoded_user_id": "orHY8H",
+        "qrcode_setting_msg": {
+          "review_set": [],
+          "bgimage_set": [],
+          "common_set": [],
+          "bottom_warn": {
+            "type": 0
+          }
+        }
+      },
+      "url": "",
+      "wait": 3
+    },
+    "markdown": "<!-- meta\n{\n    \"url\": \"https:\/\/qr71.cn\/orHY8H\/qLhqfi1\",\n    \"code\": \"qLhqfi1\",\n    \"type\": \"standard\"\n}\n-->\n\n希丝奈25年3月舰长音声领取\n\n\n\n**文件:《三月音声+后缀rar》**\n\n[点击查看三月音声+后缀rar](https:\/\/ncstatic.clewm.net\/rsrc\/2025\/0320\/02\/fda924997ea27fa3614b2be2e28a7c13.)\n\n**1.请勿直接在线解**\n\n**压,避免文件被爆破**\n\n**2.如发现无法下载**\n\n**请联系士大夫**"
+  },
+  "url": "",
+  "wait": 3
+}
