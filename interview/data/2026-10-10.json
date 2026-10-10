@@ -1,0 +1,221 @@
+{
+  "date": "2026-10-10",
+  "generatedAt": "2026-10-10T13:57:12+08:00",
+  "questions": [
+    {
+      "id": "20261010-1",
+      "topic": "Go",
+      "difficulty": "Medium",
+      "title": "Batches that silently overwrite each other",
+      "title_zh": "批次之间悄悄互相覆盖",
+      "question": "A helper splits a slice into batches for a bulk API. Before sending, the caller appends a required marker item to each batch:\n\n```go\nfunc splitBatches(items []Product, size int) [][]Product {\n    var batches [][]Product\n    for len(items) > size {\n        batches = append(batches, items[:size])\n        items = items[size:]\n    }\n    if len(items) > 0 {\n        batches = append(batches, items)\n    }\n    return batches\n}\n\nfor _, b := range splitBatches(products, 100) {\n    b = append(b, marker)\n    send(b)\n}\n```\n\nIn production, the first product of every batch except the first never reaches the platform, and those batches contain the marker twice. Explain why, and fix it.",
+      "question_zh": "一个辅助函数把切片拆成多个批次，用来调用批量接口。发送之前，调用方还要给每个批次追加一个必需的标记项：\n\n```go\nfunc splitBatches(items []Product, size int) [][]Product {\n    var batches [][]Product\n    for len(items) > size {\n        batches = append(batches, items[:size])\n        items = items[size:]\n    }\n    if len(items) > 0 {\n        batches = append(batches, items)\n    }\n    return batches\n}\n\nfor _, b := range splitBatches(products, 100) {\n    b = append(b, marker)\n    send(b)\n}\n```\n\n线上出现了问题：除第一个批次外，每个批次的第一个商品都没有到达平台，而且这些批次里标记项出现了两次。请解释原因并修复。",
+      "answer": "**Root cause.** `items[:size]` shares the backing array with the original slice and keeps all of the remaining capacity. For batch *i*, `cap(b)` is larger than `len(b)`, so `append` does not allocate. It writes `marker` into the next slot of the shared array, which is element 0 of batch *i+1*. The next batch is then sent with `marker` in place of its first product, plus its own appended `marker`. Only the last batch's own append is safe, because its length equals its capacity and `append` has to allocate a new array. The caller's `products` slice is modified too, so anything that reads it later sees the wrong data.\n\n**Fix 1: cap each batch with a full slice expression.** `items[:size:size]` sets the capacity equal to the length, so any `append` must copy to a new array. `slices.Clip(b)` from Go 1.21 does the same thing.\n\n**Fix 2: use `slices.Chunk` (Go 1.23+).** It yields sub-slices whose capacity is already clipped to their length:\n\n```go\nfor b := range slices.Chunk(products, 100) {\n    send(append(b, marker))\n}\n```\n\n**Fix 3: copy when the callee keeps the data.** If `send` holds on to the slice (for example, it queues it for a retry goroutine), copy it with `slices.Clone` so later writes to the original cannot reach it.\n\n**General rule.** A sub-slice is a view, not a copy. Whenever a function returns sub-slices of its input, either clip them or document that callers must not append. If the sends ran concurrently, this bug would also be a data race, and `go test -race` would report it.",
+      "answer_zh": "**根本原因。** `items[:size]` 与原切片共享底层数组，并且保留了剩余的全部容量。对第 *i* 个批次来说，`cap(b)` 大于 `len(b)`，所以 `append` 不会分配新数组，而是把 `marker` 写进共享数组的下一个位置，也就是第 *i+1* 个批次的第 0 个元素。于是下一个批次发送时，第一个商品被替换成了 `marker`，再加上它自己追加的 `marker`。只有最后一个批次自己的追加是安全的，因为它的长度等于容量，`append` 必须分配新数组。调用方的 `products` 切片同样被改写了，之后任何读取它的代码都会拿到错误数据。\n\n**修复 1：用完整切片表达式限制容量。** `items[:size:size]` 把容量设为与长度相同，之后任何 `append` 都必须复制到新数组。Go 1.21 的 `slices.Clip(b)` 效果相同。\n\n**修复 2：使用 `slices.Chunk`（Go 1.23+）。** 它产出的子切片已经把容量裁剪到与长度相同：\n\n```go\nfor b := range slices.Chunk(products, 100) {\n    send(append(b, marker))\n}\n```\n\n**修复 3：被调用方持有数据时就复制。** 如果 `send` 会保留这个切片（例如交给重试 goroutine 排队），就用 `slices.Clone` 复制一份，这样原切片后续的写入就影响不到它。\n\n**通用规则。** 子切片是视图，不是副本。只要函数返回的是输入的子切片，要么裁剪容量，要么在文档里写明调用方不能 `append`。如果这些发送是并发执行的，这个 bug 还会构成数据竞争，`go test -race` 会把它报告出来。",
+      "followups": [
+        "When is sharing a backing array exactly what you want?",
+        "When `append` does allocate, how does Go choose the new capacity?",
+        "Would the race detector catch the sequential version of this bug? Why or why not?"
+      ],
+      "followups_zh": [
+        "什么时候共享底层数组恰恰是你想要的？",
+        "当 `append` 确实需要分配时，Go 如何决定新的容量？",
+        "对于顺序执行的版本，race detector 能发现这个 bug 吗？为什么？"
+      ],
+      "vocab": [
+        {
+          "en": "backing array",
+          "zh": "底层数组"
+        },
+        {
+          "en": "full slice expression",
+          "zh": "完整切片表达式（三索引切片）"
+        },
+        {
+          "en": "aliasing",
+          "zh": "别名（多个引用共享同一块内存）"
+        },
+        {
+          "en": "silently corrupt data",
+          "zh": "悄无声息地破坏数据"
+        },
+        {
+          "en": "A sub-slice is a view, not a copy.",
+          "zh": "子切片是视图，不是副本。"
+        }
+      ]
+    },
+    {
+      "id": "20261010-2",
+      "topic": "System Design",
+      "difficulty": "Hard",
+      "title": "Refreshing OAuth tokens from many pods without logging merchants out",
+      "title_zh": "多个 pod 并发刷新 OAuth token，又不让商家掉线",
+      "question": "Your service holds OAuth tokens for 20,000 merchants on an ad platform. Access tokens expire after one hour. The platform rotates refresh tokens: every refresh returns a new refresh token and invalidates the old one. Twenty pods call the platform's API, and each pod refreshes a token as soon as it sees a 401. A few times a day, a merchant gets `invalid_grant` and has to reconnect their account by hand. Explain why, and design token management that stops this from happening.",
+      "question_zh": "你的服务在某个广告平台上为 20,000 个商家保存 OAuth token。access token 一小时后过期。该平台会轮换 refresh token：每次刷新都会返回一个新的 refresh token，并使旧的失效。共有 20 个 pod 调用平台 API，每个 pod 一遇到 401 就会自己刷新 token。每天都会有几次，某个商家收到 `invalid_grant`，只能手动重新授权账号。请解释原因，并设计一套 token 管理方案，杜绝这种情况。",
+      "answer": "**Why it breaks.** Two pods see a 401 for the same merchant at about the same time. Both read refresh token R1 and both call the token endpoint. The first call succeeds and returns R2, which invalidates R1. The second call presents R1, gets `invalid_grant`, and the code treats that as \"the merchant revoked access\" and marks the connection broken. A quieter variant: a pod refreshes successfully but crashes or times out before saving R2, so the only valid refresh token is lost. Some providers also treat reuse of an old refresh token as possible theft and revoke the whole token family, as the OAuth 2.0 Security Best Current Practice (RFC 9700) describes.\n\n**One refresher per merchant.** Make refresh a single-flight operation keyed by merchant:\n- Inside a pod, use `golang.org/x/sync/singleflight` so concurrent requests share one refresh call.\n- Across pods, take a short lease, for example Redis `SET lock:token:{merchant} {owner} NX PX 15000`, or `SELECT ... FOR UPDATE` on the token row. Make the lease longer than the token call's HTTP timeout. Pods that lose the race wait briefly and re-read the token from storage instead of calling the platform.\n\n**Compare-and-set on storage.** Keep a version column on the token row. Save a refresh with `UPDATE tokens SET access_token=?, refresh_token=?, expires_at=?, version=version+1 WHERE merchant_id=? AND version=?`. If 0 rows change, another worker already refreshed: drop your result and re-read. Persist the new refresh token before you use the new access token, and encrypt tokens at rest.\n\n**Refresh proactively, not on 401.** A scheduler refreshes each token when about 10 minutes of lifetime remain, with random jitter so thousands of tokens do not come due in the same minute. Request-path code then only reads tokens. On a 401 it re-reads storage first and refreshes only if the stored token is still the one that failed.\n\n**Handle `invalid_grant` carefully.** Before marking a merchant disconnected, re-read storage. If a newer token exists, retry with it. Only when a fresh token also fails do you mark the connection as needing re-authorization and notify the merchant. Network errors and 5xx responses from the token endpoint are retryable. They say nothing about the token itself.\n\n**Observability.** Count refreshes, CAS conflicts and `invalid_grant` per platform, and alert on tokens that are close to expiry without a recent successful refresh.",
+      "answer_zh": "**为什么会出问题。** 两个 pod 几乎同时遇到同一个商家的 401。它们都读到 refresh token R1，并且都去调用 token 接口。第一个调用成功，拿到 R2，同时 R1 失效。第二个调用拿着 R1 去刷新，收到 `invalid_grant`，代码把它理解为“商家撤销了授权”，于是把连接标记为断开。还有一种更隐蔽的情况：某个 pod 刷新成功了，但在保存 R2 之前崩溃或超时，唯一有效的 refresh token 就这样丢了。有些平台还会把重复使用旧 refresh token 视为可能的盗用，直接吊销整个 token 家族，OAuth 2.0 安全最佳实践（RFC 9700）中描述的正是这种做法。\n\n**每个商家只有一个刷新者。** 把刷新做成按商家维度的 single-flight 操作：\n- 在单个 pod 内，用 `golang.org/x/sync/singleflight` 让并发请求共享同一次刷新调用。\n- 跨 pod 时，获取一个短租约，例如 Redis 的 `SET lock:token:{merchant} {owner} NX PX 15000`，或者对 token 行执行 `SELECT ... FOR UPDATE`。租约时长要大于 token 调用的 HTTP 超时时间。没抢到的 pod 稍等片刻，从存储里重新读取 token，而不是自己去调用平台。\n\n**存储层用比较并设置（CAS）。** 在 token 行上加一个 version 列。保存刷新结果时执行 `UPDATE tokens SET access_token=?, refresh_token=?, expires_at=?, version=version+1 WHERE merchant_id=? AND version=?`。如果影响行数为 0，说明别的 worker 已经刷新过了：丢弃你的结果，重新读取。先持久化新的 refresh token，再使用新的 access token，并且对存储的 token 做静态加密。\n\n**主动刷新，而不是等到 401。** 由调度器在每个 token 剩余约 10 分钟有效期时刷新，并加入随机抖动，避免成千上万个 token 在同一分钟到期。这样请求路径上的代码只需要读取 token。遇到 401 时，先重新读取存储，只有当存储里的 token 仍然是失败的那一个时才刷新。\n\n**谨慎处理 `invalid_grant`。** 在把商家标记为断开之前，先重新读取存储。如果已经有更新的 token，就用它重试。只有当最新的 token 也失败时，才把连接标记为需要重新授权，并通知商家。token 接口返回的网络错误和 5xx 都可以重试，它们并不能说明 token 本身有问题。\n\n**可观测性。** 按平台统计刷新次数、CAS 冲突次数和 `invalid_grant` 次数，并对即将过期却迟迟没有成功刷新的 token 告警。",
+      "followups": [
+        "The platform's token endpoint is down for 30 minutes. What happens to merchants whose tokens expire during the outage, and how do you limit the damage?",
+        "Why do you need both the lease and the version check? What goes wrong with only one of them?",
+        "How would you rotate the key that encrypts stored tokens without downtime?"
+      ],
+      "followups_zh": [
+        "平台的 token 接口宕机 30 分钟。在此期间 token 到期的商家会怎样？你如何把影响降到最低？",
+        "为什么租约和版本检查两者都需要？只用其中一个会出什么问题？",
+        "如何在不停机的情况下轮换用于加密 token 的密钥？"
+      ],
+      "vocab": [
+        {
+          "en": "refresh token rotation",
+          "zh": "刷新令牌轮换"
+        },
+        {
+          "en": "single-flight",
+          "zh": "合并并发的相同请求，只执行一次"
+        },
+        {
+          "en": "compare-and-set (CAS)",
+          "zh": "比较并设置"
+        },
+        {
+          "en": "lease",
+          "zh": "租约"
+        },
+        {
+          "en": "jitter",
+          "zh": "随机抖动"
+        }
+      ]
+    },
+    {
+      "id": "20261010-3",
+      "topic": "Database",
+      "difficulty": "Senior",
+      "title": "Why an \"online\" ALTER TABLE took the site down",
+      "title_zh": "为什么一个“在线” ALTER TABLE 让整个网站宕机",
+      "question": "`products` is a 500-million-row InnoDB table on MySQL 8.0 serving about 5,000 QPS. A teammate ran the following during the day, because the docs say adding a column is instant and adding an index is online:\n\n```sql\nALTER TABLE products ADD COLUMN ad_status TINYINT NULL;\nALTER TABLE products ADD INDEX idx_shop_updated (shop_id, updated_at);\n```\n\nWithin seconds, every query on `products` hung, connection pools were exhausted, and the site went down. Later that day the replica also fell more than an hour behind. Explain both problems, and describe how you would run this change safely.",
+      "question_zh": "`products` 是 MySQL 8.0 上一张有 5 亿行的 InnoDB 表，承载约 5,000 QPS。一位同事在白天执行了下面的语句，因为文档上说加列是 instant 的，加索引是 online 的：\n\n```sql\nALTER TABLE products ADD COLUMN ad_status TINYINT NULL;\nALTER TABLE products ADD INDEX idx_shop_updated (shop_id, updated_at);\n```\n\n几秒之内，所有访问 `products` 的查询都卡住了，连接池被耗尽，网站宕机。当天晚些时候，从库也落后了一个多小时。请解释这两个问题，并说明你会如何安全地完成这次变更。",
+      "answer": "**The metadata lock queue.** Every DDL statement, even `ALGORITHM=INSTANT`, needs an exclusive metadata lock (MDL) on the table for a moment. Every query holds a shared MDL until its transaction ends. Here some long-running transaction still held a shared MDL on `products`, for example a session that ran a `SELECT` inside a transaction and never committed, or a 10-minute report. The `ALTER` waited in `Waiting for table metadata lock`. A pending exclusive MDL request blocks new shared requests, so every new query on the table queued behind it. The table was effectively locked for as long as the old transaction stayed open, and the app ran out of connections. The DDL itself was cheap. The wait was the outage.\n\n**Why the replica lagged.** The index build ran online on the primary, but it is written to the binlog only after it finishes. The replica then runs the same long build. A DDL statement is a barrier for the applier, even with multi-threaded replication, so nothing after it applies until it completes. The lag is roughly the build time.\n\n**How to run it safely.**\n- **Check first.** Look for old transactions in `information_schema.innodb_trx` and for lock holders in `performance_schema.metadata_locks`. Wait them out or kill them.\n- **Fail fast.** In the DDL session, run `SET SESSION lock_wait_timeout = 5` (the default is one year), so a blocked `ALTER` gives up after a few seconds instead of building a queue. Retry in a loop.\n- **Be explicit about the algorithm.** Write `ALGORITHM=INSTANT` for the column and `ALGORITHM=INPLACE, LOCK=NONE` for the index. If MySQL cannot honor them, it returns an error instead of silently falling back to a blocking table copy.\n- **Know the limits of native online DDL.** During an `INPLACE` index build, concurrent writes are buffered in a temporary log capped by `innodb_online_alter_log_max_size` (128 MB by default). On a busy table it can overflow, and then the whole build fails at the very end.\n- **Use an online schema change tool for the big build.** `gh-ost` copies rows into a shadow table, follows the row-based binlog for ongoing changes, throttles on replica lag and load, and lets you choose when to run the short cut-over. `pt-online-schema-change` does the same with triggers. Replicas then see ordinary row changes instead of one huge DDL, so lag stays bounded.\n- **Plan the rollback.** A new index can change query plans for the worse. In MySQL 8.0 you can hide it from the optimizer instantly with `ALTER TABLE products ALTER INDEX idx_shop_updated INVISIBLE`, and drop it later off-peak.\n\n**One more detail.** Since MySQL 8.0.29, `INSTANT` can add a column at any position, but each table allows a limited number of instant row versions (64 in 8.0) before a rebuild is required.",
+      "answer_zh": "**元数据锁排队。** 每条 DDL 语句，即便是 `ALGORITHM=INSTANT`，也需要短暂获取表上的排他元数据锁（MDL）。每个查询在其事务结束前都持有共享 MDL。这次的情况是：某个长事务仍持有 `products` 的共享 MDL，比如某个会话在事务里执行了 `SELECT` 后一直没有提交，或者一个跑了 10 分钟的报表。`ALTER` 于是停在 `Waiting for table metadata lock` 状态。等待中的排他 MDL 请求会阻塞新的共享请求，所以此后所有访问这张表的新查询都排在它后面。只要那个老事务不结束，这张表实际上就被锁住了，应用的连接随之耗尽。DDL 本身很轻，真正造成故障的是等待。\n\n**从库为什么延迟。** 索引是在主库上在线构建的，但它只有在执行完成后才会写入 binlog。随后从库要把同样漫长的构建再跑一遍。对于应用线程来说，DDL 是一道屏障，即使开启了多线程复制，它之后的事务也必须等它完成才能应用。所以延迟大约就等于构建耗时。\n\n**如何安全地执行。**\n- **先检查。** 在 `information_schema.innodb_trx` 中查找老事务，在 `performance_schema.metadata_locks` 中查找锁的持有者。等它们结束，或者直接 kill。\n- **快速失败。** 在执行 DDL 的会话里运行 `SET SESSION lock_wait_timeout = 5`（默认值是一年），让被阻塞的 `ALTER` 几秒后就放弃，而不是制造排队。然后循环重试。\n- **明确指定算法。** 加列写 `ALGORITHM=INSTANT`，加索引写 `ALGORITHM=INPLACE, LOCK=NONE`。如果 MySQL 无法满足，它会直接报错，而不是悄悄退回到会阻塞的整表复制。\n- **了解原生 online DDL 的限制。** `INPLACE` 构建索引期间，并发写入会缓存在一个临时日志里，其大小受 `innodb_online_alter_log_max_size` 限制（默认 128 MB）。在写入繁忙的表上它可能溢出，整个构建会在最后一步失败。\n- **大表构建使用在线变更工具。** `gh-ost` 把数据行复制到影子表，通过行格式 binlog 追踪增量变更，根据从库延迟和负载自动限速，并且让你自己决定何时执行短暂的切换。`pt-online-schema-change` 用触发器实现同样的目标。这样从库看到的是普通的行变更，而不是一条巨大的 DDL，延迟就能保持在可控范围内。\n- **规划回滚。** 新索引可能让某些查询的执行计划变差。在 MySQL 8.0 中，可以用 `ALTER TABLE products ALTER INDEX idx_shop_updated INVISIBLE` 立即让它对优化器不可见，之后在低峰期再删除。\n\n**还有一个细节。** 从 MySQL 8.0.29 起，`INSTANT` 可以在任意位置加列，但每张表允许的 instant 行版本数是有限的（8.0 中为 64 个），超过后就必须重建表。",
+      "followups": [
+        "gh-ost also needs a brief lock at cut-over. How does it avoid the same metadata-lock pile-up?",
+        "During the incident, how would you find the session that holds the blocking metadata lock?",
+        "Which kinds of schema change can never be instant or in-place in MySQL 8.0, and why?"
+      ],
+      "followups_zh": [
+        "gh-ost 在切换时同样需要短暂加锁。它是如何避免同样的元数据锁堆积的？",
+        "故障发生时，你如何找到持有阻塞性元数据锁的那个会话？",
+        "在 MySQL 8.0 中，哪些类型的表结构变更永远无法 instant 或 in-place 执行？为什么？"
+      ],
+      "vocab": [
+        {
+          "en": "metadata lock (MDL)",
+          "zh": "元数据锁"
+        },
+        {
+          "en": "head-of-line blocking",
+          "zh": "队头阻塞"
+        },
+        {
+          "en": "replication lag",
+          "zh": "复制延迟"
+        },
+        {
+          "en": "shadow table",
+          "zh": "影子表"
+        },
+        {
+          "en": "cut-over",
+          "zh": "切换（新旧表交换）"
+        }
+      ]
+    },
+    {
+      "id": "20261010-4",
+      "topic": "Middleware",
+      "difficulty": "Hard",
+      "title": "A slow downstream API turns into a Kafka rebalance storm",
+      "title_zh": "下游 API 变慢演变成 Kafka 重平衡风暴",
+      "question": "A Kafka consumer group reads conversion events and posts each one to an ad platform's HTTP API, one record at a time. It uses the Java client defaults `max.poll.records=500` and `max.poll.interval.ms=300000`, and commits offsets after each batch. One afternoon the platform's p99 latency rises from 200 ms to 8 s. Within minutes the group is rebalancing constantly, lag keeps growing, the logs show `CommitFailedException`, and the platform reports duplicate conversions. Walk through the chain of events and fix it.",
+      "question_zh": "一个 Kafka 消费者组读取转化事件，并把它们逐条发送到某广告平台的 HTTP API。它使用 Java 客户端的默认值 `max.poll.records=500` 和 `max.poll.interval.ms=300000`，每处理完一批就提交一次 offset。某天下午，平台的 p99 延迟从 200 ms 涨到了 8 s。几分钟之内，消费者组开始不停地重平衡，lag 持续上涨，日志里出现 `CommitFailedException`，平台还反馈收到了重复的转化。请梳理事件的连锁过程，并给出修复方案。",
+      "answer": "**The chain of events.**\n- One `poll()` returns up to 500 records. At 8 s per call, the batch can take 500 × 8 s = 4,000 s, far beyond the 300 s `max.poll.interval.ms`.\n- The consumer does not call `poll()` again in time, so its background thread leaves the group and the coordinator reassigns its partitions.\n- The new owner starts from the last committed offset, which is before the batch the first consumer was still sending. It sends those events again: duplicates.\n- When the first consumer finishes and tries to commit, it no longer owns the partitions, so the commit fails with `CommitFailedException`.\n- The new owner gets the same 500 records, hits the same slow API, misses the same deadline, and the cycle repeats. With the default eager protocol, every rebalance also stops consumption on all partitions in the group. Lag grows while almost nothing gets committed.\n\nHeartbeats run on a background thread, so `session.timeout.ms` is not what fails here. The poll-interval check exists precisely to catch a consumer that is alive but stuck in its processing loop.\n\n**Fixes, in order of impact.**\n- **Bound the work per poll.** Pick `max.poll.records` so that records × worst-case latency stays well under `max.poll.interval.ms`, and set a hard per-request HTTP timeout so the worst case is actually known. For example, 50 records × 3 s timeout = 150 s.\n- **Process concurrently, commit carefully.** Send through a bounded worker pool, and commit only the highest offset below which every record is done. Move failures to a retry topic and then a dead-letter topic instead of blocking the partition.\n- **Decouple liveness from slow work.** If a batch can still be slow, `pause()` the partitions, process asynchronously, keep calling `poll()` (it returns nothing for paused partitions but keeps the consumer in the group), then `resume()`.\n- **Make sends idempotent.** Rebalances always cause some redelivery. Send a stable event id that the platform uses for deduplication where it supports one, and keep your own record of sent ids as a guard.\n- **Shrink the blast radius of rebalances.** Use `CooperativeStickyAssignor` so only the partitions that move are paused, and static membership (`group.instance.id`) so rolling restarts do not trigger rebalances. From Kafka 4.0, the new consumer group protocol (`group.protocol=consumer`, KIP-848) is generally available and replaces stop-the-world rebalances with incremental, broker-driven assignment.\n- **Protect the downstream.** A circuit breaker and a rate limiter keep you from hammering a struggling API, and lag alerts tell you early.",
+      "answer_zh": "**事件的连锁过程。**\n- 一次 `poll()` 最多返回 500 条记录。每次调用 8 s，这一批最多可能耗时 500 × 8 s = 4,000 s，远远超过 300 s 的 `max.poll.interval.ms`。\n- 消费者没能及时再次调用 `poll()`，于是它的后台线程主动离开消费者组，协调者把它的分区重新分配出去。\n- 新的分区持有者从最后一次提交的 offset 开始消费，而这个位置在第一个消费者仍在发送的那一批之前。它把这些事件又发了一遍：重复由此产生。\n- 第一个消费者处理完后尝试提交 offset，但它已经不再拥有这些分区，于是提交失败，抛出 `CommitFailedException`。\n- 新的持有者拿到同样的 500 条记录，碰上同样慢的 API，错过同样的期限，循环就此重复。在默认的 eager 协议下，每次重平衡还会让组内所有分区停止消费。lag 不断增长，几乎什么都提交不了。\n\n心跳是在后台线程中发送的，所以失效的并不是 `session.timeout.ms`。poll 间隔检查存在的目的，正是为了发现“消费者还活着，但处理循环卡住了”的情况。\n\n**修复方案，按影响从大到小排列。**\n- **限制每次 poll 的工作量。** 选择合适的 `max.poll.records`，使记录数 × 最坏延迟远小于 `max.poll.interval.ms`；同时为每个 HTTP 请求设置硬超时，让最坏情况真正可知。例如 50 条记录 × 3 s 超时 = 150 s。\n- **并发处理，谨慎提交。** 通过有界的 worker 池发送，只提交“其之前所有记录都已完成”的最大 offset。失败的记录先转入重试 topic，再转入死信 topic，而不是阻塞整个分区。\n- **把存活检测与慢处理解耦。** 如果一批数据仍可能很慢，就先 `pause()` 这些分区，异步处理，同时继续调用 `poll()`（对暂停的分区它不会返回数据，但能让消费者留在组内），处理完再 `resume()`。\n- **让发送具备幂等性。** 重平衡总会带来一些重复投递。在平台支持去重的情况下，发送稳定的事件 id 供其去重，同时在自己这边记录已发送的 id 作为兜底。\n- **缩小重平衡的影响范围。** 使用 `CooperativeStickyAssignor`，只有被迁移的分区才会暂停；使用静态成员（`group.instance.id`），滚动重启时不会触发重平衡。从 Kafka 4.0 起，新的消费者组协议（`group.protocol=consumer`，KIP-848）正式可用，它用由 broker 驱动的增量分配取代了 stop-the-world 式的重平衡。\n- **保护下游。** 熔断器和限流器可以避免你持续冲击一个已经吃力的 API，lag 告警则能让你尽早发现问题。",
+      "followups": [
+        "Why does raising `max.poll.interval.ms` to one hour stop the rebalances but make other failures worse?",
+        "With a worker pool, how do you track which offset is safe to commit?",
+        "What changes if events for the same user must stay in order?"
+      ],
+      "followups_zh": [
+        "为什么把 `max.poll.interval.ms` 调到一小时能止住重平衡，却会让其他故障变得更糟？",
+        "使用 worker 池时，你如何追踪哪个 offset 可以安全提交？",
+        "如果同一用户的事件必须保持顺序，方案要做哪些调整？"
+      ],
+      "vocab": [
+        {
+          "en": "rebalance storm",
+          "zh": "重平衡风暴"
+        },
+        {
+          "en": "liveness check",
+          "zh": "存活检测"
+        },
+        {
+          "en": "redelivery",
+          "zh": "重复投递"
+        },
+        {
+          "en": "blast radius",
+          "zh": "影响范围（爆炸半径）"
+        },
+        {
+          "en": "static membership",
+          "zh": "静态成员"
+        }
+      ]
+    },
+    {
+      "id": "20261010-5",
+      "topic": "Java & CS",
+      "difficulty": "Medium",
+      "title": "One merchant sees another merchant's report",
+      "title_zh": "一个商家看到了另一个商家的报表",
+      "question": "A Spring Boot service keeps the current tenant in a `ThreadLocal`, set by a servlet filter:\n\n```java\npublic class TenantFilter implements Filter {\n    @Override\n    public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain)\n            throws IOException, ServletException {\n        String shopId = resolveShopId((HttpServletRequest) req); // null if the session expired\n        if (shopId != null) {\n            TenantContext.set(shopId);\n        }\n        chain.doFilter(req, res);\n    }\n}\n```\n\nControllers call `TenantContext.get()` and return 401 when it is null. A few times a week, a merchant briefly sees another merchant's ad report. Separately, a CSV export started with `CompletableFuture.supplyAsync(() -> export(TenantContext.get()))` sometimes runs with no tenant at all. Explain both bugs and fix them.",
+      "question_zh": "一个 Spring Boot 服务把当前租户保存在 `ThreadLocal` 里，由一个 servlet 过滤器负责设置：\n\n```java\npublic class TenantFilter implements Filter {\n    @Override\n    public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain)\n            throws IOException, ServletException {\n        String shopId = resolveShopId((HttpServletRequest) req); // null if the session expired\n        if (shopId != null) {\n            TenantContext.set(shopId);\n        }\n        chain.doFilter(req, res);\n    }\n}\n```\n\n控制器调用 `TenantContext.get()`，为 null 时返回 401。每周有几次，某个商家会短暂地看到另一个商家的广告报表。另外，用 `CompletableFuture.supplyAsync(() -> export(TenantContext.get()))` 启动的 CSV 导出任务，有时会在完全没有租户的情况下运行。请解释这两个 bug 并修复。",
+      "answer": "**Bug 1: a stale tenant on a reused thread.** Tomcat serves requests from a thread pool, and nothing ever clears the `ThreadLocal`. When a session has expired, `resolveShopId` returns null, the filter skips `set`, and the thread still holds whichever merchant it served last. The null check in the controller never fires, so the request runs as that other merchant. It is rare only because expired sessions on that page are rare. Fix: never leave the old value in place, fail closed, and always clear in `finally`:\n\n```java\nString shopId = resolveShopId((HttpServletRequest) req);\nif (shopId == null) {\n    ((HttpServletResponse) res).sendError(HttpServletResponse.SC_UNAUTHORIZED);\n    return;\n}\nTenantContext.set(shopId);\ntry {\n    chain.doFilter(req, res);\n} finally {\n    TenantContext.clear(); // calls threadLocal.remove()\n}\n```\n\nPrefer `remove()` over `set(null)`, because it deletes the entry instead of keeping it in the thread's map. Leftover entries also leak memory: pool threads live as long as the process, and in app servers that hot-redeploy, a stale value can keep a whole class loader alive.\n\n**Bug 2: thread locals do not follow work to other threads.** `supplyAsync` without an executor runs the lambda on the default async pool, usually `ForkJoinPool.commonPool()`. Those threads never passed through the filter, so `TenantContext.get()` returns null there, or a stale value if other code once set one on that thread. `InheritableThreadLocal` does not help either: it copies values only when a thread is created, and pool threads are created long before the request.\n\n**Fixes for async work.**\n- Read the tenant on the request thread and pass it in: `String shop = TenantContext.get(); CompletableFuture.supplyAsync(() -> export(shop), exportExecutor);`\n- Or wrap tasks so they set and clear the context around each run, for example with a Spring `TaskDecorator` on a `ThreadPoolTaskExecutor`.\n- Pass your own executor rather than relying on the common pool, so slow exports cannot starve unrelated work.\n\n**Defense in depth.** Make the tenant id a required argument of every repository method and reject null, so a missing context fails loudly instead of running an unscoped query. Log the tenant with each request (for example through MDC, which is itself a thread local and needs the same cleanup) so leaks can be traced. On Java 25, `ScopedValue` (JEP 506) gives an immutable binding that exists only inside a scope and disappears when it ends, which removes this whole class of bug.",
+      "answer_zh": "**Bug 1：复用线程上残留的旧租户。** Tomcat 用线程池处理请求，而代码里从来没有清理这个 `ThreadLocal`。当会话过期时，`resolveShopId` 返回 null，过滤器跳过了 `set`，线程里仍然保存着它上一次服务的那个商家。控制器里的 null 检查永远不会触发，于是这个请求就以另一个商家的身份执行了。它之所以少见，只是因为那个页面上会话过期的情况本来就少。修复方法：绝不保留旧值，失败即拒绝，并且始终在 `finally` 中清理：\n\n```java\nString shopId = resolveShopId((HttpServletRequest) req);\nif (shopId == null) {\n    ((HttpServletResponse) res).sendError(HttpServletResponse.SC_UNAUTHORIZED);\n    return;\n}\nTenantContext.set(shopId);\ntry {\n    chain.doFilter(req, res);\n} finally {\n    TenantContext.clear(); // calls threadLocal.remove()\n}\n```\n\n优先使用 `remove()` 而不是 `set(null)`，因为前者会删除条目，而不是把它留在线程的 map 里。残留的条目还会造成内存泄漏：线程池中的线程与进程同寿；在支持热部署的应用服务器里，一个残留的值甚至能让整个类加载器无法被回收。\n\n**Bug 2：ThreadLocal 不会跟着任务跑到别的线程。** 不指定 executor 的 `supplyAsync` 会在默认的异步线程池上执行 lambda，通常是 `ForkJoinPool.commonPool()`。这些线程从未经过过滤器，所以在那里 `TenantContext.get()` 返回 null；如果别的代码曾在该线程上设置过值，拿到的则是残留的旧值。`InheritableThreadLocal` 也帮不上忙：它只在线程创建时复制值，而线程池里的线程早在请求到来之前就已经创建好了。\n\n**异步任务的修复方法。**\n- 在请求线程上读取租户，再显式传进去：`String shop = TenantContext.get(); CompletableFuture.supplyAsync(() -> export(shop), exportExecutor);`\n- 或者包装任务，在每次执行前后设置并清理上下文，例如在 `ThreadPoolTaskExecutor` 上配置 Spring 的 `TaskDecorator`。\n- 传入你自己的 executor，而不是依赖公共线程池，这样缓慢的导出任务就不会饿死其他无关的工作。\n\n**纵深防御。** 让租户 id 成为每个 repository 方法的必填参数，并拒绝 null，这样上下文缺失时会明确报错，而不是执行一条没有租户限定的查询。在每个请求的日志里带上租户（例如通过 MDC，它本身也是 ThreadLocal，同样需要清理），让串数据的问题可以追溯。在 Java 25 上，`ScopedValue`（JEP 506）提供一种不可变的绑定，它只在某个作用域内存在，作用域结束后自动消失，从根本上消除了这一类 bug。",
+      "followups": [
+        "How do thread locals behave with virtual threads, and why can they get expensive?",
+        "How would you write a test that catches a missing `remove()`?",
+        "Where else do thread locals hide in a typical Java stack?"
+      ],
+      "followups_zh": [
+        "ThreadLocal 在虚拟线程下表现如何？为什么可能变得很昂贵？",
+        "你会如何写一个测试来发现遗漏的 `remove()`？",
+        "在典型的 Java 技术栈里，还有哪些地方藏着 ThreadLocal？"
+      ],
+      "vocab": [
+        {
+          "en": "tenant isolation",
+          "zh": "租户隔离"
+        },
+        {
+          "en": "stale value",
+          "zh": "残留的旧值"
+        },
+        {
+          "en": "fail closed",
+          "zh": "失败即拒绝（默认拒绝）"
+        },
+        {
+          "en": "defense in depth",
+          "zh": "纵深防御"
+        },
+        {
+          "en": "It is rare only because ...",
+          "zh": "它之所以少见，只是因为……"
+        }
+      ]
+    }
+  ]
+}
