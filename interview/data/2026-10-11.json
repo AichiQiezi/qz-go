@@ -1,0 +1,221 @@
+{
+  "date": "2026-10-11",
+  "generatedAt": "2026-10-11T08:26:37+08:00",
+  "questions": [
+    {
+      "id": "20261011-1",
+      "topic": "Go",
+      "difficulty": "Hard",
+      "title": "A price service that freezes hours after every deploy",
+      "title_zh": "每次发布几小时后就卡死的价格服务",
+      "question": "A pricing service keeps its catalog in memory behind a `sync.RWMutex`:\n\n```go\ntype Catalog struct {\n    mu    sync.RWMutex\n    items map[string]Item\n    rules []Rule\n}\n\nfunc (c *Catalog) Price(sku string) (int64, bool) {\n    c.mu.RLock()\n    defer c.mu.RUnlock()\n    it, ok := c.items[sku]\n    if !ok {\n        return 0, false\n    }\n    return c.ApplyRules(it), true\n}\n\n// ApplyRules is also called directly by other handlers.\nfunc (c *Catalog) ApplyRules(it Item) int64 {\n    c.mu.RLock()\n    defer c.mu.RUnlock()\n    p := it.BasePrice\n    for _, r := range c.rules {\n        p = r.Apply(p)\n    }\n    return p\n}\n\n// Reload runs every 30 seconds.\nfunc (c *Catalog) Reload(items map[string]Item, rules []Rule) {\n    c.mu.Lock()\n    defer c.mu.Unlock()\n    c.items, c.rules = items, rules\n}\n```\n\nIt passes every test and runs fine in staging. In production, a few hours after each deploy, all price requests hang and CPU drops to almost zero. A restart fixes it until the next time. A goroutine dump shows thousands of goroutines blocked in `sync.(*RWMutex).RLock` and one blocked in `sync.(*RWMutex).Lock` inside `Reload`. Explain what is happening and fix it.",
+      "question_zh": "一个定价服务把商品目录保存在内存里，用 `sync.RWMutex` 保护：\n\n```go\ntype Catalog struct {\n    mu    sync.RWMutex\n    items map[string]Item\n    rules []Rule\n}\n\nfunc (c *Catalog) Price(sku string) (int64, bool) {\n    c.mu.RLock()\n    defer c.mu.RUnlock()\n    it, ok := c.items[sku]\n    if !ok {\n        return 0, false\n    }\n    return c.ApplyRules(it), true\n}\n\n// ApplyRules is also called directly by other handlers.\nfunc (c *Catalog) ApplyRules(it Item) int64 {\n    c.mu.RLock()\n    defer c.mu.RUnlock()\n    p := it.BasePrice\n    for _, r := range c.rules {\n        p = r.Apply(p)\n    }\n    return p\n}\n\n// Reload runs every 30 seconds.\nfunc (c *Catalog) Reload(items map[string]Item, rules []Rule) {\n    c.mu.Lock()\n    defer c.mu.Unlock()\n    c.items, c.rules = items, rules\n}\n```\n\n它能通过所有测试，在预发环境也运行正常。但在生产环境中，每次发布几小时后，所有价格请求都会卡住，CPU 几乎降到零。重启能恢复，直到下一次再出现。goroutine dump 显示有数千个 goroutine 阻塞在 `sync.(*RWMutex).RLock`，还有一个阻塞在 `Reload` 里的 `sync.(*RWMutex).Lock`。请解释发生了什么并修复。",
+      "answer": "**Root cause: a recursive read lock meets a waiting writer.** Go's `RWMutex` prevents writer starvation: once a goroutine calls `Lock`, new `RLock` calls block until that writer has acquired and released the lock. Now take this sequence:\n- Goroutine A enters `Price` and holds a read lock.\n- `Reload` calls `Lock` and waits for A to release its read lock.\n- A calls `ApplyRules`, which calls `RLock` again. That call now waits behind the pending writer.\n\nA waits for the writer, and the writer waits for A. Every new request's `RLock` also queues behind the writer, so the whole service stops. The `sync` docs explicitly prohibit recursive read locking for this reason. It needs a `Reload` to land in the tiny gap between the two `RLock` calls, which is why it takes hours of production traffic and never shows up in tests.\n\n**Why nothing reports it.** The runtime only prints `fatal error: all goroutines are asleep - deadlock!` when every goroutine is blocked. An HTTP server always has other goroutines alive, so it just hangs. The race detector does not look for deadlocks either.\n\n**Fix 1: take the lock once, at the boundary.** Exported methods lock; unexported helpers assume the lock is already held and say so in their name, for example `applyRulesLocked`. Never call a locking method from inside a locked section. `ApplyRules` becomes a thin wrapper that locks and calls `applyRulesLocked`.\n\n**Fix 2: use an immutable snapshot.** The data only changes in `Reload`, so readers do not need a lock at all. Publish a new snapshot with `atomic.Pointer` (Go 1.19+):\n\n```go\ntype snapshot struct {\n    items map[string]Item\n    rules []Rule\n}\n\ntype Catalog struct {\n    snap atomic.Pointer[snapshot]\n}\n\nfunc (c *Catalog) Price(sku string) (int64, bool) {\n    s := c.snap.Load()\n    it, ok := s.items[sku]\n    if !ok {\n        return 0, false\n    }\n    return s.applyRules(it), true\n}\n\nfunc (c *Catalog) Reload(items map[string]Item, rules []Rule) {\n    c.snap.Store(&snapshot{items: items, rules: rules})\n}\n```\n\nReads are lock-free, and every request sees `items` and `rules` from the same reload. The old version had a second, quieter bug here: the two separate lock acquisitions could see items from one reload and rules from the next. `Reload` must build fresh maps and never modify a published snapshot.\n\n**Catching it earlier.** In `/debug/pprof/goroutine?debug=2`, look for one goroutine in `Lock` and many in `RLock`, with an `RLock` stack that already passed through another locked method. A stress test that calls `Reload` in a tight loop while readers run reproduces it in seconds, and libraries such as `github.com/sasha-s/go-deadlock` can flag recursive locking in CI.",
+      "answer_zh": "**根本原因：递归读锁遇上了等待中的写锁。** Go 的 `RWMutex` 会防止写者饥饿：一旦有 goroutine 调用了 `Lock`，新的 `RLock` 调用就会阻塞，直到这个写者拿到锁并释放。来看这个时序：\n- goroutine A 进入 `Price`，持有读锁。\n- `Reload` 调用 `Lock`，等待 A 释放读锁。\n- A 调用 `ApplyRules`，再次调用 `RLock`。这次调用现在要排在等待中的写者后面。\n\nA 在等写者，写者在等 A。之后每个新请求的 `RLock` 也都排在写者后面，于是整个服务停摆。`sync` 包的文档正是因为这个原因，明确禁止递归加读锁。触发它需要 `Reload` 恰好落在两次 `RLock` 之间那个极小的空隙里，所以要在生产流量下跑上几个小时才会出现，而测试中永远看不到。\n\n**为什么没有任何报错。** 只有当所有 goroutine 都阻塞时，运行时才会打印 `fatal error: all goroutines are asleep - deadlock!`。HTTP 服务器总有其他 goroutine 活着，所以它只会一直卡住。race detector 也不负责检测死锁。\n\n**修复 1：只在边界加一次锁。** 导出方法负责加锁；未导出的辅助方法假定锁已被持有，并在名字里注明，例如 `applyRulesLocked`。绝不在已加锁的代码段里调用会加锁的方法。`ApplyRules` 变成一个薄包装：加锁后调用 `applyRulesLocked`。\n\n**修复 2：使用不可变快照。** 数据只在 `Reload` 中变化，所以读者根本不需要锁。用 `atomic.Pointer`（Go 1.19+）发布新的快照：\n\n```go\ntype snapshot struct {\n    items map[string]Item\n    rules []Rule\n}\n\ntype Catalog struct {\n    snap atomic.Pointer[snapshot]\n}\n\nfunc (c *Catalog) Price(sku string) (int64, bool) {\n    s := c.snap.Load()\n    it, ok := s.items[sku]\n    if !ok {\n        return 0, false\n    }\n    return s.applyRules(it), true\n}\n\nfunc (c *Catalog) Reload(items map[string]Item, rules []Rule) {\n    c.snap.Store(&snapshot{items: items, rules: rules})\n}\n```\n\n读取完全无锁，而且每个请求看到的 `items` 和 `rules` 都来自同一次 reload。旧版本在这里还有第二个更隐蔽的 bug：两次独立的加锁可能读到一次 reload 的 items 和下一次 reload 的 rules。`Reload` 必须构建全新的 map，绝不修改已经发布的快照。\n\n**如何更早发现。** 在 `/debug/pprof/goroutine?debug=2` 中，寻找一个阻塞在 `Lock` 的 goroutine 和大量阻塞在 `RLock` 的 goroutine，其中某个 `RLock` 的调用栈已经经过了另一个加锁方法。写一个压力测试，在读者运行的同时循环调用 `Reload`，几秒内就能复现；`github.com/sasha-s/go-deadlock` 之类的库也能在 CI 中标记出递归加锁。",
+      "followups": [
+        "Why does Go deliberately not provide a reentrant mutex?",
+        "With the snapshot version, what happens to a request that loaded the old snapshot just before `Reload`?",
+        "When would `sync.Map` be a better or worse fit than a snapshot here?"
+      ],
+      "followups_zh": [
+        "为什么 Go 刻意不提供可重入互斥锁？",
+        "在快照版本中，一个恰好在 `Reload` 之前加载了旧快照的请求会怎样？",
+        "在这个场景下，`sync.Map` 什么时候比快照更合适，什么时候更不合适？"
+      ],
+      "vocab": [
+        {
+          "en": "writer starvation",
+          "zh": "写者饥饿"
+        },
+        {
+          "en": "recursive (reentrant) locking",
+          "zh": "递归（可重入）加锁"
+        },
+        {
+          "en": "copy-on-write snapshot",
+          "zh": "写时复制快照"
+        },
+        {
+          "en": "lock-free read",
+          "zh": "无锁读取"
+        },
+        {
+          "en": "It only shows up under production traffic.",
+          "zh": "它只在生产流量下才会出现。"
+        }
+      ]
+    },
+    {
+      "id": "20261011-2",
+      "topic": "System Design",
+      "difficulty": "Medium",
+      "title": "A webhook endpoint that loses, duplicates and reorders events",
+      "title_zh": "一个会丢失、重复、乱序处理事件的 webhook 接口",
+      "question": "Your service receives product and order webhooks from an e-commerce platform. The handler verifies the signature, parses the JSON, updates several tables, calls an ad platform's API to sync the change, and only then returns 200. During a database slowdown, the platform reports many failed deliveries. You see the same event processed two or three times, an old \"price updated\" event overwrites a newer price, and a week later you find products whose changes never synced at all. Redesign the webhook handling.",
+      "question_zh": "你的服务接收某电商平台推送的商品和订单 webhook。处理函数会校验签名、解析 JSON、更新几张表、调用广告平台 API 同步变更，最后才返回 200。在一次数据库变慢期间，平台报告大量投递失败。你发现同一个事件被处理了两三次，一个旧的“价格已更新”事件覆盖了更新的价格，一周后还发现有些商品的变更根本没有同步过去。请重新设计 webhook 的处理方式。",
+      "answer": "**What went wrong.**\n- The handler does slow work before it responds. Webhook senders usually wait only a few seconds. Past that, they count the delivery as failed and retry, even if your processing later succeeds. That is where the duplicates come from.\n- Retries and parallel deliveries arrive in any order, and nothing checks whether an event is older than the state you already stored.\n- Senders retry for a limited time and may disable an endpoint that keeps failing, so a long slowdown drops events for good.\n\n**Acknowledge fast, process asynchronously.** The handler should do only cheap, durable work: verify the signature, insert the raw event into an inbox table or a queue, and return 2xx, ideally well under a second. Workers process the inbox separately, with their own retries and a dead-letter path.\n\n**Verify against the raw body.** Compute the HMAC over the exact bytes you received, before parsing JSON, because re-serializing changes the bytes. Compare signatures with a constant-time function such as Go's `hmac.Equal`. If the scheme signs a timestamp, reject requests outside a window of a few minutes to block replays.\n\n**Deduplicate.** Delivery is at-least-once. Store the sender's event id under a unique key in the inbox, so inserting a redelivery does nothing (`ON CONFLICT DO NOTHING` in PostgreSQL, a duplicate-key no-op in MySQL). Downstream calls should also carry an idempotency key where the API supports one.\n\n**Handle ordering explicitly.** Never trust arrival order. Either compare the resource's version or `updated_at` in the payload with what you stored and ignore anything older, or treat the webhook only as a signal: fetch the resource's current state from the platform's API and sync that. Fetching is simpler and always converges, at the cost of extra API calls and rate-limit budget.\n\n**Reconcile.** Some webhooks will still be missed: your outages, the sender's bugs, a disabled subscription. Run a periodic job that lists resources changed since the last checkpoint through the API and enqueues anything that does not match your state. Monitor subscription status, inbox lag and the dead-letter count.",
+      "answer_zh": "**问题出在哪里。**\n- 处理函数在响应之前做了慢操作。webhook 发送方通常只等几秒。超过这个时间，它就认为投递失败并重试，即使你的处理稍后成功了。重复就是这么来的。\n- 重试和并行投递的到达顺序是任意的，而代码从不检查一个事件是否比已存储的状态更旧。\n- 发送方只在有限时间内重试，并且可能会停用一直失败的接口，所以一次较长的变慢会让事件永久丢失。\n\n**快速确认，异步处理。** 处理函数只做廉价且持久的工作：校验签名，把原始事件插入收件箱表或队列，然后返回 2xx，最好远低于一秒。worker 单独处理收件箱，有自己的重试机制和死信路径。\n\n**基于原始请求体校验签名。** 在解析 JSON 之前，对收到的原始字节计算 HMAC，因为重新序列化会改变字节内容。用常数时间的函数比较签名，例如 Go 的 `hmac.Equal`。如果签名方案包含时间戳，就拒绝超出几分钟窗口的请求，以防重放攻击。\n\n**去重。** 投递是至少一次的。把发送方的事件 id 存入收件箱并加唯一键，这样插入重复投递时什么也不会发生（PostgreSQL 用 `ON CONFLICT DO NOTHING`，MySQL 则让重复键冲突成为空操作）。在 API 支持的情况下，下游调用也应带上幂等键。\n\n**显式处理顺序。** 永远不要相信到达顺序。要么把 payload 中资源的 version 或 `updated_at` 与已存储的值比较，忽略更旧的事件；要么把 webhook 仅仅当作一个信号：从平台 API 拉取资源的当前状态再同步。拉取的方式更简单，而且总能收敛，代价是额外的 API 调用和限流额度。\n\n**对账。** 总会有一些 webhook 被漏掉：你自己的故障、发送方的 bug、被停用的订阅。运行一个定时任务，通过 API 列出自上次检查点以来变更过的资源，把与你的状态不一致的都放入队列。同时监控订阅状态、收件箱积压和死信数量。",
+      "followups": [
+        "A merchant's bulk import triggers 50,000 product webhooks in one minute. What breaks first, and how do you smooth it out?",
+        "How would you rotate the webhook signing secret without rejecting valid deliveries?",
+        "When is fetching the current state better than applying the payload, and when is it worse?"
+      ],
+      "followups_zh": [
+        "某个商家的批量导入在一分钟内触发了 50,000 个商品 webhook。最先出问题的是什么？你如何削峰？",
+        "如何在不拒绝合法投递的前提下轮换 webhook 签名密钥？",
+        "什么时候拉取当前状态比直接应用 payload 更好，什么时候更差？"
+      ],
+      "vocab": [
+        {
+          "en": "at-least-once delivery",
+          "zh": "至少一次投递"
+        },
+        {
+          "en": "acknowledge (ack)",
+          "zh": "确认（回执）"
+        },
+        {
+          "en": "inbox table",
+          "zh": "收件箱表"
+        },
+        {
+          "en": "constant-time comparison",
+          "zh": "常数时间比较"
+        },
+        {
+          "en": "converge",
+          "zh": "收敛（最终达到一致）"
+        }
+      ]
+    },
+    {
+      "id": "20261011-3",
+      "topic": "Database",
+      "difficulty": "Medium",
+      "title": "An export job that gets slower and still misses rows",
+      "title_zh": "越跑越慢、还会漏数据的导出任务",
+      "question": "A nightly job exports a 30-million-row `orders` table to a data warehouse:\n\n```sql\nSELECT * FROM orders\nORDER BY created_at\nLIMIT 1000 OFFSET ?;  -- offset += 1000 for each page\n```\n\nThe first pages take milliseconds, but near the end each page takes several seconds and the job runs for hours. The warehouse team also reports that a few orders are missing and a few appear twice, even though orders are never deleted. Explain both problems and fix the job.",
+      "question_zh": "一个夜间任务把一张 3000 万行的 `orders` 表导出到数据仓库：\n\n```sql\nSELECT * FROM orders\nORDER BY created_at\nLIMIT 1000 OFFSET ?;  -- offset += 1000 for each page\n```\n\n最初几页只要几毫秒，但到了后面每页要好几秒，整个任务要跑几个小时。数据仓库团队还反馈，有少量订单缺失、少量订单重复出现，而订单从来不会被删除。请解释这两个问题并修复这个任务。",
+      "answer": "**Why it gets slower.** `OFFSET n` does not jump. The database walks `n` entries in order (and with `SELECT *` it may also fetch each row) and then throws them away. Page k costs about k × 1000 rows of work, so the whole job is quadratic.\n\n**Why rows go missing or repeat.**\n- `created_at` is not unique. Many orders share the same timestamp, SQL does not define the order among ties, and two queries can order them differently. Rows on a page boundary can appear twice or not at all.\n- The table changes while the job runs. An order whose `created_at` was set at the start of a slow transaction becomes visible only when it commits, possibly after the job has already paged past that timestamp. With `OFFSET`, every newly visible row in the range you already read also shifts all later pages by one, so the next page repeats a row.\n\n**Fix 1: keyset pagination on a unique key.** Remember the last row's `(created_at, id)` and seek past it:\n\n```sql\nSELECT * FROM orders\nWHERE created_at >= :last_created_at\n  AND (created_at > :last_created_at OR id > :last_id)\nORDER BY created_at, id\nLIMIT 1000;\n```\n\nBack it with an index on `(created_at, id)`. In InnoDB, a secondary index on `created_at` already stores the primary key, so it behaves like `(created_at, id)`. Each page is now an index seek with constant cost. The `>=` predicate gives the optimizer a clean range. In PostgreSQL, the row-value form `WHERE (created_at, id) > (:last_created_at, :last_id)` is equivalent and uses the composite index directly.\n\n**Fix 2: deal with rows that become visible late.**\n- For a full export, read from one consistent snapshot (`START TRANSACTION WITH CONSISTENT SNAPSHOT` in MySQL, a `REPEATABLE READ` transaction in PostgreSQL). A snapshot held for hours keeps old row versions alive (a growing InnoDB history list, or vacuum held back in PostgreSQL), so run it on a replica.\n- For an incremental export by timestamp, start each run a few minutes before the last checkpoint and deduplicate by `id` in the warehouse, because commit order is not timestamp order.",
+      "answer_zh": "**为什么越来越慢。** `OFFSET n` 并不会直接跳过去。数据库要按顺序遍历 `n` 个条目（使用 `SELECT *` 时可能还要回表取出每一行），然后把它们全部丢弃。第 k 页大约要处理 k × 1000 行，所以整个任务的开销是平方级的。\n\n**为什么会漏行或重复。**\n- `created_at` 不唯一。很多订单的时间戳相同，SQL 没有规定并列行之间的顺序，两次查询可能给出不同的排列。处于分页边界上的行可能出现两次，也可能一次都不出现。\n- 任务运行期间表在变化。某个订单的 `created_at` 是在一个慢事务开始时设置的，它要等事务提交后才可见，而这时导出任务可能早已翻过了那个时间戳。在 `OFFSET` 方式下，已读范围内每多出一行新可见的数据，后面所有页都会整体后移一行，于是下一页会重复一行。\n\n**修复 1：基于唯一键的游标分页。** 记住上一页最后一行的 `(created_at, id)`，然后从它之后开始查：\n\n```sql\nSELECT * FROM orders\nWHERE created_at >= :last_created_at\n  AND (created_at > :last_created_at OR id > :last_id)\nORDER BY created_at, id\nLIMIT 1000;\n```\n\n为它建立 `(created_at, id)` 索引。在 InnoDB 中，`created_at` 上的二级索引本身就存储了主键，所以它的效果等同于 `(created_at, id)`。现在每一页都是一次索引定位，成本恒定。`>=` 条件让优化器能得到一个干净的范围扫描。在 PostgreSQL 中，行值写法 `WHERE (created_at, id) > (:last_created_at, :last_id)` 与之等价，并且能直接使用复合索引。\n\n**修复 2：处理延迟可见的行。**\n- 全量导出时，在同一个一致性快照中读取（MySQL 用 `START TRANSACTION WITH CONSISTENT SNAPSHOT`，PostgreSQL 用 `REPEATABLE READ` 事务）。持有几个小时的快照会让旧的行版本一直保留（InnoDB 的 history list 不断增长，或者 PostgreSQL 的 vacuum 被阻塞），所以要在从库上执行。\n- 按时间戳做增量导出时，每次从上一个检查点之前几分钟开始读，并在数据仓库中按 `id` 去重，因为提交顺序并不等于时间戳顺序。",
+      "followups": [
+        "Users want to jump straight to page 500 in the UI. How do you support that with keyset pagination?",
+        "Why does `SELECT *` make deep `OFFSET` even worse than `SELECT id`, and what is a deferred join?",
+        "The export must also capture updates and deletes. What would you use instead of polling?"
+      ],
+      "followups_zh": [
+        "用户希望在界面上直接跳到第 500 页。使用游标分页时你如何支持？",
+        "为什么 `SELECT *` 会让深度 `OFFSET` 比 `SELECT id` 更糟？什么是延迟关联（deferred join）？",
+        "导出还需要捕获更新和删除。你会用什么来代替轮询？"
+      ],
+      "vocab": [
+        {
+          "en": "keyset (seek) pagination",
+          "zh": "游标分页（键集分页）"
+        },
+        {
+          "en": "tie-breaker column",
+          "zh": "决胜列（排序时用于打破并列）"
+        },
+        {
+          "en": "consistent snapshot",
+          "zh": "一致性快照"
+        },
+        {
+          "en": "quadratic cost",
+          "zh": "平方级开销"
+        },
+        {
+          "en": "Commit order is not timestamp order.",
+          "zh": "提交顺序并不等于时间戳顺序。"
+        }
+      ]
+    },
+    {
+      "id": "20261011-4",
+      "topic": "Middleware",
+      "difficulty": "Senior",
+      "title": "A Redis lock that lets a settlement job run twice",
+      "title_zh": "一个会让结算任务跑两次的 Redis 锁",
+      "question": "A nightly settlement job charges merchants for their ad spend. It runs on three instances, and a Redis lock is supposed to make sure only one of them does the work:\n\n```go\nok, _ := rdb.SetNX(ctx, \"lock:settlement\", hostname, 30*time.Second).Result()\nif !ok {\n    return\n}\ndefer rdb.Del(ctx, \"lock:settlement\")\nrunSettlement(ctx) // usually takes 10-20 s\n```\n\nA few times a month, some merchants are charged twice. Find every way this lock can fail, and redesign the job so that a double charge cannot happen.",
+      "question_zh": "一个夜间结算任务按商家的广告消耗向他们扣费。它运行在三个实例上，靠一把 Redis 锁来保证只有其中一个实例真正执行：\n\n```go\nok, _ := rdb.SetNX(ctx, \"lock:settlement\", hostname, 30*time.Second).Result()\nif !ok {\n    return\n}\ndefer rdb.Del(ctx, \"lock:settlement\")\nrunSettlement(ctx) // usually takes 10-20 s\n```\n\n每个月总有几次，部分商家被扣了两次费。请找出这把锁所有可能失效的方式，并重新设计这个任务，让重复扣费不可能发生。",
+      "answer": "**Failure 1: the lease expires while the holder is still working.** The job usually takes 10-20 s, but a slow database, a long GC pause or a network stall can push it past 30 s. The key expires, a second instance acquires the lock and starts settling the same merchants. Now both are charging.\n\n**Failure 2: releasing someone else's lock.** When the first instance finishes, `DEL` removes the key no matter who owns it. If the second instance holds it by then, the lock is gone and a third instance can start too. The value is also not unique per acquisition: `hostname` repeats if the same host runs the job twice. Release must check ownership atomically, using a random token per acquisition and a Lua script:\n\n```lua\nif redis.call(\"GET\", KEYS[1]) == ARGV[1] then\n    return redis.call(\"DEL\", KEYS[1])\nelse\n    return 0\nend\n```\n\n**Failure 3: failover loses the lock.** Redis replication is asynchronous. The primary can acknowledge the `SET`, crash before the write reaches a replica, and the promoted replica has no key, so another instance acquires the lock at once. `WAIT` narrows the window but does not make Redis strongly consistent. Redlock, which takes a majority across independent primaries, addresses failover, but its safety still depends on bounded clock drift and process pauses. That is the heart of the well-known debate between Martin Kleppmann and antirez.\n\n**Failure 4: no lock can stop a paused process.** Even with a perfect lock service, the holder can check that it owns the lock, pause, and resume after the lease has expired, still believing it is the owner. Lease renewal makes expiry rarer (Redisson's watchdog, by default, keeps extending a 30 s lease about every 10 s), but it cannot remove this case.\n\n**Redesign: make correctness independent of the lock.**\n- **Idempotent charges.** Give every charge a deterministic key such as `settlement:{date}:{merchant_id}`, with a unique constraint in the ledger table, and pass it as the idempotency key to the payment provider if it supports one. A second run then inserts nothing and charges nothing.\n- **Fencing tokens where you truly need exclusivity.** Every lock grant gets a monotonically increasing number from a strongly consistent source, such as a database sequence or an etcd revision. The protected resource remembers the highest token it has seen and rejects writes that carry a lower one.\n- **Keep the lock for efficiency only.** It still avoids wasted work, so keep it with a unique token, the safe release script, a lease well above the job's p99 duration, and renewal. Just stop relying on it for correctness.\n- **Question whether you need a lock at all.** A single scheduler that enqueues one settlement task per merchant per day, consumed by idempotent workers, often removes the need for one.",
+      "answer_zh": "**失效 1：持有者还在工作，租约已经过期。** 任务通常耗时 10-20 s，但数据库变慢、一次较长的 GC 停顿或网络卡顿，都可能让它超过 30 s。key 过期后，第二个实例拿到锁，开始为同一批商家结算。现在两个实例都在扣费。\n\n**失效 2：释放了别人的锁。** 第一个实例完成后，`DEL` 不管锁属于谁都会删掉这个 key。如果此时锁已被第二个实例持有，锁就没了，第三个实例也能开始执行。而且锁的值并不是每次获取都唯一：同一台主机运行两次任务时，`hostname` 是重复的。释放锁必须以原子方式校验归属，每次获取都使用随机 token，并通过 Lua 脚本释放：\n\n```lua\nif redis.call(\"GET\", KEYS[1]) == ARGV[1] then\n    return redis.call(\"DEL\", KEYS[1])\nelse\n    return 0\nend\n```\n\n**失效 3：主从切换导致锁丢失。** Redis 的复制是异步的。主节点可能已经确认了 `SET`，却在写入同步到从节点之前崩溃，被提升的从节点上没有这个 key，于是另一个实例立刻就能拿到锁。`WAIT` 能缩小这个窗口，但无法让 Redis 变成强一致。Redlock 通过在多个独立主节点上取多数来应对主从切换，但它的安全性仍然依赖于时钟漂移和进程停顿都有上限。这正是 Martin Kleppmann 与 antirez 那场著名争论的核心。\n\n**失效 4：没有任何锁能阻止一个暂停的进程。** 即便锁服务本身完美无缺，持有者也可能在确认自己持有锁之后发生停顿，等恢复时租约已经过期，它却仍然以为自己是持有者。租约续期能让过期变得更少见（Redisson 的 watchdog 默认每隔约 10 s 把 30 s 的租约延长一次），但无法消除这种情况。\n\n**重新设计：让正确性不依赖于锁。**\n- **幂等扣费。** 给每笔扣费一个确定性的键，例如 `settlement:{date}:{merchant_id}`，在账本表上加唯一约束；如果支付服务商支持幂等键，也把它传过去。这样第二次运行什么也插入不了，也不会扣费。\n- **真正需要互斥时使用 fencing token。** 每次授予锁时，从强一致的来源（例如数据库序列或 etcd 的 revision）获取一个单调递增的数字。被保护的资源记住见过的最大 token，拒绝携带更小 token 的写入。\n- **锁只用来提升效率。** 它仍然能避免重复劳动，所以保留它，但要使用唯一 token、安全的释放脚本、明显大于任务 p99 耗时的租约，以及续期机制。只是不要再依赖它来保证正确性。\n- **想一想是否真的需要锁。** 由单个调度器每天为每个商家投递一个结算任务，再由幂等的 worker 消费，往往就完全不需要锁了。",
+      "followups": [
+        "The payment provider has no idempotency key. How do you avoid a double charge if your process crashes right after the provider call but before you record it?",
+        "Why can't the protected resource compare timestamps instead of fencing tokens?",
+        "When is a database lock, such as `SELECT ... FOR UPDATE` or an advisory lock, a better choice than Redis?"
+      ],
+      "followups_zh": [
+        "支付服务商不支持幂等键。如果进程在调用支付接口之后、记录结果之前崩溃，你如何避免重复扣费？",
+        "为什么被保护的资源不能用时间戳代替 fencing token 来做比较？",
+        "什么时候数据库锁（例如 `SELECT ... FOR UPDATE` 或 advisory lock）比 Redis 更合适？"
+      ],
+      "vocab": [
+        {
+          "en": "lease expiry",
+          "zh": "租约过期"
+        },
+        {
+          "en": "fencing token",
+          "zh": "栅栏令牌（防止过期持有者写入）"
+        },
+        {
+          "en": "asynchronous replication",
+          "zh": "异步复制"
+        },
+        {
+          "en": "idempotency key",
+          "zh": "幂等键"
+        },
+        {
+          "en": "a lock for efficiency, not for correctness",
+          "zh": "锁用于提升效率，而不是保证正确性"
+        }
+      ]
+    },
+    {
+      "id": "20261011-5",
+      "topic": "Java & CS",
+      "difficulty": "Hard",
+      "title": "REQUIRES_NEW and a connection pool that deadlocks under load",
+      "title_zh": "REQUIRES_NEW 让连接池在高负载下死锁",
+      "question": "A Spring Boot service uses HikariCP with the default `maximumPoolSize=10` and Tomcat's default of 200 worker threads:\n\n```java\n@Service\npublic class OrderService {\n    private final OrderRepository orders;\n    private final AuditService audit;\n\n    @Transactional\n    public void placeOrder(Order order) {\n        orders.save(order);\n        audit.record(order); // @Transactional(propagation = Propagation.REQUIRES_NEW)\n    }\n}\n```\n\nThe audit record must survive even if the order rolls back, hence `REQUIRES_NEW`. Load tests with 5 concurrent users pass. During a flash sale the service freezes: every request fails after 30 s with `SQLTransientConnectionException: HikariPool-1 - Connection is not available, request timed out after 30000ms`, yet the database shows 10 open connections doing nothing and almost no CPU. Explain what is happening and fix it.",
+      "question_zh": "一个 Spring Boot 服务使用 HikariCP，连接池保持默认的 `maximumPoolSize=10`，Tomcat 也是默认的 200 个工作线程：\n\n```java\n@Service\npublic class OrderService {\n    private final OrderRepository orders;\n    private final AuditService audit;\n\n    @Transactional\n    public void placeOrder(Order order) {\n        orders.save(order);\n        audit.record(order); // @Transactional(propagation = Propagation.REQUIRES_NEW)\n    }\n}\n```\n\n即使订单回滚，审计记录也必须保留，所以用了 `REQUIRES_NEW`。5 个并发用户的压测能通过。但在一次限时抢购中，服务卡死了：每个请求都在 30 s 后失败，报 `SQLTransientConnectionException: HikariPool-1 - Connection is not available, request timed out after 30000ms`，而数据库那边只有 10 个什么都不做的连接，CPU 几乎为零。请解释发生了什么并修复。",
+      "answer": "**Root cause: a resource-pool deadlock.** `REQUIRES_NEW` suspends the outer transaction but keeps its connection. The inner transaction needs a second connection from the same pool, so each request needs two connections at once. Once 10 or more requests are inside `placeOrder`, all 10 connections can end up held by outer transactions, each waiting for a second connection that only another waiting request could free. Nothing moves until the 30 s `connectionTimeout`. Then the inner calls fail, the outer transactions roll back, and the next wave of requests does the same. The database is idle because all the waiting happens inside the application. With 5 users, at most 5 connections are held by outer transactions and 5 remain for inner ones, so the test never hit it.\n\nThe Spring reference documentation warns about exactly this: use `REQUIRES_NEW` only if the pool is larger than the number of concurrent threads. HikariCP's pool sizing guide gives the deadlock-free size as `Tn × (Cm − 1) + 1`, where `Tn` is the maximum number of threads and `Cm` the most connections one thread holds at once. With 200 threads and `Cm = 2`, that is 201 connections, which is not realistic.\n\n**Fixes.**\n- **Never hold two connections at once.** Write the audit record outside the order transaction, from a non-transactional facade that calls `placeOrder` and then `audit.record` in a `finally` block, so the order's connection is already back in the pool. Note that `@TransactionalEventListener` callbacks run before Spring releases the outer connection, so doing the write there does not help.\n- **Or use one transaction if the rules allow it.** If only successful orders need an audit record, write it in the same transaction.\n- **If nesting must stay, bound it.** Give audit writes their own small connection pool, so inner transactions never compete with outer ones. Alternatively, wrap `placeOrder` in a bulkhead (a `Semaphore` or Resilience4j `Bulkhead`) with at most pool size − 1 permits. That bound only holds if nothing else draws from the pool.\n- **Fail fast and watch the pool.** Lower `connectionTimeout` to a few seconds, so a stall sheds load instead of parking 200 threads for 30 s each. Alert on HikariCP's pending-threads metric (`hikaricp_connections_pending`). It would have shown about 190 threads waiting while active connections stayed pinned at 10.\n\n**The general pattern.** Whenever a holder of a pooled resource waits for another unit from the same pool, you can deadlock: nested `REQUIRES_NEW`, a task in a fixed thread pool blocking on subtasks submitted to that same pool, or a service calling itself through a bounded HTTP client pool. Either never wait on a pool while holding a unit from it, or bound concurrency so that the deadlock is provably impossible.",
+      "answer_zh": "**根本原因：资源池死锁。** `REQUIRES_NEW` 会挂起外层事务，但不会释放它占用的连接。内层事务需要从同一个池里再拿一个连接，所以每个请求同时需要两个连接。一旦有 10 个或更多请求进入 `placeOrder`，10 个连接就可能全部被外层事务占住，而每个外层事务都在等待第二个连接，这个连接只有另一个同样在等待的请求才能释放。在 30 s 的 `connectionTimeout` 到期之前，什么都不会推进。之后内层调用失败，外层事务回滚，下一波请求又重复同样的过程。数据库之所以空闲，是因为所有的等待都发生在应用内部。5 个用户时，外层事务最多占用 5 个连接，还剩 5 个给内层事务，所以压测从来没有触发它。\n\nSpring 官方参考文档对此有明确警告：只有当连接池大于并发线程数时才使用 `REQUIRES_NEW`。HikariCP 的连接池容量指南给出了不会死锁的池大小：`Tn × (Cm − 1) + 1`，其中 `Tn` 是最大线程数，`Cm` 是单个线程同时持有的最大连接数。200 个线程、`Cm = 2` 时需要 201 个连接，这并不现实。\n\n**修复方法。**\n- **绝不同时持有两个连接。** 把审计写入移到订单事务之外：由一个非事务的门面方法先调用 `placeOrder`，再在 `finally` 块中调用 `audit.record`，这样订单事务的连接已经归还到池里。注意，`@TransactionalEventListener` 的回调在 Spring 释放外层连接之前执行，所以把写入放在那里并不能解决问题。\n- **业务允许的话就用一个事务。** 如果只需要为成功的订单记录审计，就在同一个事务里写入。\n- **如果必须保留嵌套，就加以限制。** 给审计写入单独配一个小连接池，让内层事务永远不和外层事务争抢连接。或者用舱壁（`Semaphore` 或 Resilience4j 的 `Bulkhead`）包住 `placeOrder`，许可数最多为池大小减一。这个上限只有在没有其他代码使用这个池时才成立。\n- **快速失败并监控连接池。** 把 `connectionTimeout` 调低到几秒，这样发生卡顿时会尽快丢弃负载，而不是让 200 个线程各自挂起 30 s。对 HikariCP 的等待线程指标（`hikaricp_connections_pending`）设置告警。它本可以显示出大约 190 个线程在等待，而活跃连接一直卡在 10 个。\n\n**通用模式。** 只要持有某个池化资源的一方去等待同一个池里的另一个单元，就可能死锁：嵌套的 `REQUIRES_NEW`、固定线程池中的任务阻塞等待提交到同一线程池的子任务，或者一个服务通过有界的 HTTP 客户端连接池调用自己。要么在持有某个池的资源时绝不等待同一个池，要么限制并发，让死锁在理论上不可能发生。",
+      "followups": [
+        "How would you prove from a thread dump that this is a pool deadlock and not a slow database?",
+        "Why doesn't simply raising `maximumPoolSize` to 50 fix it, and what does that cost the database?",
+        "Where else in a Java service can a thread wait on a pool it already holds a unit from?"
+      ],
+      "followups_zh": [
+        "你如何从线程 dump 中证明这是连接池死锁，而不是数据库变慢？",
+        "为什么简单地把 `maximumPoolSize` 调到 50 并不能解决问题？这样做对数据库有什么代价？",
+        "在 Java 服务中，还有哪些地方会出现线程在等待一个它已经占用了资源的池？"
+      ],
+      "vocab": [
+        {
+          "en": "connection pool exhaustion",
+          "zh": "连接池耗尽"
+        },
+        {
+          "en": "suspend a transaction",
+          "zh": "挂起事务"
+        },
+        {
+          "en": "bulkhead",
+          "zh": "舱壁（隔离并发的模式）"
+        },
+        {
+          "en": "fail fast",
+          "zh": "快速失败"
+        },
+        {
+          "en": "provably impossible",
+          "zh": "可以证明不可能发生"
+        }
+      ]
+    }
+  ]
+}
