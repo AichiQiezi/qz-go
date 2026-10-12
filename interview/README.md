@@ -3,10 +3,20 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 4 天、20 道题。
+共 5 天、25 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
+
+## [2026-10-13](days/2026-10-13.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Medium | [An API client that slowly runs out of ports](days/2026-10-13.md#q1) | 一个慢慢耗尽端口的 API 客户端 |
+| 2 | System Design | Medium | [Importing a 2 GB product CSV without timeouts or half-done imports](days/2026-10-13.md#q2) | 导入 2 GB 的商品 CSV，不超时，也不留下半成品 |
+| 3 | Database | Hard | [Fast in staging, full table scans in production](days/2026-10-13.md#q3) | 预发环境很快，生产环境却在全表扫描 |
+| 4 | Middleware | Hard | [Lost and looping messages in a RabbitMQ pipeline](days/2026-10-13.md#q4) | RabbitMQ 链路中丢失和死循环的消息 |
+| 5 | Java & CS | Senior | [Virtual threads made the service slower](days/2026-10-13.md#q5) | 启用虚拟线程后，服务反而变慢了 |
 
 ## [2026-10-12](days/2026-10-12.md)
 
