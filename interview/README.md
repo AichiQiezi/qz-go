@@ -3,10 +3,20 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 3 天、15 道题。
+共 4 天、20 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
+
+## [2026-10-12](days/2026-10-12.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Senior | [Latency spikes and OOMKills in a containerized Go service](days/2026-10-12.md#q1) | 容器化 Go 服务的延迟尖刺与 OOMKill |
+| 2 | System Design | Hard | [Running jobs at 9:00 local time for 200,000 merchants](days/2026-10-12.md#q2) | 为 20 万个商家在当地时间 9:00 运行任务 |
+| 3 | Database | Hard | [Coupons redeemed more often than their limit allows](days/2026-10-12.md#q3) | 优惠券被核销的次数超过了上限 |
+| 4 | Middleware | Medium | [One Redis command that stalls every client](days/2026-10-12.md#q4) | 一条让所有客户端都卡住的 Redis 命令 |
+| 5 | Java & CS | Medium | [Two new order lines go in, only one comes out](days/2026-10-12.md#q5) | 加了两行新的订单明细，只保存下来一行 |
 
 ## [2026-10-11](days/2026-10-11.md)
 
