@@ -12,6 +12,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -116,13 +117,12 @@ func renderDay(day Day) string {
 		fmt.Fprintf(&b, "## %d. %s\n\n", i+1, q.Title)
 		fmt.Fprintf(&b, "**%s** · `%s` · `%s`\n\n", q.TitleZh, q.Topic, q.Difficulty)
 
-		fmt.Fprintf(&b, "### Question\n\n%s\n\n", q.Question)
-		fmt.Fprintf(&b, "### 题目\n\n%s\n\n", q.QuestionZh)
+		b.WriteString("### Question · 题目\n\n")
+		b.WriteString(bilingual(q.Question, q.QuestionZh))
 
 		// 答案默认折叠，先自己想再展开
 		b.WriteString("<details>\n<summary><b>Answer · 参考答案</b></summary>\n\n")
-		fmt.Fprintf(&b, "#### Answer\n\n%s\n\n", q.Answer)
-		fmt.Fprintf(&b, "#### 参考答案\n\n%s\n\n", q.AnswerZh)
+		b.WriteString(bilingual(q.Answer, q.AnswerZh))
 		b.WriteString("</details>\n\n")
 
 		if len(q.Followups) > 0 {
@@ -130,7 +130,7 @@ func renderDay(day Day) string {
 			for j, f := range q.Followups {
 				fmt.Fprintf(&b, "- %s\n", f)
 				if j < len(q.FollowupsZh) {
-					fmt.Fprintf(&b, "  - %s\n", q.FollowupsZh[j])
+					fmt.Fprintf(&b, "  > %s\n", q.FollowupsZh[j])
 				}
 			}
 			b.WriteString("\n")
@@ -174,6 +174,79 @@ func writeTable(b *strings.Builder, day Day, link string) {
 		fmt.Fprintf(b, "| %d | %s | %s | [%s](%s#q%d) | %s |\n",
 			i+1, cell(q.Topic), cell(q.Difficulty), cell(q.Title), link, i+1, cell(q.TitleZh))
 	}
+}
+
+// block 是题目 markdown 里的一个段落、列表或代码块
+type block struct {
+	kind  string // "p"、"ul" 或 "pre"
+	text  string // 段落文本，或包含围栏的整个代码块
+	items []string
+}
+
+var itemRE = regexp.MustCompile(`^\s*[-*] `)
+
+func parseBlocks(src string) []block {
+	var out []block
+	lines := strings.Split(src, "\n")
+	for i := 0; i < len(lines); {
+		l := lines[i]
+		switch {
+		case strings.HasPrefix(l, "```"):
+			start := i
+			for i++; i < len(lines) && !strings.HasPrefix(lines[i], "```"); i++ {
+			}
+			i++ // 跳过结束围栏
+			out = append(out, block{kind: "pre", text: strings.Join(lines[start:min(i, len(lines))], "\n")})
+		case itemRE.MatchString(l):
+			var items []string
+			for ; i < len(lines) && itemRE.MatchString(lines[i]); i++ {
+				items = append(items, itemRE.ReplaceAllString(lines[i], ""))
+			}
+			out = append(out, block{kind: "ul", items: items})
+		case strings.TrimSpace(l) == "":
+			i++
+		default:
+			var p []string
+			for ; i < len(lines) && strings.TrimSpace(lines[i]) != "" && !strings.HasPrefix(lines[i], "```") && !itemRE.MatchString(lines[i]); i++ {
+				p = append(p, lines[i])
+			}
+			out = append(out, block{kind: "p", text: strings.Join(p, " ")})
+		}
+	}
+	return out
+}
+
+// bilingual 把中文逐段放在对应的英文段落或列表项下面（引用块）；
+// 两边结构对不上时退回为先英文、后中文
+func bilingual(en, zh string) string {
+	a, z := parseBlocks(en), parseBlocks(zh)
+	aligned := len(a) == len(z)
+	for i := 0; aligned && i < len(a); i++ {
+		aligned = a[i].kind == z[i].kind && len(a[i].items) == len(z[i].items)
+	}
+	if !aligned {
+		return en + "\n\n" + zh + "\n\n"
+	}
+
+	var b strings.Builder
+	for i, x := range a {
+		y := z[i]
+		switch x.kind {
+		case "pre":
+			b.WriteString(x.text + "\n\n")
+			if y.text != x.text {
+				b.WriteString(y.text + "\n\n")
+			}
+		case "ul":
+			for j, it := range x.items {
+				fmt.Fprintf(&b, "- %s\n  > %s\n", it, y.items[j])
+			}
+			b.WriteString("\n")
+		default:
+			fmt.Fprintf(&b, "%s\n\n> %s\n\n", x.text, y.text)
+		}
+	}
+	return b.String()
 }
 
 // cell 转义表格单元格中的竖线和换行
