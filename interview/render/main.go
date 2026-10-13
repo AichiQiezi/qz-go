@@ -118,11 +118,11 @@ func renderDay(day Day) string {
 		fmt.Fprintf(&b, "**%s** · `%s` · `%s`\n\n", q.TitleZh, q.Topic, q.Difficulty)
 
 		b.WriteString("### Question · 题目\n\n")
-		b.WriteString(bilingual(q.Question, q.QuestionZh))
+		b.WriteString(bilingual(q.ID+" question", q.Question, q.QuestionZh))
 
 		// 答案默认折叠，先自己想再展开
 		b.WriteString("<details>\n<summary><b>Answer · 参考答案</b></summary>\n\n")
-		b.WriteString(bilingual(q.Answer, q.AnswerZh))
+		b.WriteString(bilingual(q.ID+" answer", q.Answer, q.AnswerZh))
 		b.WriteString("</details>\n\n")
 
 		if len(q.Followups) > 0 {
@@ -217,14 +217,15 @@ func parseBlocks(src string) []block {
 }
 
 // bilingual 把中文逐段放在对应的英文段落或列表项下面（引用块）；
-// 两边结构对不上时退回为先英文、后中文
-func bilingual(en, zh string) string {
+// 两边结构对不上时打印警告，并退回为先英文、后中文
+func bilingual(name, en, zh string) string {
 	a, z := parseBlocks(en), parseBlocks(zh)
 	aligned := len(a) == len(z)
 	for i := 0; aligned && i < len(a); i++ {
 		aligned = a[i].kind == z[i].kind && len(a[i].items) == len(z[i].items)
 	}
 	if !aligned {
+		log.Printf("warning: %s: English and Chinese blocks do not line up", name)
 		return en + "\n\n" + zh + "\n\n"
 	}
 
