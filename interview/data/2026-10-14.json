@@ -1,0 +1,221 @@
+{
+  "date": "2026-10-14",
+  "generatedAt": "2026-10-14T06:58:52+08:00",
+  "questions": [
+    {
+      "id": "20261014-1",
+      "topic": "Go",
+      "difficulty": "Hard",
+      "title": "Log lines that come out scrambled under load",
+      "title_zh": "高负载下日志行变得错乱",
+      "question": "A service logs every outgoing ad-platform request as one JSON line. To cut allocations, it encodes into pooled buffers and hands the bytes to a background writer:\n\n```go\nvar bufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}\n\nfunc logEvent(e Event) {\n    buf := bufPool.Get().(*bytes.Buffer)\n    buf.Reset()\n    json.NewEncoder(buf).Encode(e)\n    logCh <- buf.Bytes() // a single goroutine writes logCh to the file\n    bufPool.Put(buf)\n}\n```\n\nUnder load, some log lines are cut off, merged with other lines or duplicated, and parsing the file fails. Separately, after one customer sent a few 20 MB payloads, the process uses hundreds of megabytes more memory long after those requests finished. Explain both problems and fix them.",
+      "question_zh": "某个服务把每一次调用广告平台的请求都记录为一行 JSON 日志。为了减少内存分配，它把日志编码到从池中取出的缓冲区里，再把字节交给一个后台写入协程：\n\n```go\nvar bufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}\n\nfunc logEvent(e Event) {\n    buf := bufPool.Get().(*bytes.Buffer)\n    buf.Reset()\n    json.NewEncoder(buf).Encode(e)\n    logCh <- buf.Bytes() // a single goroutine writes logCh to the file\n    bufPool.Put(buf)\n}\n```\n\n在高负载下，有些日志行被截断、与其他行混在一起或者重复出现，导致日志文件解析失败。另外，在某个客户发送了几个 20 MB 的请求之后，即使这些请求早已结束，进程的内存占用仍然多出了几百 MB。请解释这两个问题并修复。",
+      "answer": "**Problem 1: the bytes are still in use when the buffer goes back to the pool.** `buf.Bytes()` returns a slice that shares the buffer's internal array. Right after sending that slice, the code puts the buffer back. Another goroutine can then `Get` the same buffer, `Reset` it and encode a new event into the same array before the writer has written the first slice. The writer writes whatever the array holds at that moment: half of one event, all of another, or the same event twice. In a quick test with 8 goroutines logging 40,000 events, only about 20,000 lines came out, almost all of them corrupt or duplicated, because the newlines were overwritten too. The race detector reports it as a data race between the encoder and the writer's `Write`.\n\n**Fix: hand over ownership instead of sharing.** A pooled object may go back to the pool only when nothing else references it. Two options:\n- Copy before handing off: `logCh <- append([]byte(nil), buf.Bytes()...)`. Simple, and it still saves the encoder's allocations.\n- Send the `*bytes.Buffer` itself on the channel and let the writer goroutine `Put` it back after writing. No copy, and ownership moves with the buffer.\n\n**Problem 2: oversized buffers live on in the pool.** A `bytes.Buffer` never shrinks. A buffer that grew to 20 MB keeps that capacity when it goes back to the pool, and as long as the pool keeps handing it out, the GC never frees it. The pool has a separate shard per P, so a few such buffers can pin hundreds of megabytes. Fix: drop large buffers instead of pooling them, the way the standard library's `fmt` package discards print buffers larger than 64 KiB:\n\n```go\nif buf.Cap() <= 64<<10 {\n    bufPool.Put(buf)\n}\n```\n\n**Other sync.Pool rules worth knowing.**\n- The pool may drop any item at any GC (since Go 1.13 an item survives one extra cycle in a victim cache), so treat it as a cache, not a free list you can count on.\n- Pool pointers, not values: putting a non-pointer value into the `any` allocates, which `staticcheck` reports as SA6002.\n- Reset an item's state when you take it out, and keep pooled items of similar size, or the pool wastes memory.\n- Measure first. Pooling pays off only on hot paths where allocations show up in profiles.",
+      "answer_zh": "**问题 1：缓冲区放回池中时，它的字节还在被使用。** `buf.Bytes()` 返回的切片与缓冲区内部的数组共享内存。代码刚把这个切片发出去，就把缓冲区放回了池里。另一个 goroutine 随后可能 `Get` 到同一个缓冲区，`Reset` 之后把新事件编码进同一个数组，而此时写入协程还没有写出第一个切片。写入协程写出的是数组在那一刻的内容：一个事件的一半、另一个事件的全部，或者同一个事件写了两次。在一次简单测试中，8 个 goroutine 记录 40,000 个事件，最终只写出了约 20,000 行，而且几乎全部损坏或重复，因为换行符也被覆盖了。race detector 会把它报告为编码器与写入协程的 `Write` 之间的数据竞争。\n\n**修复：移交所有权，而不是共享。** 只有在没有任何其他地方引用一个池化对象时，才能把它放回池中。有两种做法：\n- 移交之前先复制：`logCh <- append([]byte(nil), buf.Bytes()...)`。简单，而且仍然省掉了编码器的内存分配。\n- 直接通过 channel 发送 `*bytes.Buffer` 本身，由写入协程在写完之后 `Put` 回池中。无需复制，所有权随缓冲区一起转移。\n\n**问题 2：过大的缓冲区一直留在池中。** `bytes.Buffer` 从不收缩。一个增长到 20 MB 的缓冲区放回池中后仍保持这个容量，只要池还在不断地把它分发出去，GC 就永远不会释放它。池为每个 P 维护一个独立的分片，所以几个这样的缓冲区就能占住几百 MB。修复方法：大缓冲区直接丢弃，不放回池中，就像标准库的 `fmt` 包会丢弃大于 64 KiB 的打印缓冲区一样：\n\n```go\nif buf.Cap() <= 64<<10 {\n    bufPool.Put(buf)\n}\n```\n\n**其他值得了解的 sync.Pool 规则。**\n- 池可能在任何一次 GC 时丢弃任何对象（从 Go 1.13 起，对象会在 victim cache 中多存活一个周期），所以要把它当作缓存，而不是可以依赖的空闲列表。\n- 池中存放指针，而不是值：把非指针值放进 `any` 会产生内存分配，`staticcheck` 会以 SA6002 报告这个问题。\n- 从池中取出对象时重置它的状态，并让池中对象的大小大致相同，否则池会浪费内存。\n- 先测量再优化。只有在分配出现在性能分析结果里的热点路径上，池化才有回报。",
+      "followups": [
+        "When does sync.Pool make performance worse rather than better?",
+        "Why does letting the writer goroutine put the buffer back remove the race, in terms of happens-before?",
+        "How would you write a test that catches this bug reliably?"
+      ],
+      "followups_zh": [
+        "什么时候 sync.Pool 反而会让性能变差？",
+        "从 happens-before 的角度看，为什么让写入协程把缓冲区放回池中就消除了竞争？",
+        "你会如何写一个能稳定发现这个 bug 的测试？"
+      ],
+      "vocab": [
+        {
+          "en": "object pool",
+          "zh": "对象池"
+        },
+        {
+          "en": "ownership transfer",
+          "zh": "所有权转移"
+        },
+        {
+          "en": "victim cache",
+          "zh": "victim cache（GC 后暂存被淘汰对象的缓存）"
+        },
+        {
+          "en": "data race",
+          "zh": "数据竞争"
+        },
+        {
+          "en": "It's a cache, not a free list.",
+          "zh": "它是缓存，不是可以依赖的空闲列表。"
+        }
+      ]
+    },
+    {
+      "id": "20261014-2",
+      "topic": "System Design",
+      "difficulty": "Senior",
+      "title": "Sharing ad-platform API quotas across many services",
+      "title_zh": "在多个服务之间共享广告平台的 API 配额",
+      "question": "Catalog sync, reporting, conversion upload and a merchant-facing dashboard all call the same ad platforms with the same app credentials. Each platform enforces its own limits: per app, per ad account, sometimes per endpoint; some are fixed windows, and some are reported dynamically in response headers. Today every service retries on 429 on its own. During busy periods, a nightly reporting backfill uses up a large merchant's account quota, live conversion uploads for that merchant start failing, and repeated violations get the whole app throttled for longer. Design a quota management system.",
+      "question_zh": "商品目录同步、报表、转化上传和面向商家的看板，都用同一套应用凭证调用相同的广告平台。每个平台都有自己的限额：按应用、按广告账户，有时还按接口；有的是固定时间窗口，有的通过响应头动态告知。目前每个服务都各自在遇到 429 时重试。在业务高峰期，夜间的报表回补任务耗尽了某个大商家账户的配额，该商家的实时转化上传开始失败，而反复超限还会让整个应用被限流更长时间。请设计一个配额管理系统。",
+      "answer": "**Model the limits explicitly.** Keep a registry of limit scopes per platform (app, ad account, business, endpoint class), with the window type and the documented numbers. Tag every outbound call with its scope keys and a priority class. Some platforms report usage in response headers; Meta's Graph API, for example, returns `X-Business-Use-Case-Usage` with call count and time used per business. Feed those numbers back, so the limiter tracks what the platform actually measures and not only your own count.\n\n**A central limiter with local leases.** Keep a token bucket per scope key in Redis, updated atomically by a Lua script. Calling Redis on every request adds latency and a hard dependency, so each service instance leases a small batch of tokens (say 20) and spends them locally; unused leases expire quickly. Global accuracy then stays within a known margin.\n\n**Priorities and fairness.**\n- Priority classes: merchant-facing reads and conversion uploads first, catalog sync next, reporting backfills last. Reserve a share of each bucket per class, so lower classes only use capacity the higher ones leave free.\n- Fairness: within a class, use per-account queues and weighted round-robin, so one large merchant's backfill cannot starve smaller merchants who share the same app limit.\n- Bulk jobs pull work at the rate the limiter grants, instead of pushing and retrying.\n\n**React to the platform.**\n- On a 429, or when a usage header passes a threshold such as 80%, cut that scope's rate sharply, then raise it slowly (additive increase, multiplicative decrease). Honour `Retry-After` exactly.\n- Open a circuit per scope while errors persist, so a throttled account does not burn retries.\n- Never let independent retries multiply: retries go through the same limiter, with exponential backoff and jitter.\n\n**Failure modes.** If Redis is unavailable, fall back to conservative local limits (for example the scope's limit divided by the number of instances) rather than failing open without bounds or failing closed. Alert on sustained 429 rates per scope and on queue age per priority class.\n\n**Observability and capacity planning.** Dashboards of usage against limits per scope show which merchant or job is approaching quota, and give you the evidence to request higher limits from a platform before it turns into an incident.",
+      "answer_zh": "**把限额显式建模。** 为每个平台维护一份限额范围的登记表（应用、广告账户、business、接口类别），记录窗口类型和文档中给出的数值。给每一次对外调用打上它所属的范围 key 和优先级类别。有些平台会在响应头中报告用量，例如 Meta 的 Graph API 会返回 `X-Business-Use-Case-Usage`，其中包含每个 business 的调用次数和耗时占用。把这些数字反馈回来，让限流器跟踪的是平台实际统计的用量，而不只是你自己的计数。\n\n**中心化限流器加本地租约。** 在 Redis 中为每个范围 key 维护一个令牌桶，用 Lua 脚本原子地更新。每次请求都访问 Redis 会增加延迟，也会带来硬依赖，所以每个服务实例一次租用一小批令牌（比如 20 个）在本地消耗；未用完的租约很快过期。这样全局精度就能控制在已知的误差范围内。\n\n**优先级与公平性。**\n- 优先级类别：面向商家的读请求和转化上传最优先，其次是商品目录同步，报表回补最后。为每个类别在每个令牌桶中预留一定份额，让低优先级只能使用高优先级留下的容量。\n- 公平性：在同一类别内，按账户分队列并使用加权轮询，这样某个大商家的回补任务就不会饿死共享同一应用限额的小商家。\n- 批量任务按照限流器发放的速率拉取工作，而不是主动推送再重试。\n\n**对平台的反馈做出反应。**\n- 遇到 429，或者用量响应头超过某个阈值（例如 80%）时，大幅降低该范围的速率，然后缓慢回升（加性增、乘性减）。严格遵守 `Retry-After`。\n- 错误持续时，为该范围打开熔断，避免一个已被限流的账户继续消耗重试。\n- 绝不能让各自独立的重试叠加放大：重试同样要经过这个限流器，并使用带随机抖动的指数退避。\n\n**故障模式。** 如果 Redis 不可用，就退回到保守的本地限额（例如范围限额除以实例数），而不是无上限地放行，也不是一律拒绝。对每个范围持续的 429 比例，以及每个优先级类别的队列积压时长设置告警。\n\n**可观测性与容量规划。** 按范围展示用量与限额对比的看板，可以看出哪个商家或任务正在逼近配额，并让你有依据在问题演变成事故之前，向平台申请更高的限额。",
+      "followups": [
+        "How would you test that the limiter behaves correctly during a real platform outage?",
+        "A new platform publishes no limits at all. How do you find a safe rate?",
+        "What would you change if some calls must stay strictly ordered per merchant?"
+      ],
+      "followups_zh": [
+        "你会如何测试限流器在平台真实故障期间的行为是否正确？",
+        "某个新平台完全没有公布限额。你如何找到一个安全的调用速率？",
+        "如果某些调用必须按商家严格保序，你会做哪些调整？"
+      ],
+      "vocab": [
+        {
+          "en": "quota",
+          "zh": "配额"
+        },
+        {
+          "en": "priority class",
+          "zh": "优先级类别"
+        },
+        {
+          "en": "weighted round-robin",
+          "zh": "加权轮询"
+        },
+        {
+          "en": "additive increase, multiplicative decrease (AIMD)",
+          "zh": "加性增、乘性减"
+        },
+        {
+          "en": "fail open / fail closed",
+          "zh": "故障时放行 / 故障时拒绝"
+        }
+      ]
+    },
+    {
+      "id": "20261014-3",
+      "topic": "Database",
+      "difficulty": "Medium",
+      "title": "Inserts slow down as a table keyed by random UUIDs grows",
+      "title_zh": "以随机 UUID 为主键的表越大，插入越慢",
+      "question": "An `orders` table in MySQL 8.0 (InnoDB) uses `id CHAR(36) PRIMARY KEY`, filled with random UUIDs (version 4) generated by the application, and has five secondary indexes. Inserts were fast at launch. Now the table has 300 million rows and is far larger than the buffer pool, and insert latency and disk reads keep climbing even though the insert rate has not changed. Explain why, and choose a better key.",
+      "question_zh": "MySQL 8.0（InnoDB）中的 `orders` 表使用 `id CHAR(36) PRIMARY KEY`，值是应用生成的随机 UUID（version 4），表上还有五个二级索引。刚上线时插入很快。现在表里有 3 亿行，远远大于 buffer pool，尽管插入速率没有变化，插入延迟和磁盘读取却在持续上升。请解释原因，并选择一个更好的主键。",
+      "answer": "**Why random keys hurt in InnoDB.** InnoDB stores the table itself as a B+tree ordered by the primary key (the clustered index). With random UUIDs, each insert lands on an arbitrary leaf page:\n- Once the table outgrows memory, that page is probably not in the buffer pool, so most inserts first read a page from disk.\n- Pages fill up at random and split, so on average they end up only about 70% full. The tree gets bigger, each page holds fewer rows, and caching gets even worse.\n- Dirty pages are spread across the whole tree, so flushing turns into random writes.\n\nWith an increasing key, every insert goes to the rightmost leaf, which is always in memory, and pages fill almost completely.\n\n**The key's size is multiplied.** Every secondary index entry stores the primary key. `CHAR(36)` costs 36 bytes per entry, against 16 bytes for `BINARY(16)` and 8 for `BIGINT`. With five secondary indexes, that difference is paid six times per row.\n\n**A quick measurement.** In a small test on PostgreSQL with a 16 MB buffer cache, inserting 2 million rows with random UUIDs took about 60% longer than with time-ordered UUIDs, and the primary key index came out about 25% larger. InnoDB suffers more, because there the whole table is the clustered index.\n\n**Better choices.**\n- `BIGINT AUTO_INCREMENT`: the smallest and fastest for a single database. The downsides: ids are guessable when exposed in URLs, and they have to come from the database.\n- UUID version 7 (RFC 9562): the first 48 bits are a Unix timestamp in milliseconds, so values are roughly increasing, yet still globally unique and generated by the application. Store it as `BINARY(16)` in MySQL, or as the `uuid` type in PostgreSQL, where version 18 adds a built-in `uuidv7()` function.\n- Snowflake-style 64-bit ids (timestamp, worker id, sequence): time-ordered and compact, but you have to manage worker ids and clock skew.\n- A common compromise: an internal `BIGINT` primary key plus a separate unique public id for URLs and APIs.\n\n**Migrating.** Add the new key column, backfill it, switch the primary key with an online schema change tool, and keep the old UUID column with a unique index so existing lookups keep working.\n\n**One caveat.** Strictly increasing keys send every insert to one page. That is ideal for a single InnoDB instance, but databases that split data by key range across nodes (TiDB, CockroachDB, Spanner) then get a write hotspot on one node, which is why they recommend random or hash-prefixed keys.",
+      "answer_zh": "**为什么随机主键在 InnoDB 中代价很高。** InnoDB 把表本身存成一棵按主键排序的 B+ 树（聚簇索引）。使用随机 UUID 时，每次插入都会落到一个任意的叶子页上：\n- 一旦表的大小超过内存，这个页很可能不在 buffer pool 中，所以大多数插入都要先从磁盘读一个页。\n- 页被随机地填满并分裂，平均下来只有约 70% 是满的。树变得更大，每页能放的行更少，缓存效果也就更差。\n- 脏页分散在整棵树上，刷盘就变成了随机写。\n\n使用递增的主键时，每次插入都落在最右边的叶子页上，这个页始终在内存中，而且页几乎会被完全填满。\n\n**主键的大小会被放大。** 每个二级索引条目都存储了主键。`CHAR(36)` 每个条目要 36 字节，而 `BINARY(16)` 只要 16 字节，`BIGINT` 只要 8 字节。有五个二级索引时，这个差距每行要付出六次。\n\n**一次简单的测量。** 在 PostgreSQL 上用 16 MB 的缓冲缓存做的小测试中，用随机 UUID 插入 200 万行，比用按时间排序的 UUID 多花了约 60% 的时间，主键索引也大了约 25%。InnoDB 受到的影响更大，因为在那里整张表就是聚簇索引。\n\n**更好的选择。**\n- `BIGINT AUTO_INCREMENT`：在单个数据库中最小、最快。缺点是 id 暴露在 URL 中时可以被猜到，而且必须由数据库生成。\n- UUID version 7（RFC 9562）：前 48 位是以毫秒为单位的 Unix 时间戳，所以值大致递增，同时仍然全局唯一，并且可以由应用生成。在 MySQL 中存为 `BINARY(16)`；在 PostgreSQL 中使用 `uuid` 类型，版本 18 还新增了内置的 `uuidv7()` 函数。\n- Snowflake 风格的 64 位 id（时间戳、worker id、序列号）：按时间排序且紧凑，但你需要管理 worker id 和时钟漂移。\n- 一种常见的折中：内部用 `BIGINT` 做主键，再另设一个唯一的公开 id 用于 URL 和 API。\n\n**迁移。** 新增主键列并回填数据，用在线表结构变更工具切换主键，同时保留旧的 UUID 列并加唯一索引，让现有的查询继续可用。\n\n**一个需要注意的地方。** 严格递增的主键会让所有插入都落到同一个页上。对单个 InnoDB 实例来说这很理想，但对于按主键范围把数据分布到多个节点上的数据库（TiDB、CockroachDB、Spanner），这会在一个节点上形成写热点，所以它们推荐使用随机或带哈希前缀的主键。",
+      "followups": [
+        "Your public API already exposes UUIDv4 ids. How do you change the primary key without breaking clients?",
+        "What does a UUIDv7 reveal about the record, and when might that matter?",
+        "How would you keep UUIDv7 values ordered when many are generated within the same millisecond?"
+      ],
+      "followups_zh": [
+        "你的公开 API 已经暴露了 UUIDv4 的 id。如何在不影响客户端的情况下更换主键？",
+        "UUIDv7 会暴露记录的什么信息？什么时候这会成为问题？",
+        "当同一毫秒内生成了大量 UUIDv7 时，你如何保证它们仍然有序？"
+      ],
+      "vocab": [
+        {
+          "en": "clustered index",
+          "zh": "聚簇索引"
+        },
+        {
+          "en": "page split",
+          "zh": "页分裂"
+        },
+        {
+          "en": "buffer pool",
+          "zh": "缓冲池（buffer pool）"
+        },
+        {
+          "en": "write hotspot",
+          "zh": "写热点"
+        },
+        {
+          "en": "time-ordered identifier",
+          "zh": "按时间有序的 ID"
+        }
+      ]
+    },
+    {
+      "id": "20261014-4",
+      "topic": "Middleware",
+      "difficulty": "Medium",
+      "title": "A hot cache key expires and the database falls over",
+      "title_zh": "一个热点缓存 key 过期，数据库随之被打垮",
+      "question": "The product detail page of a flash-sale item is served from Redis using cache-aside, with a 10-minute TTL. The page gets about 5,000 requests per second. Every 10 minutes, when the key expires, database CPU jumps to 100% for a few seconds and p99 latency spikes. Separately, a bot is requesting random product ids that do not exist, and every one of those requests goes all the way to the database. Explain both problems and how you would fix them.",
+      "question_zh": "一个限时抢购商品的详情页通过 cache-aside 方式从 Redis 读取，TTL 为 10 分钟。这个页面每秒大约有 5,000 次请求。每隔 10 分钟，当 key 过期时，数据库 CPU 会在几秒内飙到 100%，p99 延迟随之暴涨。另外，有个爬虫在请求随机的、并不存在的商品 id，每一个这样的请求都会一路打到数据库。请解释这两个问题，并说明你会如何修复。",
+      "answer": "**Problem 1: a cache stampede.** When the key expires, every request that arrives before it is rebuilt misses at the same moment. If a rebuild takes 200 ms, about 1,000 requests run the same expensive query at once. The database slows down, which makes the rebuild slower still, and even more requests pile in.\n\n**Fixes, usually combined.**\n- **Only one rebuild per key.** Within a process, collapse concurrent misses into one load (`singleflight` in Go). Across instances, the first miss takes a short lock (`SET lock:product:42 <token> NX PX 3000`) and rebuilds; the others wait briefly and re-read, or get the stale value (next point).\n- **Serve stale while revalidating.** Store a logical expiry inside the value and give the Redis key a longer TTL. After the logical expiry, one request refreshes in the background while everyone else keeps getting the old value. A few seconds of staleness is fine for a product page; for stock counts it may not be.\n- **Refresh early, at random.** Each reader recomputes with a probability that rises as expiry approaches (the XFetch algorithm), so one request usually refreshes the key before it ever expires.\n- **Add jitter to TTLs.** Keys written together, for example by a cache warmer, should not expire together: use 10 minutes plus or minus a random 10%.\n- **Protect the database anyway.** Cap concurrent rebuild queries per key or per table, so a burst of misses queues instead of overloading the database.\n\n**Problem 2: cache penetration.** Ids that do not exist are never cached, so every lookup for one goes to the database.\n- **Cache negative results** with a short TTL, for example a `not_found` marker for 60 seconds.\n- **Filter impossible keys first.** Validate the id format, and for large id spaces keep a Bloom filter of existing ids. A Bloom filter has no false negatives, so its \"no\" lets you skip both Redis and the database.\n- **Rate-limit** per client or IP to slow the bot itself.\n\n**A related failure: an avalanche.** If Redis goes down, or restarts empty, every key misses at once. Keep a small in-process cache for the hottest keys, warm the cache before routing traffic to a new node, and rely on the same database concurrency caps.",
+      "answer_zh": "**问题 1：缓存击穿。** key 过期后，在它被重建之前到达的所有请求会同时未命中。如果重建一次需要 200 ms，大约就有 1,000 个请求同时执行同一条昂贵的查询。数据库变慢，重建也随之变得更慢，于是更多的请求涌进来。\n\n**修复方法，通常组合使用。**\n- **每个 key 只重建一次。** 在单个进程内，把并发的未命中合并成一次加载（Go 中用 `singleflight`）。跨实例时，第一个未命中的请求获取一把短时锁（`SET lock:product:42 <token> NX PX 3000`）并负责重建；其他请求稍等后重新读取，或者拿到旧值（见下一条）。\n- **先返回旧值，再后台刷新。** 在缓存值里存一个逻辑过期时间，并给 Redis key 设置更长的 TTL。逻辑过期之后，由一个请求在后台刷新，其他所有人继续拿到旧值。对于商品详情页，几秒钟的陈旧数据没有问题；对于库存数量则可能不行。\n- **提前随机刷新。** 每个读请求按照随过期时间临近而升高的概率去重新计算（XFetch 算法），这样通常在 key 过期之前，就已经有一个请求把它刷新了。\n- **给 TTL 加随机抖动。** 一起写入的 key（例如由缓存预热程序写入的）不应该一起过期：使用 10 分钟上下浮动 10% 的随机值。\n- **无论如何都要保护数据库。** 按 key 或按表限制并发的重建查询数，这样一波未命中会排队，而不是压垮数据库。\n\n**问题 2：缓存穿透。** 不存在的 id 永远不会被缓存，所以每次查找都会打到数据库。\n- **缓存空结果**，并设置较短的 TTL，例如缓存一个 `not_found` 标记 60 秒。\n- **先过滤掉不可能存在的 key。** 校验 id 格式；对于很大的 id 空间，维护一个包含所有已存在 id 的布隆过滤器。布隆过滤器没有假阴性，所以它说“不存在”时，就可以同时跳过 Redis 和数据库。\n- **按客户端或 IP 限流**，直接压制爬虫本身。\n\n**相关的故障：缓存雪崩。** 如果 Redis 宕机，或者重启后为空，所有 key 都会同时未命中。为最热的 key 保留一个小的进程内缓存，在把流量切到新节点之前先预热缓存，并依靠同样的数据库并发上限来兜底。",
+      "followups": [
+        "How do you choose between serving stale data and blocking until the rebuild finishes?",
+        "What happens to the rebuild lock if the process holding it crashes?",
+        "How would you size and keep up to date a Bloom filter for 50 million product ids?"
+      ],
+      "followups_zh": [
+        "你如何在“返回旧数据”和“阻塞等待重建完成”之间做选择？",
+        "如果持有重建锁的进程崩溃了，这把锁会怎样？",
+        "对于 5000 万个商品 id，你会如何确定布隆过滤器的大小，并保持它的更新？"
+      ],
+      "vocab": [
+        {
+          "en": "cache stampede",
+          "zh": "缓存击穿（热点 key 过期引发的惊群）"
+        },
+        {
+          "en": "cache penetration",
+          "zh": "缓存穿透"
+        },
+        {
+          "en": "cache avalanche",
+          "zh": "缓存雪崩"
+        },
+        {
+          "en": "stale-while-revalidate",
+          "zh": "先返回旧值，再后台刷新"
+        },
+        {
+          "en": "Bloom filter",
+          "zh": "布隆过滤器"
+        }
+      ]
+    },
+    {
+      "id": "20261014-5",
+      "topic": "Java & CS",
+      "difficulty": "Hard",
+      "title": "A request thread that spins forever waiting for a cache",
+      "title_zh": "一个永远在空转等待缓存的请求线程",
+      "question": "A price cache loads its data in a background thread when the service starts:\n\n```java\npublic class PriceCache {\n    private boolean ready;               // set by the loader thread\n    private Map<String, Long> prices;\n\n    public PriceCache() {\n        new Thread(this::load).start();\n    }\n\n    private void load() {\n        prices = loadAllPrices();        // takes about 2 s\n        ready = true;\n    }\n\n    public long price(String sku) {\n        while (!ready) { }               // wait for the first load\n        return prices.get(sku);\n    }\n}\n```\n\nIn production, the first requests after a deploy sometimes hang forever, each stuck thread burning 100% of a core. The problem disappears in the debugger and whenever someone adds a log line inside the loop. On the ARM-based nodes, a few requests also failed with a `NullPointerException` in `price()`. Explain both symptoms using the Java Memory Model, and fix the class.",
+      "question_zh": "一个价格缓存在服务启动时由后台线程加载数据：\n\n```java\npublic class PriceCache {\n    private boolean ready;               // set by the loader thread\n    private Map<String, Long> prices;\n\n    public PriceCache() {\n        new Thread(this::load).start();\n    }\n\n    private void load() {\n        prices = loadAllPrices();        // takes about 2 s\n        ready = true;\n    }\n\n    public long price(String sku) {\n        while (!ready) { }               // wait for the first load\n        return prices.get(sku);\n    }\n}\n```\n\n在生产环境中，发布后的头几个请求有时会永远卡住，每个卡住的线程都会占满一个 CPU 核。在调试器里问题会消失，只要有人在循环里加一行日志，问题也会消失。在基于 ARM 的节点上，还有少数请求在 `price()` 中抛出了 `NullPointerException`。请用 Java 内存模型解释这两个现象，并修复这个类。",
+      "answer": "**Symptom 1: the loop may never see `ready = true`.** `ready` is a plain field. Without a happens-before edge between the loader's write and the reader's read, the Java Memory Model does not require the reader ever to see the new value. In practice, the JIT compiles the hot loop, sees that nothing inside it writes `ready`, and reads the field only once, turning the loop into `if (!ready) while (true) { }`. That is why the hang starts only once the loop has run long enough to be compiled, and why a debugger or a log call hides it: they prevent that optimization. In a reproduction of this class, the request thread was still spinning 4 seconds after the load had finished.\n\n**Symptom 2: even when the loop exits, `prices` may not be visible.** The loader writes `prices` and then `ready`. With plain fields, the compiler and the CPU may reorder those stores, so a reader can see `ready == true` and still read `prices` as null. x86 keeps stores in order, so this is rare there; ARM's weaker memory model lets it happen more often.\n\n**The fix: create a happens-before edge.** Declaring `ready` as `volatile` fixes both symptoms. A volatile write happens-before every later read of the same field that sees it, and everything the loader wrote before the volatile write, `prices` included, is visible after that read. But the loop still burns a whole core while it waits, so it is better to block:\n\n```java\nprivate final CountDownLatch loaded = new CountDownLatch(1);\n\nprivate void load() {\n    prices = loadAllPrices();\n    loaded.countDown();                  // happens-before await() returning\n}\n\npublic long price(String sku) throws InterruptedException {\n    loaded.await();                      // blocks instead of spinning\n    return prices.get(sku);\n}\n```\n\nA `CompletableFuture<Map<String, Long>>` completed by the loader works too, and makes the reader's dependency on the data explicit.\n\n**The same rule behind other classic bugs.**\n- Double-checked locking needs the shared instance field to be `volatile`; otherwise another thread can see a non-null reference to an object whose constructor writes are not yet visible. The initialization-on-demand holder idiom (a static nested class) avoids the problem entirely.\n- `final` fields are safe to read after construction even without synchronization, as long as `this` does not escape the constructor. Starting a thread from a constructor, as this class does, is a classic way to let `this` escape.\n- `Thread.onSpinWait()` makes a deliberate spin loop cheaper for the CPU, but it does not create any happens-before edge.",
+      "answer_zh": "**现象 1：循环可能永远看不到 `ready = true`。** `ready` 是一个普通字段。在加载线程的写入与读线程的读取之间没有 happens-before 关系时，Java 内存模型并不要求读线程最终一定能看到新值。实际上，JIT 编译这个热点循环时，发现循环内部没有任何地方写 `ready`，于是只读取一次这个字段，把循环变成了 `if (!ready) while (true) { }`。这就是为什么只有在循环运行足够久、被编译之后才会卡住，也是为什么调试器或日志调用能掩盖它：它们阻止了这种优化。在对这个类的复现中，加载完成 4 秒后，请求线程仍然在空转。\n\n**现象 2：即使循环退出了，`prices` 也可能不可见。** 加载线程先写 `prices`，再写 `ready`。对于普通字段，编译器和 CPU 都可能对这两次写入重排序，所以读线程可能看到 `ready == true`，读到的 `prices` 却仍然是 null。x86 会保持写入的顺序，所以在 x86 上这种情况很少见；ARM 的内存模型更弱，这种情况就更容易发生。\n\n**修复：建立 happens-before 关系。** 把 `ready` 声明为 `volatile` 可以同时解决这两个现象。一次 volatile 写 happens-before 之后所有读到这个值的同一字段的读取，而加载线程在 volatile 写之前写入的所有内容（包括 `prices`），在那次读取之后都是可见的。但这个循环在等待期间仍会占满一个核，所以更好的做法是阻塞等待：\n\n```java\nprivate final CountDownLatch loaded = new CountDownLatch(1);\n\nprivate void load() {\n    prices = loadAllPrices();\n    loaded.countDown();                  // happens-before await() returning\n}\n\npublic long price(String sku) throws InterruptedException {\n    loaded.await();                      // blocks instead of spinning\n    return prices.get(sku);\n}\n```\n\n由加载线程完成的 `CompletableFuture<Map<String, Long>>` 同样可行，而且能把读线程对数据的依赖表达得更明确。\n\n**同一条规则也是其他经典 bug 的根源。**\n- 双重检查锁需要把共享的实例字段声明为 `volatile`；否则另一个线程可能看到一个非 null 的引用，而它指向的对象在构造函数中的写入还不可见。按需初始化持有者模式（一个静态嵌套类）可以完全避开这个问题。\n- 只要 `this` 没有在构造函数中逃逸，`final` 字段在构造完成后即使不加同步也可以安全读取。在构造函数里启动线程（就像这个类所做的）是让 `this` 逃逸的经典方式。\n- `Thread.onSpinWait()` 能让刻意的自旋循环对 CPU 更友好，但它不会建立任何 happens-before 关系。",
+      "followups": [
+        "Why does adding a log call inside the loop make the hang disappear?",
+        "When is `volatile` not enough, so that you need an `AtomicLong` or a lock?",
+        "What does the initialization-on-demand holder idiom rely on to be thread-safe?"
+      ],
+      "followups_zh": [
+        "为什么在循环里加一行日志，卡死就消失了？",
+        "什么时候 `volatile` 不够用，需要 `AtomicLong` 或者锁？",
+        "按需初始化持有者模式依靠什么来保证线程安全？"
+      ],
+      "vocab": [
+        {
+          "en": "happens-before",
+          "zh": "happens-before（先行发生）关系"
+        },
+        {
+          "en": "visibility",
+          "zh": "可见性"
+        },
+        {
+          "en": "reordering",
+          "zh": "重排序"
+        },
+        {
+          "en": "safe publication",
+          "zh": "安全发布"
+        },
+        {
+          "en": "busy-waiting",
+          "zh": "忙等待"
+        }
+      ]
+    }
+  ]
+}

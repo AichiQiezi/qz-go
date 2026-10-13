@@ -3,10 +3,20 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 5 天、25 道题。
+共 6 天、30 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
+
+## [2026-10-14](days/2026-10-14.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Hard | [Log lines that come out scrambled under load](days/2026-10-14.md#q1) | 高负载下日志行变得错乱 |
+| 2 | System Design | Senior | [Sharing ad-platform API quotas across many services](days/2026-10-14.md#q2) | 在多个服务之间共享广告平台的 API 配额 |
+| 3 | Database | Medium | [Inserts slow down as a table keyed by random UUIDs grows](days/2026-10-14.md#q3) | 以随机 UUID 为主键的表越大，插入越慢 |
+| 4 | Middleware | Medium | [A hot cache key expires and the database falls over](days/2026-10-14.md#q4) | 一个热点缓存 key 过期，数据库随之被打垮 |
+| 5 | Java & CS | Hard | [A request thread that spins forever waiting for a cache](days/2026-10-14.md#q5) | 一个永远在空转等待缓存的请求线程 |
 
 ## [2026-10-13](days/2026-10-13.md)
 
