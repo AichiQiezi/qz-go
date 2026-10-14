@@ -3,10 +3,20 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 6 天、30 道题。
+共 7 天、35 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
+
+## [2026-10-15](days/2026-10-15.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Medium | [Every product fails validation after a small refactor](days/2026-10-15.md#q1) | 一次小重构之后，所有商品都校验失败 |
+| 2 | System Design | Hard | [A flash sale that oversells and melts the order database](days/2026-10-15.md#q2) | 一场既超卖、又压垮订单库的限时抢购 |
+| 3 | Database | Senior | [Orders that vanished after a database failover](days/2026-10-15.md#q3) | 数据库故障切换之后消失的订单 |
+| 4 | Middleware | Hard | [One merchant's events back up a whole Kafka partition](days/2026-10-15.md#q4) | 一个商家的事件堵住了整个 Kafka 分区 |
+| 5 | Java & CS | Medium | [A scheduled token refresh that silently stopped](days/2026-10-15.md#q5) | 悄无声息停止运行的定时刷新 token 任务 |
 
 ## [2026-10-14](days/2026-10-14.md)
 
