@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 8 个模块、24 道题。
+共 9 个模块、29 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -103,3 +103,17 @@ What changes when an agent leaves the demo: validating structured output, contro
 | 1 | Production | Medium | [Supplier data to catalog fields: malformed, truncated, or confidently wrong](modules/08-production.md#q1) | 供应商数据转商品目录字段：格式错误、输出截断，或者错得理直气壮 |
 | 2 | Production | Hard | [A support agent that costs too much and takes 90 seconds to answer](modules/08-production.md#q2) | 一个太贵、还要 90 秒才能回复的客服 Agent |
 | 3 | Production | Hard | [Peak traffic: 429s, overloaded errors, double refunds and restarted tasks](modules/08-production.md#q3) | 流量高峰：429、过载错误、重复退款和从头再来的任务 |
+
+## [Daily set · Oct 16 · 每日新题 · 10 月 16 日](modules/daily-2026-10-16.md)
+
+Five new agent questions: streaming a tool-using chat, long-term memory for merchant preferences, constrained product search, agents that overwrite each other's catalog edits, and choosing between your own loop, an SDK runner, an agent framework and a managed platform.
+
+> 五道新的 Agent 题：带工具调用的聊天如何流式化、商家偏好的长期记忆、带约束条件的商品检索、互相覆盖商品修改的多个 Agent，以及在自研循环、SDK runner、Agent 框架和托管平台之间如何选择。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Production | Medium | [The support chat sits silent for 40 seconds, then dumps the whole answer](modules/daily-2026-10-16.md#q1) | 客服聊天框沉默 40 秒，然后一下子吐出整段回答 |
+| 2 | Context & Memory | Medium | [Merchants are tired of repeating their preferences every session](modules/daily-2026-10-16.md#q2) | 商家厌倦了每次会话都重复自己的偏好 |
+| 3 | RAG | Hard | ["Dresses under $50, not red" returns red dresses at $79](modules/daily-2026-10-16.md#q3) | “50 美元以下、不要红色的连衣裙”却返回了 79 美元的红裙子 |
+| 4 | Multi-agent | Hard | [Two agents keep overwriting each other's catalog edits](modules/daily-2026-10-16.md#q4) | 两个 Agent 不断覆盖彼此对商品目录的修改 |
+| 5 | Agent Loop | Senior | [Your own loop, an SDK runner, an agent framework or a managed platform for a nightly feed audit?](modules/daily-2026-10-16.md#q5) | 夜间 feed 审计 Agent：自己写循环、用 SDK runner、用 Agent 框架，还是用托管平台？ |
