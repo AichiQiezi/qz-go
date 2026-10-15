@@ -1,8 +1,12 @@
-// render 把 interview/data/*.json 渲染成 interview/days/*.md，并重建 interview/README.md 索引。
+// render 把面试题 JSON 渲染成 Markdown，并重建 README 索引。支持两种题集：
+//
+//   - days：每日题，interview/data/<日期>.json -> interview/days/<日期>.md，按日期倒序
+//   - modules：Agent 速成课，interview/agent/data/<模块 id>.json -> interview/agent/modules/<模块 id>.md，按 order 排列
 //
 // 用法（在仓库根目录执行）：
 //
 //	go run ./interview/render
+//	go run ./interview/render -dir interview/agent -kind modules
 package main
 
 import (
@@ -37,16 +41,36 @@ type Question struct {
 	Vocab       []Vocab  `json:"vocab"`
 }
 
-// Day 与 Interview Drill 页面里 "days" 集合的文档结构一致
-type Day struct {
-	Date        string     `json:"date"`
+// Set 是一组题：每日题（与 Interview Drill 页面的 "days" 集合一致），
+// 或 Agent 速成课的一个模块（与速成课页面的 "modules" 集合一致）
+type Set struct {
+	Date        string     `json:"date"`  // 每日题
+	ID          string     `json:"id"`    // 模块
+	Order       int        `json:"order"` // 模块
+	Kind        string     `json:"kind"`  // 模块："core" 或 "daily"
+	Title       string     `json:"title"` // 模块
+	TitleZh     string     `json:"title_zh"`
+	Summary     string     `json:"summary"`
+	SummaryZh   string     `json:"summary_zh"`
 	GeneratedAt string     `json:"generatedAt"`
 	Questions   []Question `json:"questions"`
 }
 
+// key 是题集的文件名（不含 .json）
+func (s Set) key(kind string) string {
+	if kind == "modules" {
+		return s.ID
+	}
+	return s.Date
+}
+
 func main() {
-	dir := flag.String("dir", "interview", "interview 目录")
+	dir := flag.String("dir", "interview", "题集目录，JSON 在其下的 data/ 中")
+	kind := flag.String("kind", "days", `题集类型："days" 或 "modules"`)
 	flag.Parse()
+	if *kind != "days" && *kind != "modules" {
+		log.Fatalf("unknown -kind %q", *kind)
+	}
 
 	files, err := filepath.Glob(filepath.Join(*dir, "data", "*.json"))
 	if err != nil {
@@ -56,62 +80,82 @@ func main() {
 		log.Fatalf("no data files under %s", filepath.Join(*dir, "data"))
 	}
 
-	days := make([]Day, 0, len(files))
+	sets := make([]Set, 0, len(files))
 	for _, f := range files {
-		day, err := loadDay(f)
+		set, err := loadSet(f, *kind)
 		if err != nil {
 			log.Fatalf("%s: %v", f, err)
 		}
-		days = append(days, day)
+		sets = append(sets, set)
 	}
-	// 最新的一天排在最前面
-	sort.Slice(days, func(i, j int) bool { return days[i].Date > days[j].Date })
+	// 每日题最新的一天排在最前面；模块按 order 排列
+	sort.Slice(sets, func(i, j int) bool {
+		if *kind == "modules" {
+			return sets[i].Order < sets[j].Order
+		}
+		return sets[i].Date > sets[j].Date
+	})
 
-	if err := os.MkdirAll(filepath.Join(*dir, "days"), 0o755); err != nil {
+	sub := *kind
+	if err := os.MkdirAll(filepath.Join(*dir, sub), 0o755); err != nil {
 		log.Fatal(err)
 	}
-	for _, day := range days {
-		path := filepath.Join(*dir, "days", day.Date+".md")
-		if err := os.WriteFile(path, []byte(renderDay(day)), 0o644); err != nil {
+	for _, set := range sets {
+		path := filepath.Join(*dir, sub, set.key(*kind)+".md")
+		if err := os.WriteFile(path, []byte(renderSet(set, *kind)), 0o644); err != nil {
 			log.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(*dir, "README.md"), []byte(renderIndex(days)), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(*dir, "README.md"), []byte(renderIndex(sets, *kind)), 0o644); err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("rendered %d day(s) into %s\n", len(days), *dir)
+	fmt.Printf("rendered %d %s into %s\n", len(sets), *kind, *dir)
 }
 
-func loadDay(path string) (Day, error) {
-	var day Day
+func loadSet(path, kind string) (Set, error) {
+	var set Set
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return day, err
+		return set, err
 	}
-	if err := json.Unmarshal(b, &day); err != nil {
-		return day, err
+	if err := json.Unmarshal(b, &set); err != nil {
+		return set, err
 	}
-	if want := strings.TrimSuffix(filepath.Base(path), ".json"); day.Date != want {
-		return day, fmt.Errorf("date %q does not match file name %q", day.Date, want)
+	if want := strings.TrimSuffix(filepath.Base(path), ".json"); set.key(kind) != want {
+		return set, fmt.Errorf("%s key %q does not match file name %q", kind, set.key(kind), want)
 	}
-	if len(day.Questions) == 0 {
-		return day, fmt.Errorf("no questions")
+	if len(set.Questions) == 0 {
+		return set, fmt.Errorf("no questions")
 	}
-	for i, q := range day.Questions {
+	for i, q := range set.Questions {
 		if q.Title == "" || q.Question == "" || q.Answer == "" {
-			return day, fmt.Errorf("question %d is missing title, question or answer", i+1)
+			return set, fmt.Errorf("question %d is missing title, question or answer", i+1)
 		}
 	}
-	return day, nil
+	return set, nil
 }
 
-func renderDay(day Day) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "# %s · 每日面试题 / Daily Interview Questions\n\n", day.Date)
-	fmt.Fprintf(&b, "> %d questions · generated %s · [← 全部 / All days](../README.md)\n\n", len(day.Questions), day.GeneratedAt)
-	writeTable(&b, day, "")
+// moduleTitle 是模块标题，核心模块带上序号
+func moduleTitle(s Set) string {
+	if s.Kind == "core" {
+		return fmt.Sprintf("%02d. %s · %s", s.Order, s.Title, s.TitleZh)
+	}
+	return s.Title + " · " + s.TitleZh
+}
 
-	for i, q := range day.Questions {
+func renderSet(set Set, kind string) string {
+	var b strings.Builder
+	if kind == "modules" {
+		fmt.Fprintf(&b, "# %s\n\n", moduleTitle(set))
+		fmt.Fprintf(&b, "%s\n\n> %s\n\n", set.Summary, set.SummaryZh)
+		fmt.Fprintf(&b, "%d questions · generated %s · [← 目录 / Contents](../README.md)\n\n", len(set.Questions), set.GeneratedAt)
+	} else {
+		fmt.Fprintf(&b, "# %s · 每日面试题 / Daily Interview Questions\n\n", set.Date)
+		fmt.Fprintf(&b, "> %d questions · generated %s · [← 全部 / All days](../README.md)\n\n", len(set.Questions), set.GeneratedAt)
+	}
+	writeTable(&b, set, "")
+
+	for i, q := range set.Questions {
 		b.WriteString("\n---\n\n")
 		fmt.Fprintf(&b, "<a id=\"q%d\"></a>\n\n", i+1)
 		fmt.Fprintf(&b, "## %d. %s\n\n", i+1, q.Title)
@@ -146,7 +190,11 @@ func renderDay(day Day) string {
 	return b.String()
 }
 
-func renderIndex(days []Day) string {
+func renderIndex(sets []Set, kind string) string {
+	if kind == "modules" {
+		return renderModuleIndex(sets)
+	}
+	days := sets
 	total := 0
 	for _, d := range days {
 		total += len(d.Questions)
@@ -159,6 +207,7 @@ func renderIndex(days []Day) string {
 	fmt.Fprintf(&b, "共 %d 天、%d 道题。\n\n", len(days), total)
 	b.WriteString("- 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）\n")
 	b.WriteString("- 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`\n")
+	b.WriteString("- Agent 面试速成：[agent/README.md](agent/README.md)\n")
 
 	for _, d := range days {
 		fmt.Fprintf(&b, "\n## [%s](days/%s.md)\n\n", d.Date, d.Date)
@@ -167,10 +216,32 @@ func renderIndex(days []Day) string {
 	return b.String()
 }
 
-// writeTable 输出当天的题目列表；link 为空时链接到当前页面内的锚点
-func writeTable(b *strings.Builder, day Day, link string) {
+func renderModuleIndex(mods []Set) string {
+	total := 0
+	for _, m := range mods {
+		total += len(m.Questions)
+	}
+
+	var b strings.Builder
+	b.WriteString("# Agent 面试速成 · Agent Interview Crash Course\n\n")
+	b.WriteString("面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。\n")
+	b.WriteString("每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。\n\n")
+	fmt.Fprintf(&b, "共 %d 个模块、%d 道题。\n\n", len(mods), total)
+	b.WriteString("- 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）\n")
+	b.WriteString("- 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`\n")
+
+	for _, m := range mods {
+		fmt.Fprintf(&b, "\n## [%s](modules/%s.md)\n\n", moduleTitle(m), m.ID)
+		fmt.Fprintf(&b, "%s\n\n> %s\n\n", m.Summary, m.SummaryZh)
+		writeTable(&b, m, "modules/"+m.ID+".md")
+	}
+	return b.String()
+}
+
+// writeTable 输出一组题的列表；link 为空时链接到当前页面内的锚点
+func writeTable(b *strings.Builder, set Set, link string) {
 	b.WriteString("| # | Topic | Difficulty | Title | 标题 |\n| --- | --- | --- | --- | --- |\n")
-	for i, q := range day.Questions {
+	for i, q := range set.Questions {
 		fmt.Fprintf(b, "| %d | %s | %s | [%s](%s#q%d) | %s |\n",
 			i+1, cell(q.Topic), cell(q.Difficulty), cell(q.Title), link, i+1, cell(q.TitleZh))
 	}

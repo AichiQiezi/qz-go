@@ -7,6 +7,7 @@
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
+- Agent 面试速成：[agent/README.md](agent/README.md)
 
 ## [2026-10-15](days/2026-10-15.md)
 
