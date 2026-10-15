@@ -1,0 +1,348 @@
+# 06. Evaluating and observing agents · Agent 的评测与可观测性
+
+How to trace agent runs, build eval sets and graders, measure reliability, and ship prompt and model changes without surprising production. Interviewers ask because an agent you cannot measure is an agent you cannot improve or ship safely.
+
+> 如何追踪 agent 的运行、构建评测集和评分器、衡量可靠性，以及在不给线上带来意外的前提下发布提示词和模型的改动。面试官爱问这些，是因为一个无法衡量的 agent，既无法改进，也无法安全上线。
+
+3 questions · generated 2026-10-15T18:27:03+08:00 · [← 目录 / Contents](../README.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Evals & Observability | Medium | [Why some agent runs take three minutes and cost a lot](#q1) | 为什么有些 agent 运行要三分钟、还特别贵 |
+| 2 | Evals & Observability | Hard | [Proving a catalog-fixing agent is ready to ship](#q2) | 证明一个修复商品目录的 agent 已经可以上线 |
+| 3 | Evals & Observability | Hard | [The eval score went up, and so did production complaints](#q3) | 评测分数涨了，线上投诉也涨了 |
+
+---
+
+<a id="q1"></a>
+
+## 1. Why some agent runs take three minutes and cost a lot
+
+**为什么有些 agent 运行要三分钟、还特别贵** · `Evals & Observability` · `Medium`
+
+### Question · 题目
+
+Your merchant-facing reporting agent usually answers in 15 to 20 seconds. Support tickets now say "the agent sometimes takes 3 minutes and costs a lot", and finance sees the model bill growing faster than usage. Today you only log the final answer and the total request time.
+
+> 你们面向商家的报表 agent 通常 15 到 20 秒就能给出回答。现在客服工单里说“这个 agent 有时要跑 3 分钟，而且很费钱”，财务也发现模型账单的增长速度超过了使用量的增长。目前你们只记录最终答案和总请求耗时。
+
+What would you record for each run, how would you find the slow or expensive part, how would you replay a bad run, and how would you handle privacy when you log prompts? Mention the standards you would use.
+
+> 你会为每次运行记录哪些内容？如何找出慢或贵的那一部分？如何重放一次有问题的运行？记录提示词时如何处理隐私问题？请说明你会采用哪些标准。
+
+<details>
+<summary><b>Answer · 参考答案</b></summary>
+
+**The core idea.** An agent run is like a request that fans out across many services: a loop of model calls and tool calls, where total time and cost are sums over the steps. Logging only the final answer is like logging only the HTTP 200 of a request that called thirty backends. You need tracing: one trace per run, one span per model call and per tool call, and attributes that explain time and money.
+
+> **核心思路。** 一次 agent 运行就像一个扇出到很多服务的请求：模型调用和工具调用组成一个循环，总耗时和总成本是各个步骤的累加。只记录最终答案，就像一个请求调用了三十个后端，你却只记录了它返回的 HTTP 200。你需要的是链路追踪（tracing）：每次运行一条 trace，每次模型调用和每次工具调用各一个 span，再加上能解释时间和花费的属性。
+
+**What to record.**
+
+> **要记录什么。**
+
+- Run (root span): run ID, tenant, request type, agent version (prompt, tool set, model ID, settings such as effort), outcome (success, error, escalated, abandoned), number of turns, total tokens and cost.
+  > 运行本身（根 span）：运行 ID、租户、请求类型、agent 版本（提示词、工具集、模型 ID、effort 等设置）、结果（成功、出错、升级到人工、用户放弃）、轮数、总 token 数和总成本。
+- Model call: model, input and output tokens, cache read and write tokens, latency (time to first token and total), stop reason (`end_turn`, `tool_use`, `max_tokens`, `refusal`, `pause_turn`), tool calls requested, HTTP status and retries.
+  > 模型调用：模型、输入和输出 token、缓存读取和写入 token、延迟（首 token 时间和总时间）、停止原因（`end_turn`、`tool_use`、`max_tokens`、`refusal`、`pause_turn`）、请求的工具调用数、HTTP 状态码和重试次数。
+- Tool call: name, arguments (redacted), result size, `is_error`, latency, the downstream API, and time spent waiting on rate limits.
+  > 工具调用：名称、参数（脱敏后）、结果大小、`is_error`、延迟、调用的下游 API，以及等待限流的时间。
+- Full prompts and responses: in a separate, access-controlled store, linked by span ID.
+  > 完整的提示词和回复：放在单独的、有访问控制的存储中，用 span ID 关联。
+
+**Get the token maths right.** In the Claude Messages API response, `input_tokens` is only the uncached remainder; the full prompt is `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`. Cache writes cost more than normal input (about 1.25x with the 5-minute TTL) and cache reads much less (about 0.1x on most models), so price each span from all four numbers. Telemetry may define things differently: in the OpenTelemetry spans that Anthropic's SDKs emit, `gen_ai.usage.input_tokens` already includes cache reads and writes. Pick one definition and never double count.
+
+> **把 token 账算对。** 在 Claude Messages API 的响应里，`input_tokens` 只是未命中缓存的那部分；完整的提示词是 `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`。缓存写入比普通输入贵（5 分钟 TTL 时约 1.25 倍），缓存读取则便宜得多（大多数模型上约 0.1 倍），所以要用这四个数字给每个 span 计价。遥测里的定义可能不同：在 Anthropic SDK 输出的 OpenTelemetry span 中，`gen_ai.usage.input_tokens` 已经包含了缓存读取和写入。选定一种定义，绝不重复计算。
+
+**Use OpenTelemetry.** Emit spans through the OpenTelemetry API and propagate W3C trace context, so agent spans join your existing traces and the ad-platform HTTP call inside a tool shows up as a child span. The GenAI semantic conventions define `gen_ai.*` attributes such as `gen_ai.request.model` and `gen_ai.usage.output_tokens`; they are still evolving, so pin versions. Many LLM observability backends accept OTLP, and the Claude SDKs can emit these spans themselves (beta). A tool span in Go:
+
+> **使用 OpenTelemetry。** 通过 OpenTelemetry API 输出 span，并传播 W3C trace context，这样 agent 的 span 会并入你现有的链路，工具内部对广告平台发起的 HTTP 调用也会显示为子 span。生成式 AI 语义约定（GenAI semantic conventions）定义了 `gen_ai.*` 属性，比如 `gen_ai.request.model` 和 `gen_ai.usage.output_tokens`；这些约定仍在演进，所以要固定版本。很多 LLM 可观测性后端都接受 OTLP，Claude SDK 自己也能输出这些 span（beta）。Go 里的一个工具 span：
+
+```go
+ctx, span := tracer.Start(ctx, "execute_tool "+call.Name,
+    trace.WithAttributes(
+        attribute.String("gen_ai.operation.name", "execute_tool"),
+        attribute.String("gen_ai.tool.name", call.Name),
+        attribute.String("gen_ai.tool.call.id", call.ID),
+    ))
+defer span.End()
+out, err := runTool(ctx, call)
+if err != nil {
+    span.RecordError(err)
+    span.SetStatus(codes.Error, "tool failed")
+}
+span.SetAttributes(attribute.Int("tool.result_bytes", len(out)))
+```
+
+**Find the slow or expensive part.** Start from aggregates: p50, p95 and p99 run time by agent version and request type, time split into model, tool and rate-limit waiting, and cost by span type. Then open a slow trace:
+
+> **找出慢或贵的那部分。** 先看聚合数据：按 agent 版本和请求类型统计运行时间的 p50、p95 和 p99，把时间拆成模型、工具和等待限流三部分，并按 span 类型拆分成本。然后打开一条慢的 trace：
+
+```
+run r_7f3a  report-agent v42  184s  23 turns  stop=end_turn
+  chat #1     2.8s  in 1,204  cache_read 15,880  cache_write 0        out 310    stop=tool_use
+  get_ad_report x36   141s  640 KB returned  61s waiting on HTTP 429
+  chat #23    9.4s  in 2,950  cache_read 0       cache_write 210,400  out 1,950  stop=end_turn
+```
+
+The usual suspects:
+
+> 常见的元凶：
+
+- Too many turns: one report per turn. Use parallel tool calls (with all results returned in one message), a batch tool such as `get_ad_reports(ids)`, or programmatic tool calling.
+  > 轮数太多：每轮只拉一份报表。改用并行工具调用（所有结果放在一条消息里返回）、`get_ad_reports(ids)` 这样的批量工具，或者程序化工具调用（programmatic tool calling）。
+- Huge tool results: the history is re-sent every turn, so a large result early in the run is paid for again on every later turn. Filter and paginate inside the tool, and clear old tool results.
+  > 工具结果太大：每一轮都会重新发送整个历史，所以运行早期返回的一个大结果，在之后的每一轮都要再付一次钱。在工具内部过滤和分页，并清理旧的工具结果。
+- Cache misses: big cache writes and near-zero cache reads on a call mean the prefix changed, for example a timestamp in the system prompt or tools in a random order. Diff the rendered prompts of two consecutive calls.
+  > 缓存未命中：某次调用缓存写入很多、缓存读取却接近零，说明前缀变了，比如 system prompt 里有时间戳，或者工具顺序是随机的。对比两次相邻调用渲染出的提示词。
+- External rate limits: time spent in backoff shows up on tool spans. Fix it in the backend with a shared rate limiter and cached reports.
+  > 外部限流：退避等待的时间会出现在工具 span 上。在后端解决：使用共享的限流器，并缓存报表。
+- Loops and truncation: the same tool called with the same arguments again and again, or `max_tokens` stops followed by retries. Add loop detection and a turn cap.
+  > 循环和截断：同一个工具用同样的参数被反复调用，或者 `max_tokens` 停止之后又重试。加上循环检测和轮数上限。
+
+Track cost per completed task, not per request.
+
+> 跟踪“每个完成任务的成本”，而不是每个请求的成本。
+
+**Replay a run.** Store the exact rendered request of every model call (system prompt, tools, messages, parameters, model ID) and every tool result. You can then step through a run, or restart from turn N with a changed prompt and tools stubbed from the recorded results, to test a fix. A re-run will not match exactly, because model output is nondeterministic, which is why the recorded tool results matter. During replay, side-effecting tools must be stubbed or sandboxed: never re-run `create_campaign` against production.
+
+> **重放一次运行。** 保存每次模型调用的完整渲染请求（system prompt、工具、消息、参数、模型 ID）以及每个工具结果。这样你就可以逐步查看一次运行，或者从第 N 轮开始，换一个提示词、用记录下来的结果替代工具，来测试修复方案。由于模型输出是不确定的，重新运行不会完全一致，这正是记录工具结果的意义所在。重放时，带副作用的工具必须替换成桩或放进沙箱：绝不能对生产环境重新执行 `create_campaign`。
+
+**Privacy and redaction.** Prompts carry merchant data, their customers' personal data and sometimes secrets. Default telemetry to metadata only; the Claude SDKs' OpenTelemetry export, for example, leaves out prompts and responses unless you opt in. Keep full content in a separate store with stricter access, shorter retention and audit logs. Redact at the source before export: tool results are structured, so mask known fields such as email, phone and address in code, and pattern-match secrets as a backstop. Keep credentials out of prompts entirely; the tools hold the tokens. Apply tenant boundaries and deletion requests to the trace store as you would to any other database.
+
+> **隐私与脱敏。** 提示词里有商家数据、商家客户的个人数据，有时还有机密信息。遥测默认只记录元数据；例如 Claude SDK 的 OpenTelemetry 导出，除非你主动开启，否则不会包含提示词和回复。完整内容放在单独的存储里，访问更严格、保留时间更短，并有审计日志。在导出前就在源头脱敏：工具结果是结构化的，所以在代码里掩码 email、电话、地址等已知字段，再用模式匹配查找机密信息作为兜底。凭证完全不要进入提示词，令牌由工具持有。trace 存储和其他数据库一样，要遵守租户边界和数据删除请求。
+
+**Trade-offs.** Full content is expensive to store and can exceed span size limits, so put large payloads in object storage and keep a reference on the span. Keep metadata for every run and sample full content: all errors and slow outliers, plus a small share of normal runs (the OpenTelemetry Collector's tail sampling processor can do this).
+
+> **权衡。** 完整内容的存储成本高，还可能超过 span 的大小限制，所以把大载荷放进对象存储，只在 span 上保留引用。每次运行都保留元数据，对完整内容做采样：所有出错和慢的异常运行，再加一小部分正常运行（OpenTelemetry Collector 的尾部采样处理器可以做到这一点）。
+
+</details>
+
+### Follow-ups · 追问
+
+- How would you set up an alert that catches a cost regression within an hour of a deploy?
+  > 你会如何设置告警，在部署后一小时内发现成本异常上涨？
+- Which parts of a trace would you turn into eval cases, and how?
+  > 你会把 trace 的哪些部分变成评测案例？具体怎么做？
+- How would you keep a single trace across an orchestrator, its subagents and your backend services?
+  > 如何让编排者、它的子 agent 和你的后端服务共用同一条 trace？
+
+### Vocabulary · 词汇
+
+| English | 中文 |
+| --- | --- |
+| trace / span | 链路（trace）/ 跨度（span，链路中的一个步骤） |
+| stop reason | 停止原因 |
+| cache hit rate | 缓存命中率 |
+| redaction | 脱敏 |
+| Most of the time went into waiting on rate-limited tool calls. | 大部分时间都花在等待被限流的工具调用上。 |
+
+---
+
+<a id="q2"></a>
+
+## 2. Proving a catalog-fixing agent is ready to ship
+
+**证明一个修复商品目录的 agent 已经可以上线** · `Evals & Observability` · `Hard`
+
+### Question · 题目
+
+Your team built an agent that fixes catalog sync problems for merchants. It reads sync errors from Google Merchant Center and Meta, finds the cause in the merchant's product data, proposes or applies fixes, and re-triggers the sync. The demo looks great. Your manager asks: "How do we know it is good enough to ship, and how will we know if the next prompt change makes it worse?"
+
+> 你的团队做了一个帮商家修复商品目录同步问题的 agent。它读取 Google Merchant Center 和 Meta 返回的同步错误，在商家的商品数据里找到原因，提出或直接应用修复，然后重新触发同步。演示效果很好。你的经理问：“我们怎么知道它已经好到可以上线了？下一次修改提示词时，又怎么知道它有没有变差？”
+
+Describe how you would build the eval set, which graders you would use, how you would measure reliability, and which traps you would avoid.
+
+> 请说明你会如何构建评测集、使用哪些评分器、如何衡量可靠性，以及要避开哪些陷阱。
+
+<details>
+<summary><b>Answer · 参考答案</b></summary>
+
+**The core idea.** An eval is a test suite for behaviour: a set of tasks, a harness that runs the agent on each one, and graders that turn each run into a score. For an agent, a task is a prompt plus an environment (product data, platform responses), and a run is a trajectory of tool calls with side effects. So you grade both the end state and the path, and because model output is nondeterministic, you run each task several times and measure reliability rather than a single pass.
+
+> **核心思路。** 评测（eval）就是针对行为的测试套件：一组任务、一个在每个任务上运行 agent 的 harness，以及把每次运行转换成分数的评分器（grader）。对 agent 来说，一个任务是提示词加上一个环境（商品数据、平台响应），一次运行则是一串带副作用的工具调用轨迹。所以既要给最终状态打分，也要给过程打分；而且因为模型输出是不确定的，每个任务要跑多次，衡量的是可靠性，而不是某一次通过。
+
+**Build the eval set from three sources.**
+
+> **从三个来源构建评测集。**
+
+- Real cases first: support tickets and sync error logs give you the real mix of problems. Anonymise them and turn each into a reproducible fixture: product data plus mocked Google Merchant Center and Meta APIs that return the recorded errors.
+  > 先用真实案例：客服工单和同步错误日志能给出真实的问题分布。把它们匿名化，并把每一个都变成可复现的 fixture：商品数据，加上会返回所记录错误的模拟 Google Merchant Center 和 Meta API。
+- Synthesised cases to fill the gaps: rare errors, several errors at once, other languages, huge catalogs. A model can draft variations, but review them by hand, because synthetic cases tend to be cleaner than reality.
+  > 用合成案例填补空白：罕见错误、多个错误同时出现、其他语言、超大目录。可以让模型起草变体，但要人工审核，因为合成案例往往比现实更“干净”。
+- Edge and adversarial cases: problems the agent must not fix alone (a restricted product needs the merchant's decision), ambiguous cases where it should ask, 429s and timeouts, product descriptions with injected instructions, and cases where nothing is wrong.
+  > 边界和对抗性案例：agent 不能独自修复的问题（受限商品需要商家自己决定）、应该先提问的模糊情况、429 和超时、商品描述里被注入了指令，以及什么问题都没有的情况。
+
+**Write success criteria two experts would agree on.** Each case states the expected end state and the forbidden actions, and is tagged by category, source and difficulty so you can slice the results. A few dozen carefully checked cases beat a thousand noisy ones; grow the set over time. Keep a held-out split that you never tune against.
+
+> **写出两位专家都会认同的成功标准。** 每个案例写明期望的最终状态和禁止的操作，并按类别、来源和难度打标签，以便切片分析结果。几十个仔细核对过的案例胜过一千个噪声很大的案例；评测集可以随时间扩充。保留一个从不拿来调优的留出集（held-out set）。
+
+```json
+{
+  "id": "gmc-missing-gtin-017",
+  "source": "support ticket, anonymised",
+  "tags": ["gmc", "missing_gtin", "variants"],
+  "input": "My shoes are disapproved in Google Shopping, please fix it",
+  "fixture": "fixtures/shoe_store_v3.json",
+  "expect": {
+    "end_state": {"variants_with_valid_gtin": 12, "syncs_triggered": 1},
+    "must_not_call": ["delete_product", "update_price"],
+    "ask_user_if": "a variant has no GTIN anywhere in the merchant's data"
+  }
+}
+```
+
+**Grade with code first.** Deterministic checks inspect the sandbox after the run: the variants have valid GTINs, exactly one sync was triggered, nothing was deleted. They also check invariants on the trajectory: no write before a read, no forbidden tool, and a budget of turns and tokens. Code graders are cheap, fast and unambiguous, so use them wherever a property can be computed.
+
+> **优先用代码打分。** 确定性检查在运行结束后检查沙箱：变体有了有效的 GTIN、恰好触发了一次同步、没有删除任何东西。它们还检查轨迹上的不变量：不先写后读、不调用被禁止的工具、轮数和 token 不超预算。代码评分器便宜、快速、没有歧义，所以只要某个属性能计算出来，就用它。
+
+**Use an LLM judge for the rest.** Some properties cannot be computed, such as whether the explanation to the merchant is correct, clear, in their language and free of promises the agent cannot keep. Give the judge a rubric of separate yes/no criteria rather than a 1-10 score, one call per criterion, and ask for quoted evidence before the verdict. Show it the real end state and tool results, not just the final message, or a confident "all fixed!" will fool it. Then calibrate: people label a sample independently, you measure how often the judge agrees, and you iterate on the judge prompt until agreement is high on clear-cut cases, re-checking whenever the judge model changes. Watch for known biases: a preference for longer answers, position bias in pairwise comparisons (randomise the order) and self-preference (do not let the model under test judge itself).
+
+> **其余部分交给 LLM 评审。** 有些属性无法计算，比如给商家的解释是否正确、清晰、使用了商家的语言，并且没有做出 agent 兑现不了的承诺。给评审一份由若干独立的是/否标准组成的评分细则（rubric），而不是 1-10 分的打分，每个标准单独调用一次，并要求它先引用证据再下结论。把真实的最终状态和工具结果给它看，而不只是最后一条消息，否则一句自信的“全部修好了！”就能骗过它。然后做校准：让人独立标注一批样本，衡量评审与人的一致率，不断迭代评审提示词，直到在界限清楚的案例上一致率很高；每次更换评审模型都要重新检查。注意已知的偏差：偏爱更长的回答、成对比较中的位置偏差（随机打乱顺序），以及自我偏好（不要让被测模型给自己当评审）。
+
+**Grade the trajectory, not only the final answer.** Final-answer grading misses dangerous paths with good endings, such as an agent that deleted and re-created products: the listings end up valid, but their review history is gone. It also misses lucky guesses and runs that took 40 tool calls instead of 5. Exact-path matching is too strict, because many step orders are valid. Grade the outcome, plus invariants on the path, plus an efficiency budget.
+
+> **给轨迹打分，而不只是给最终答案打分。** 只看最终答案，会漏掉“结局好但过程危险”的情况，比如 agent 删除后又重建了商品：商品信息最终是有效的，但评价历史已经没了。它还会漏掉碰巧猜对的情况，以及用了 40 次而不是 5 次工具调用的运行。要求路径完全一致又太严格，因为合理的步骤顺序有很多种。应该给结果打分，再加上路径上的不变量和效率预算。
+
+**Measure reliability with repeated trials.** Run each case k times. pass@k is the probability that at least one of k attempts succeeds; it fits settings where a verifier or a person picks the best attempt. pass^k, introduced by tau-bench (Sierra, 2024), is the probability that all k attempts succeed; it fits a production agent that gets one shot per merchant. With independent trials and a per-trial success rate p, pass@k is `1 - (1 - p)^k` and pass^k is `p^k`, so an agent at 90% per trial has a pass^8 of about 43%. From n trials with c successes, estimate a task's pass^k as `C(c, k) / C(n, k)` and average over tasks. Report the noise too: with 50 graded trials and a pass rate near 50%, the 95% confidence interval is about ±14 points, so a 3-point gain on a small set means nothing.
+
+> **用重复试验衡量可靠性。** 每个案例跑 k 次。pass@k 是 k 次尝试中至少一次成功的概率，适用于由校验器或人挑选最佳结果的场景。pass^k 由 tau-bench（Sierra，2024）提出，是 k 次尝试全部成功的概率，适用于每个商家只有一次机会的生产 agent。如果各次试验相互独立、单次成功率为 p，那么 pass@k 是 `1 - (1 - p)^k`，pass^k 是 `p^k`，所以一个单次成功率 90% 的 agent，pass^8 只有约 43%。如果某个任务做了 n 次试验、成功 c 次，就用 `C(c, k) / C(n, k)` 估计它的 pass^k，再对所有任务取平均。还要报告噪声：50 次评分试验、通过率在 50% 左右时，95% 置信区间约为 ±14 个百分点，所以在小评测集上提高 3 个点毫无意义。
+
+**Set ship gates before you look at results.** For example: zero forbidden actions across all trials (safety is a hard gate, not an average), a pass^k target per category, and cost and latency budgets per task, all compared with a baseline such as the previous version. Run the suite on every prompt, tool or model change. Offline evals suit the Message Batches API, at about half the normal price.
+
+> **在看结果之前就定好上线门槛。** 例如：所有试验中禁止操作的次数为零（安全是硬性门槛，不是平均值）、每个类别的 pass^k 目标，以及每个任务的成本和延迟预算，并全部与一个基线（比如上一个版本）比较。每次修改提示词、工具或模型都跑一遍评测。离线评测很适合用 Message Batches API，价格约为正常价格的一半。
+
+**Avoid the common traps.**
+
+> **避开常见陷阱。**
+
+- Leakage: eval cases or near duplicates end up as few-shot examples in the prompt, or the prompt is tuned while staring at test cases. Keep a held-out set and deduplicate examples against it.
+  > 泄漏：评测案例或几乎相同的案例作为 few-shot 示例进入了提示词，或者一边盯着测试案例一边调提示词。保留留出集，并让示例与它去重。
+- Overfitting the prompt: one new rule per failing case raises the score without improving the agent. Fixes should describe behaviour, not case content, and must hold on the held-out set.
+  > 提示词过拟合：每个失败案例加一条新规则，分数上去了，agent 却没有变好。修复应该描述行为而不是案例内容，并且必须在留出集上同样有效。
+- Judge bias and drift: re-calibrate whenever the judge model or the rubric changes.
+  > 评审偏差与漂移：评审模型或评分细则一变，就重新校准。
+- Unrealistic environments: mocks that always succeed instantly. Inject 429s, timeouts and partial failures.
+  > 不真实的环境：模拟接口总是瞬间成功。要注入 429、超时和部分失败。
+- Saturation: when everything passes, the eval tells you nothing. Add harder cases from production failures.
+  > 饱和：所有案例都通过时，评测就不再提供任何信息。从线上故障中补充更难的案例。
+
+</details>
+
+### Follow-ups · 追问
+
+- How many cases and trials do you need before you trust a 3-point improvement?
+  > 需要多少案例和多少次试验，你才会相信一个 3 个点的提升？
+- How would you grade a case that has several valid ways to fix the problem?
+  > 如果一个案例有好几种合理的修复方式，你会怎么打分？
+- How do you keep an LLM judge trustworthy when you upgrade the judge model?
+  > 升级评审模型时，你如何保证 LLM 评审依然可信？
+
+### Vocabulary · 词汇
+
+| English | 中文 |
+| --- | --- |
+| held-out set | 留出集（不用于调优的测试集） |
+| LLM-as-judge | LLM 评审（用大模型当评分者） |
+| rubric | 评分细则 |
+| trajectory | 轨迹（agent 的执行过程） |
+| pass^k drops much faster than pass@1. | pass^k 比 pass@1 下降得快得多。 |
+
+---
+
+<a id="q3"></a>
+
+## 3. The eval score went up, and so did production complaints
+
+**评测分数涨了，线上投诉也涨了** · `Evals & Observability` · `Hard`
+
+### Question · 题目
+
+Your merchant support agent has an offline eval suite of 300 cases. In one change, a teammate shortened the system prompt and switched to a newer model. The eval pass rate went from 82% to 88%, so the change shipped to all merchants on Monday. By Thursday, escalations to human support are up, merchants complain that the agent "gives confident wrong answers about billing" and "keeps asking for information I already gave", and the cost per conversation is higher.
+
+> 你们的商家客服 agent 有一套包含 300 个案例的离线评测。一位同事在同一次改动里缩短了 system prompt，又换成了一个更新的模型。评测通过率从 82% 涨到了 88%，于是这个改动在周一发布给了所有商家。到了周四，转人工客服的升级量上升了，商家抱怨这个 agent “对计费问题自信地给出错误答案”，而且“总是问我已经提供过的信息”，每次对话的成本也更高了。
+
+Explain how this can happen, and design a safer process for shipping prompt and model changes.
+
+> 请解释这是怎么发生的，并设计一套更安全的流程来发布提示词和模型的改动。
+
+<details>
+<summary><b>Answer · 参考答案</b></summary>
+
+**The core idea.** An offline eval is a sample of the world graded by a proxy. A higher score only means the change did better on that sample, by that proxy, in that run. Production complaints mean the sample, the proxy or the measurement was off, and the process let one number decide.
+
+> **核心思路。** 离线评测是用一个代理指标给世界的一个样本打分。分数更高，只说明这次改动在那个样本上、按那个代理指标、在那一次运行中表现更好。线上投诉说明样本、代理指标或测量本身出了偏差，而流程又让一个数字决定了一切。
+
+**The eval was not representative.** The 300 cases were collected months ago and are mostly single-turn and clean. Real conversations are long, and merchants often gave key facts several turns earlier, so "keeps asking for information I already gave" is a failure the suite cannot see. Billing may be a small slice of the suite but a large share of traffic this month, for example around renewals. Traffic also shifts with seasons, features, plans and merchant segments, so a static suite drifts away from production.
+
+> **评测不具有代表性。** 这 300 个案例是几个月前收集的，大多是单轮、干净的对话。真实对话很长，商家往往在好几轮之前就给出了关键信息，所以“总是问我已经提供过的信息”是这套评测根本看不到的失败。计费在评测里可能只占一小部分，在本月的流量里却占很大比例，比如在续费期间。流量也会随着季节、功能、套餐和商家群体而变化，所以一成不变的评测集会逐渐偏离线上。
+
+**The metric missed what merchants care about.** Suppose the suite counts "answered without escalating" as success and uses a lenient LLM judge for correctness. A prompt that makes the model answer more and escalate less raises the score, and fluent, confident, wrong billing answers pass the judge. Merchants then ask for a human themselves, angrier than before. That is Goodhart's law: when a measure becomes a target, it stops being a good measure. Nothing graded whether the agent knew when it did not know.
+
+> **指标漏掉了商家真正在乎的东西。** 假设评测把“没有升级就给出了回答”算作成功，并用一个宽松的 LLM 评审来判断正确性。一个让模型多回答、少升级的提示词会提高分数，而流畅、自信但错误的计费答案也能通过评审。于是商家自己要求转人工，而且火气比之前更大。这就是古德哈特定律（Goodhart's law）：一个指标一旦成为目标，就不再是好指标。没有任何评分项检查 agent 是否知道自己不知道。
+
+**Noise and confounding.** With 300 cases run once, the standard error of a pass rate near 85% is about 2 points, so if you treat the two versions as independent samples, the 95% confidence interval on their difference is roughly ±6 points. A 6-point gain is not clearly real, and nondeterministic runs add more noise; repeated trials and a paired, case-by-case comparison narrow this. On top of that, two changes shipped together. The shorter prompt may have dropped a line that no case tested, such as "always call `get_invoice` before stating an amount", and the new model may write longer replies, think more or use tools differently. Cost per conversation rose because conversations got longer, and cost per resolved case rose further because fewer cases were resolved.
+
+> **噪声与混杂因素。** 300 个案例只跑一次，通过率在 85% 左右时标准误约为 2 个百分点，所以如果把两个版本当作相互独立的样本，它们之间差值的 95% 置信区间约为 ±6 个百分点。6 个点的提升并不能确定是真的，而不确定的运行结果还会带来更多噪声；多次重复试验和逐案例的配对比较可以缩小这个范围。此外，两个改动是一起发布的。更短的提示词可能删掉了一句没有任何案例测试过的话，比如“说出金额之前一定先调用 `get_invoice`”；新模型可能写更长的回复、思考更多，或者以不同的方式使用工具。每次对话的成本上升，是因为对话变长了；每个已解决工单的成本上升得更多，是因为解决的工单变少了。
+
+**First, contain it.** Prompt, tool definitions, model ID and parameters should form one versioned agent config, recorded on every trace, so rollback is a config flip rather than a deploy. Roll back, pull the conversations behind the complaints, label the failure modes and turn them into eval cases before trying again.
+
+> **先止血。** 提示词、工具定义、模型 ID 和参数应该组成一个带版本号的 agent 配置，并记录在每条 trace 上，这样回滚只是切换一下配置，而不是重新部署。先回滚，拉出投诉背后的对话，标注失败模式，把它们变成评测案例，然后再尝试。
+
+**A safer process.**
+
+> **更安全的流程。**
+
+- Change one thing at a time where you can: ship the prompt and the model separately.
+  > 尽量一次只改一样东西：提示词和模型分开发布。
+- Offline regression suite in CI on every config change: several trials per case, results per slice (billing, catalog, ads; single-turn versus multi-turn; language), a paired case-by-case comparison with the current version, a review of every case that flipped from pass to fail, and hard gates on safety invariants. Add multi-turn simulations with a simulated merchant to cover "remembers what I said".
+  > 每次配置变更都在 CI 里跑离线回归评测：每个案例多次试验，按切片给出结果（计费、目录、广告；单轮与多轮；语言），与当前版本逐案例配对比较，审查每一个从通过变成失败的案例，并对安全不变量设置硬性门槛。加入由模拟商家参与的多轮模拟，覆盖“记得我说过的话”这类情况。
+- Shadow traffic: run the candidate on copies of real inputs with side-effecting tools stubbed, show its output to nobody, and grade it against the current version. It works best for first responses, because later turns depend on how the merchant answered the old version.
+  > 影子流量：在真实输入的副本上运行候选版本，带副作用的工具都替换成桩，输出不给任何人看，再按同样的评分方式与当前版本比较。它最适合评估第一条回复，因为之后的轮次取决于商家对旧版本的回应。
+- Canary: route a small, sticky share of merchants to the candidate, compare with the control group, and roll back automatically when a guardrail metric is breached.
+  > 金丝雀发布：把一小部分商家（固定分配）路由到候选版本，与对照组比较，一旦护栏指标被突破就自动回滚。
+- Online metrics: resolution without a human and without repeat contact within a few days, escalation rate and reasons, "had to repeat information" rate, satisfaction, actions later reversed, cost per resolved case, p95 latency and tool error rate.
+  > 线上指标：无需人工、几天内也没有重复来访就解决的比例，升级率及原因，“不得不重复提供信息”的比例，满意度，事后被撤销的操作，每个已解决工单的成本，p95 延迟和工具错误率。
+- Feedback loop: every week, sample escalations and thumbs-down conversations, label them, and add confirmed failures to the suite with their fixtures. Refresh the suite from recent traffic, weight results by how common each category is in production, and re-calibrate the judge against new human labels.
+  > 反馈闭环：每周抽样升级和差评的对话，加以标注，把确认的失败连同它们的 fixture 一起加入评测集。用近期流量更新评测集，按各类别在线上的占比给结果加权，并用新的人工标注重新校准评审。
+
+```go
+// Sticky canary: a merchant always gets the same agent version.
+func agentVersionFor(merchantID string, canaryPercent uint32) string {
+    h := fnv.New32a()
+    h.Write([]byte(merchantID))
+    if h.Sum32()%100 < canaryPercent {
+        return "support-agent@v43"
+    }
+    return "support-agent@v42"
+}
+```
+
+**Why sticky.** Keeping each merchant on one version stops a conversation from changing behaviour halfway, gives clean comparison groups, and keeps prompt caches warm, because caches are tied to the model and the exact prompt prefix.
+
+> **为什么要固定分配。** 让每个商家始终使用同一个版本，可以避免一段对话中途改变行为，得到干净的对比组，还能让提示缓存保持命中，因为缓存与模型和完全相同的提示词前缀绑定。
+
+**Trade-offs.** Shadow traffic doubles inference cost. A canary needs enough volume to detect small changes, so low-volume segments need a longer one. Some online metrics, such as repeat contact, lag by days. Use fast guardrails (error rate, cost, escalation rate) for automatic rollback and slower outcome metrics for the final decision. The goal is not a perfect eval but a loop in which every production failure makes the eval a little more like production.
+
+> **权衡。** 影子流量会让推理成本翻倍。金丝雀需要足够的流量才能发现细微的变化，所以低流量的群体需要更长的金丝雀期。有些线上指标会滞后好几天，比如重复来访。用快速的护栏指标（错误率、成本、升级率）来自动回滚，用较慢的结果指标做最终决定。目标不是一个完美的评测，而是一个闭环：每一次线上故障，都让评测更接近线上一点。
+
+</details>
+
+### Follow-ups · 追问
+
+- How would you detect that the eval set has drifted away from production traffic?
+  > 你会如何发现评测集已经偏离了线上流量？
+- The canary shows lower cost but a slightly higher escalation rate. How do you decide?
+  > 金丝雀版本成本更低，但升级率略高。你怎么做决定？
+- How would you run shadow traffic for an agent whose tools have side effects?
+  > 如果 agent 的工具带有副作用，你会如何运行影子流量？
+
+### Vocabulary · 词汇
+
+| English | 中文 |
+| --- | --- |
+| distribution shift | 分布偏移 |
+| canary release | 金丝雀发布 |
+| shadow traffic | 影子流量 |
+| guardrail metric | 护栏指标 |
+| The eval measured a proxy, not what merchants care about. | 评测衡量的是一个代理指标，而不是商家真正在乎的东西。 |
