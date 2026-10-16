@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 9 个模块、29 道题。
+共 10 个模块、34 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -117,3 +117,17 @@ Five new agent questions: streaming a tool-using chat, long-term memory for merc
 | 3 | RAG | Hard | ["Dresses under $50, not red" returns red dresses at $79](modules/daily-2026-10-16.md#q3) | “50 美元以下、不要红色的连衣裙”却返回了 79 美元的红裙子 |
 | 4 | Multi-agent | Hard | [Two agents keep overwriting each other's catalog edits](modules/daily-2026-10-16.md#q4) | 两个 Agent 不断覆盖彼此对商品目录的修改 |
 | 5 | Agent Loop | Senior | [Your own loop, an SDK runner, an agent framework or a managed platform for a nightly feed audit?](modules/daily-2026-10-16.md#q5) | 夜间 feed 审计 Agent：自己写循环、用 SDK runner、用 Agent 框架，还是用托管平台？ |
+
+## [Daily set · Oct 17 · 每日新题 · 10 月 17 日](modules/daily-2026-10-17.md)
+
+Five new agent questions: designing tool errors the model can recover from, keeping merchants' OAuth tokens away from the model, answering reliably from long contracts, finding a success-rate drop with no deploy, and pausing an agent for hours of human approval.
+
+> 五道新的 Agent 题：设计让模型能够恢复的工具错误、让商家的 OAuth token 远离模型、基于长篇合同可靠地回答问题、排查没有发布却下降的成功率，以及让 Agent 暂停数小时等待人工审批。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Tools & MCP | Medium | [The agent gives up after one 429, or retries the same broken call forever](modules/daily-2026-10-17.md#q1) | Agent 遇到一次 429 就放弃，或者无休止地重试同一个错误调用 |
+| 2 | Safety & Security | Medium | [Where do the merchants' Google and Meta tokens go when an agent calls their APIs?](modules/daily-2026-10-17.md#q2) | Agent 调用商家的 Google 和 Meta API 时，这些 token 应该放在哪里？ |
+| 3 | Context & Memory | Hard | [The agent read a 200-page supplier contract and missed the clause on page 143](modules/daily-2026-10-17.md#q3) | Agent 读了一份 200 页的供应商合同，却漏掉了第 143 页的条款 |
+| 4 | Evals & Observability | Hard | [Task success fell from 91% to 84% overnight, and nobody deployed anything](modules/daily-2026-10-17.md#q4) | 任务成功率一夜之间从 91% 掉到 84%，而没有任何人发布过东西 |
+| 5 | Agent Loop | Senior | [An agent that waits hours for a merchant's approval, then continues safely](modules/daily-2026-10-17.md#q5) | Agent 等待商家审批几个小时后，如何安全地继续执行 |
