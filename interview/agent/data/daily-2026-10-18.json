@@ -1,0 +1,227 @@
+{
+  "id": "daily-2026-10-18",
+  "order": 20261018,
+  "kind": "daily",
+  "title": "Daily set · Oct 18",
+  "title_zh": "每日新题 · 10 月 18 日",
+  "summary": "Five new agent questions: a large overnight copy-generation job on a budget, migrating to a new embedding model, stopping an agent from making promises it is not allowed to make, keeping subagent fan-out under control, and designing a public MCP server for merchants' own assistants.",
+  "summary_zh": "五道新的 Agent 题：在预算内完成一个大型的夜间文案生成任务、迁移到新的 embedding 模型、阻止 Agent 做出它无权做出的承诺、控制子 Agent 的扇出规模，以及为商家自己的助手设计一个公开的 MCP server。",
+  "generatedAt": "2026-10-18T06:54:41+08:00",
+  "questions": [
+    {
+      "id": "agent-daily-20261018-1",
+      "topic": "Production",
+      "difficulty": "Medium",
+      "title": "Ad copy for 50,000 products by tomorrow morning, on a fixed budget",
+      "title_zh": "明早之前为 5 万个商品生成广告文案，而且预算固定",
+      "question": "A large merchant imports 50,000 new products and wants Google Shopping titles and Meta ad descriptions for all of them by the next morning, in English and German. Your first version loops over the products and calls the largest model once per product and language, with a long system prompt of style rules. It is slow, hits rate limits, and the cost estimate is far above budget.\n\nHow would you redesign this job? Estimate the cost before running it, and explain which levers you would pull in which order.",
+      "question_zh": "一个大商家导入了 5 万个新商品，希望明天早上之前为全部商品生成 Google Shopping 标题和 Meta 广告描述，要英文和德文两个版本。你的第一版对商品逐个循环，每个商品每种语言调用一次最大的模型，并带着一段很长的、写满风格规则的系统提示词。它跑得很慢，会撞上限流，成本估算也远远超出预算。\n\n你会如何重新设计这个任务？请在运行之前估算成本，并说明你会按什么顺序使用哪些手段。",
+      "answer": "**The core idea.** This is an offline batch job, not a conversation: nobody is waiting on any single product, every request has the same shape, and the output is checkable. That opens up the cheapest levers: asynchronous batch processing, a stable cached prefix, the smallest model that passes your quality bar, and validation in code instead of more model calls.\n\n**Estimate before you run.** Cost is roughly requests times tokens per request times price per token. Measure the tokens on a sample of 50 products (style rules, product data, output) instead of guessing, then multiply. Two things usually dominate: the repeated system prompt, which is the same in every request, and output length, which you control through the format.\n\n**Levers, free ones first.**\n\n- Batch API: an asynchronous batch endpoint costs about half the normal price in the Claude API, and the discount stacks with caching. Results arrive within a 24-hour window and in any order, so match them by `custom_id`. That fits \"by tomorrow morning\" if you submit early; it does not fit an interactive feature.\n- Prompt caching: put the style rules and examples first, byte-identical in every request, with a cache breakpoint after them, and the product data after that. Within a concurrent batch, cache hits are best-effort, so treat them as a bonus in the estimate.\n- Several products per request: group 10 to 20 similar products into one request with structured output (one object per product ID). The shared prefix is paid once per group, and the model sees consistent examples. Keep groups small enough that a bad response is cheap to redo.\n- Output discipline: ask for exactly the fields you need, with length limits, and no explanations.\n\n**Then the quality trade-offs.** Try a smaller, cheaper model and a lower effort setting on a labelled sample of a few hundred products, scored on what matters: platform length limits, banned words, correct attributes, natural German. Keep the cheapest configuration that passes. A common pattern: the small model drafts everything, and only the items that fail validation go to a larger model.\n\n```go\n// Deterministic checks first: they are free and catch most bad outputs.\nfunc validate(c Copy, p Product, lang string) []string {\n\tvar errs []string\n\tif n := utf8.RuneCountInString(c.Title); n == 0 || n > maxTitleRunes {\n\t\terrs = append(errs, \"title length\")\n\t}\n\tif !strings.Contains(strings.ToLower(c.Title), strings.ToLower(p.Brand)) {\n\t\terrs = append(errs, \"brand missing\")\n\t}\n\tif containsBanned(c.Description, lang) {\n\t\terrs = append(errs, \"banned claim\")\n\t}\n\treturn errs\n}\n```\n\n**Make the job restartable.** Key each item by product ID, language and a hash of the product data plus the prompt version. Skip items that already have valid output, so a rerun only processes failures and changes. Write results to a staging table, validate, then publish to the feed; never push straight from the model to the ad platform.\n\n**Trade-offs.** Batching saves money but gives up speed and turn-by-turn control: a batch request is single-shot, so it suits generation, not a tool-using loop. Bigger groups per request are cheaper but make failures larger and quality less even. A smaller model is cheaper per token but can cost more overall if many items need a second pass, so compare cost per accepted item, not per request.",
+      "answer_zh": "**核心思路。** 这是一个离线批处理任务，而不是对话：没有人在等某一个商品的结果，每个请求的结构都一样，输出也可以检查。这就让你可以用上最便宜的那些手段：异步批处理、稳定且可缓存的前缀、能达到质量要求的最小模型，以及用代码校验代替更多的模型调用。\n\n**先估算再运行。** 成本大致等于请求数乘以每个请求的 token 数，再乘以每个 token 的价格。不要靠猜，而是在 50 个商品的样本上实测 token 数（风格规则、商品数据、输出），然后再乘上去。通常有两部分占大头：每个请求里都一样、反复发送的系统提示词，以及输出长度，而输出长度是可以通过格式来控制的。\n\n**可用的手段，先用不影响质量的。**\n\n- Batch API：在 Claude API 中，异步批处理接口的价格大约是正常价格的一半，而且这个折扣可以和缓存叠加。结果在 24 小时的窗口内返回，并且顺序不固定，所以要用 `custom_id` 来对应。只要尽早提交，就能满足“明天早上之前”的要求；但它不适合交互式功能。\n- Prompt 缓存：把风格规则和示例放在最前面，每个请求里都逐字节相同，在它们之后设置缓存断点，商品数据放在后面。在并发的批处理里，缓存命中只是尽力而为，所以在估算时只把它当作额外的收益。\n- 每个请求处理多个商品：把 10 到 20 个相似的商品合并成一个请求，并使用结构化输出（每个商品 ID 对应一个对象）。共享前缀每组只付一次钱，模型也能看到一致的示例。分组要足够小，这样某个响应出错时重做的代价也很低。\n- 控制输出：只要求你需要的字段，限定长度，并且不要解释。\n\n**再考虑影响质量的取舍。** 在几百个带标注的商品样本上，试用更小、更便宜的模型和更低的 effort 设置，按真正重要的指标打分：平台长度限制、禁用词、属性是否正确、德语是否自然。保留能达标的最便宜配置。常见的模式是：由小模型生成全部初稿，只有校验没通过的条目才交给更大的模型。\n\n```go\n// Deterministic checks first: they are free and catch most bad outputs.\nfunc validate(c Copy, p Product, lang string) []string {\n\tvar errs []string\n\tif n := utf8.RuneCountInString(c.Title); n == 0 || n > maxTitleRunes {\n\t\terrs = append(errs, \"title length\")\n\t}\n\tif !strings.Contains(strings.ToLower(c.Title), strings.ToLower(p.Brand)) {\n\t\terrs = append(errs, \"brand missing\")\n\t}\n\tif containsBanned(c.Description, lang) {\n\t\terrs = append(errs, \"banned claim\")\n\t}\n\treturn errs\n}\n```\n\n**让任务可以重新运行。** 每个条目以商品 ID、语言，以及商品数据加提示词版本的哈希值作为键。已经有有效输出的条目直接跳过，这样重跑时只处理失败的和有变化的条目。结果先写入暂存表，校验通过后再发布到 feed；绝不要把模型输出直接推送到广告平台。\n\n**取舍。** 批处理能省钱，但放弃了速度和逐轮的控制：批处理请求是一次性的，适合生成，不适合需要调用工具的循环。每个请求里的分组越大越便宜，但出错时影响面更大，质量也更不均匀。小模型每个 token 更便宜，但如果很多条目需要第二轮处理，总成本反而可能更高，所以要比较每个通过校验条目的成本，而不是每个请求的成本。",
+      "followups": [
+        "Half the batch results come back after the deadline. What is your fallback?",
+        "How would you build the labelled sample for German copy quality?",
+        "When would per-product requests be better than grouped requests?"
+      ],
+      "followups_zh": [
+        "一半的批处理结果在截止时间之后才返回。你的备用方案是什么？",
+        "你会如何为德语文案质量构建带标注的样本？",
+        "什么时候逐个商品发请求会比分组请求更好？"
+      ],
+      "vocab": [
+        {
+          "en": "batch processing",
+          "zh": "批处理"
+        },
+        {
+          "en": "cost per accepted item",
+          "zh": "每个通过校验条目的成本"
+        },
+        {
+          "en": "staging table",
+          "zh": "暂存表"
+        },
+        {
+          "en": "restartable job",
+          "zh": "可重新运行的任务"
+        },
+        {
+          "en": "Free levers first, quality trade-offs second.",
+          "zh": "先用不影响质量的手段，再考虑影响质量的取舍。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261018-2",
+      "topic": "RAG",
+      "difficulty": "Medium",
+      "title": "Switching to a new embedding model without breaking search",
+      "title_zh": "更换 embedding 模型，同时不让检索出问题",
+      "question": "Your help-center assistant searches 2 million chunks embedded with an older model. A newer multilingual embedding model scores much better on your Chinese and German test queries, so the team wants to switch. A teammate proposes embedding new documents with the new model from today and re-embedding the old ones gradually over the next month.\n\nWhat is wrong with that plan, and how would you migrate safely?",
+      "question_zh": "你们的帮助中心助手在 200 万个用旧模型生成 embedding 的文本块上做检索。一个更新的多语言 embedding 模型在中文和德语测试查询上的得分高得多，所以团队想切换过去。一位同事提议：从今天起，新文档用新模型生成 embedding，旧文档在接下来一个月里逐步重新生成。\n\n这个计划有什么问题？你会如何安全地迁移？",
+      "answer": "**The core idea.** Vectors from two different embedding models live in different spaces. Comparing a query embedded by model B with documents embedded by model A gives meaningless similarity scores, even when the dimensions happen to match. So an index must be built entirely with one model, and the query must be embedded with that same model. A migration is therefore a full rebuild plus a switch, like a database schema migration.\n\n**What breaks in the gradual plan.** During the month, the index contains vectors from two models. Whichever model embeds the query, about half of the documents are compared in the wrong space, so their scores are noise: relevant old articles silently drop out of the results, and nothing errors. You would also be unable to evaluate the new model fairly, because the index is a mix.\n\n**A safe migration, step by step.**\n\n- Build a new index side by side: same chunks, same metadata and tenant fields, new model, and the model name and version recorded on the index.\n- Backfill it with a rate-limited job that is idempotent per chunk (keyed by chunk ID and content hash), so it can stop and resume.\n- Dual-write during the backfill: every new or changed document is embedded with both models and written to both indexes, so the new one does not fall behind.\n- Evaluate offline on your labelled query set (recall at k, MRR, per language), then shadow real traffic: run both indexes, serve the old results, and compare.\n- Switch with an alias or a config flag that changes the index and the query embedder together, keep the old index for a while for rollback, then delete it.\n\n```go\n// Index and query model always change together, so they can never mismatch.\ntype SearchConfig struct {\n\tIndex    string // e.g. \"helpcenter_v2\"\n\tEmbedder string // the model that built that index\n}\n\nfunc (s *Searcher) Search(ctx context.Context, q string) ([]Hit, error) {\n\tcfg := s.cfg.Load() // atomically swapped at cutover\n\tvec, err := s.embed(ctx, cfg.Embedder, q)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\treturn s.store.Query(ctx, cfg.Index, vec)\n}\n```\n\n**Also re-check what depends on scores.** Similarity scores from a new model have a different distribution, so any fixed threshold (\"answer only if the score is above 0.78\"), reranker settings or hybrid-search weights must be re-tuned on the evaluation set. Otherwise the assistant may suddenly refuse too often or answer from weak matches.\n\n**Trade-offs.** Two indexes double storage and write cost during the migration, and backfilling 2 million chunks costs embedding fees and time, so schedule it and watch the rate limits. In return you get a clean comparison, an instant rollback, and no period of silently degraded search.",
+      "answer_zh": "**核心思路。** 两个不同 embedding 模型生成的向量处在不同的空间里。用模型 B 生成的查询向量去和模型 A 生成的文档向量比较，得到的相似度分数毫无意义，即使两者的维度恰好相同也一样。所以一个索引必须完全用同一个模型构建，查询也必须用同一个模型来生成 embedding。因此，这次迁移是一次完整的重建加一次切换，就像数据库的 schema 迁移一样。\n\n**逐步迁移计划会出什么问题。** 在这一个月里，索引中同时存在两个模型的向量。无论用哪个模型生成查询向量，都有大约一半的文档是在错误的空间里比较的，它们的分数就是噪声：相关的旧文章会悄无声息地从结果中消失，而且不会报任何错。你也无法公平地评估新模型，因为索引是混合的。\n\n**安全迁移的步骤。**\n\n- 并行构建一个新索引：相同的文本块、相同的元数据和租户字段，使用新模型，并在索引上记录模型名称和版本。\n- 用一个限速的回填任务填充它，每个文本块的处理都是幂等的（以文本块 ID 和内容哈希为键），可以随时停止和恢复。\n- 回填期间双写：每个新增或修改的文档都用两个模型分别生成 embedding，并写入两个索引，这样新索引不会落后。\n- 先在带标注的查询集上离线评估（前 k 召回率、MRR，按语言拆分），然后用真实流量做影子测试：两个索引都查询，对外仍返回旧索引的结果，并对比两者。\n- 通过别名或配置开关切换，让索引和查询所用的 embedding 模型一起改变；旧索引保留一段时间以便回滚，之后再删除。\n\n```go\n// Index and query model always change together, so they can never mismatch.\ntype SearchConfig struct {\n\tIndex    string // e.g. \"helpcenter_v2\"\n\tEmbedder string // the model that built that index\n}\n\nfunc (s *Searcher) Search(ctx context.Context, q string) ([]Hit, error) {\n\tcfg := s.cfg.Load() // atomically swapped at cutover\n\tvec, err := s.embed(ctx, cfg.Embedder, q)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\treturn s.store.Query(ctx, cfg.Index, vec)\n}\n```\n\n**还要重新检查依赖分数的地方。** 新模型的相似度分数分布不同，所以任何固定阈值（“只有分数高于 0.78 时才回答”）、重排序设置或混合检索的权重，都必须在评测集上重新调整。否则助手可能突然拒答得太多，或者基于很弱的匹配给出回答。\n\n**取舍。** 迁移期间两个索引会让存储和写入成本翻倍，回填 200 万个文本块也要花 embedding 费用和时间，所以要排好计划并注意限流。换来的是干净的对比、可以随时回滚，并且不会有一段检索质量悄悄下降的时期。",
+      "followups": [
+        "The new model needs a different chunk size. How does that change the plan?",
+        "How would you tell whether the shadow comparison shows a real improvement?",
+        "What would you monitor in the first week after the switch?"
+      ],
+      "followups_zh": [
+        "新模型需要不同的分块大小。这会如何改变迁移计划？",
+        "你如何判断影子对比的结果是否代表真实的提升？",
+        "切换后的第一周，你会监控哪些指标？"
+      ],
+      "vocab": [
+        {
+          "en": "embedding space",
+          "zh": "embedding 空间"
+        },
+        {
+          "en": "backfill",
+          "zh": "回填"
+        },
+        {
+          "en": "dual write",
+          "zh": "双写"
+        },
+        {
+          "en": "cutover",
+          "zh": "切换"
+        },
+        {
+          "en": "One index, one embedding model.",
+          "zh": "一个索引，只用一个 embedding 模型。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261018-3",
+      "topic": "Safety & Security",
+      "difficulty": "Hard",
+      "title": "The support agent promised a full refund that the policy does not allow",
+      "title_zh": "客服 Agent 承诺了政策不允许的全额退款",
+      "question": "Your support agent drafts and sends replies to merchants' customers by email. It has read-only tools for orders and the return policy; refunds are done by people. Last week it told a customer \"Don't worry, we'll refund you in full, including shipping\" for an order outside the return window. The customer forwarded the email and the merchant had to honour it.\n\nThe agent had no refund tool, yet it still made a commitment. How would you prevent this class of failure?",
+      "question_zh": "你们的客服 Agent 会起草回复，并通过邮件发给商家的顾客。它只有查询订单和退货政策的只读工具；退款由人工处理。上周，对于一个已经超出退货期限的订单，它告诉顾客“别担心，我们会全额退款，包括运费”。顾客转发了这封邮件，商家只好兑现。\n\n这个 Agent 根本没有退款工具，却还是做出了承诺。你会如何防止这类问题？",
+      "answer": "**The core idea.** Words are actions too. Removing the refund tool controlled what the agent can do, but its messages to customers can still create obligations. So treat outgoing messages like any side-effecting action: decide what the agent is allowed to promise, enforce it in code before sending, and route the rest to people.\n\n**Why it happened.** The model wants to be helpful, the customer was upset, and nothing in the loop distinguished \"explain the policy\" from \"grant an exception\". The return window was in a tool result, but nothing checked that the draft was consistent with it. And the message went straight out with no gate.\n\n**Layer 1: make commitments structured.** Ask the agent to produce the reply plus a structured list of commitments it makes, using an enum of allowed types such as `explain_policy`, `send_return_label`, `escalate_to_human`. Anything outside the list, such as a refund, discount or compensation, is not allowed in the text; if the case seems to deserve one, the agent must choose `escalate_to_human` and say a person will review it.\n\n```json\n{\n  \"reply\": \"I'm sorry the shoes didn't fit. Your order is outside our 30-day return window, so I've asked our team to review your request personally. You'll hear from them within one business day.\",\n  \"commitments\": [{\"type\": \"escalate_to_human\", \"reason\": \"return requested 41 days after delivery\"}],\n  \"facts_used\": [{\"source\": \"get_order\", \"field\": \"delivered_at\"}, {\"source\": \"get_return_policy\", \"field\": \"window_days\"}]\n}\n```\n\n**Layer 2: check the draft in code before sending.** Deterministic checks compare the declared commitments with policy facts (window, order status, amounts) taken from your systems. A classifier or a second model call then reads the reply text and flags any promise, money amount or date that is not backed by an allowed commitment. If the text and the structured commitments disagree, the message does not go out.\n\n**Layer 3: graduated autonomy.** Low-risk replies (order status, how to return within the window) can be sent automatically once they pass the checks. Replies involving exceptions, money, legal topics or angry customers become drafts for a human to approve. Start with more drafts and widen auto-send as the measured error rate stays low.\n\n**Layer 4: tell the model the boundary, and give it a good alternative.** The system prompt should state what the agent may and may not promise, and model the right move: acknowledge, explain, escalate. Refusing flatly makes customers angrier; offering a human review is both safe and kind.\n\n**Measure it.** Build a test set from real hard cases: out-of-window returns, damaged goods, threats to leave reviews, and customers who quote a promise they claim another agent made. Run it in CI and assert that no unapproved commitment appears. In production, sample sent replies for review and track the escalation rate, so tightening the rules does not quietly push everything to humans.\n\n**Trade-offs.** More checks add latency and some false alarms, and drafts cost human time. But a single wrong promise in writing can cost real money and trust, so concentrate the strictness on money and commitments and keep plain informational replies fast.",
+      "answer_zh": "**核心思路。** 说出去的话本身也是一种行动。去掉退款工具，限制的是 Agent 能做的事，但它发给顾客的消息仍然可能产生义务。所以要像对待任何有副作用的操作一样对待外发消息：明确 Agent 可以承诺什么，在发送前用代码强制检查，其余的交给人处理。\n\n**为什么会发生。** 模型想要提供帮助，顾客又很不满，而整个流程中没有任何东西区分“解释政策”和“破例处理”。退货期限明明就在工具返回的结果里，但没有任何检查去确认草稿和它是否一致。而且这封邮件没有经过任何关卡就直接发了出去。\n\n**第一层：把承诺结构化。** 让 Agent 在输出回复的同时，给出一个结构化的承诺列表，承诺类型从允许的枚举中选择，比如 `explain_policy`、`send_return_label`、`escalate_to_human`。列表之外的任何承诺，比如退款、折扣或补偿，都不允许出现在正文里；如果这个案例看起来值得这样处理，Agent 必须选择 `escalate_to_human`，并说明会有人来审核。\n\n```json\n{\n  \"reply\": \"I'm sorry the shoes didn't fit. Your order is outside our 30-day return window, so I've asked our team to review your request personally. You'll hear from them within one business day.\",\n  \"commitments\": [{\"type\": \"escalate_to_human\", \"reason\": \"return requested 41 days after delivery\"}],\n  \"facts_used\": [{\"source\": \"get_order\", \"field\": \"delivered_at\"}, {\"source\": \"get_return_policy\", \"field\": \"window_days\"}]\n}\n```\n\n**第二层：发送前用代码检查草稿。** 确定性检查把声明的承诺与从你们系统中取得的政策事实（期限、订单状态、金额）进行比对。然后由一个分类器或第二次模型调用来阅读回复正文，标出任何没有被允许的承诺所支撑的许诺、金额或日期。如果正文与结构化的承诺不一致，这封邮件就不会发出。\n\n**第三层：分级的自主权。** 低风险的回复（订单状态、在期限内如何退货）通过检查后可以自动发送。涉及破例、金钱、法律话题或者情绪激动的顾客的回复，则作为草稿交给人审批。一开始多走草稿审批，随着实测的错误率持续保持在低位，再逐步扩大自动发送的范围。\n\n**第四层：告诉模型边界，并给它一个好的替代做法。** 系统提示词要写清楚 Agent 可以承诺什么、不能承诺什么，并示范正确的做法：表示理解、解释原因、升级处理。生硬地拒绝会让顾客更生气；提出由人工复核，既安全又体贴。\n\n**度量它。** 用真实的疑难案例构建测试集：超出期限的退货、商品损坏、威胁要给差评，以及声称另一位客服曾经做过某个承诺的顾客。在 CI 中运行这些测试，并断言不会出现未经批准的承诺。在线上，抽样审核已发送的回复，并跟踪升级到人工的比例，避免规则收紧之后，所有问题都被悄悄推给了人工。\n\n**取舍。** 检查越多，延迟越高，误报也会增加，草稿审批还要耗费人力。但一句写在邮件里的错误承诺，就可能造成真金白银的损失和信任的流失，所以要把严格的检查集中在金钱和承诺上，让单纯提供信息的回复保持快速。",
+      "followups": [
+        "A customer pastes a fake \"previous agent promised me a refund\" message. How should the agent respond?",
+        "How would you build the classifier that detects promises in free text?",
+        "Which replies would you allow to be sent without any human review, and why?"
+      ],
+      "followups_zh": [
+        "顾客贴出一段伪造的“之前的客服答应给我退款”的消息。Agent 应该如何回应？",
+        "你会如何构建一个从自由文本中识别承诺的分类器？",
+        "你会允许哪些回复完全不经人工审核就发送？为什么？"
+      ],
+      "vocab": [
+        {
+          "en": "commitment",
+          "zh": "承诺"
+        },
+        {
+          "en": "pre-send check",
+          "zh": "发送前检查"
+        },
+        {
+          "en": "graduated autonomy",
+          "zh": "分级的自主权"
+        },
+        {
+          "en": "escalate to a human",
+          "zh": "升级到人工"
+        },
+        {
+          "en": "Words are actions too.",
+          "zh": "说出去的话本身也是一种行动。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261018-4",
+      "topic": "Multi-agent",
+      "difficulty": "Hard",
+      "title": "\"Optimize all my campaigns\" turned into 300 subagents and a huge bill",
+      "title_zh": "一句“优化我所有的广告系列”变成了 300 个子 Agent 和一张巨额账单",
+      "question": "Your orchestrator agent can start subagents with a `delegate(task)` tool. A merchant with 120 campaigns typed \"Optimize all my campaigns\". The orchestrator created one subagent per campaign; several of those split their work further, and some subagents delegated again. The run started about 300 agents, took two hours, and its model bill was larger than the merchant's monthly subscription. Most subagents fetched the same account-level reports.\n\nHow would you keep delegation under control without losing its benefits?",
+      "question_zh": "你们的编排 Agent 可以通过 `delegate(task)` 工具启动子 Agent。一个拥有 120 个广告系列的商家输入了“优化我所有的广告系列”。编排 Agent 为每个广告系列创建了一个子 Agent；其中几个又把自己的工作继续拆分，还有些子 Agent 再次进行了委派。这次运行一共启动了大约 300 个 Agent，耗时两个小时，模型费用比这个商家一个月的订阅费还高。大多数子 Agent 拉取的都是同样的账户级报表。\n\n你会如何控制委派，同时又不丢掉它带来的好处？",
+      "answer": "**The core idea.** Delegation multiplies cost: every subagent pays for its own instructions, tools and exploration, and multi-agent runs are known to use many times the tokens of a single chat. An open-ended request plus an unbounded `delegate` tool is like a recursive function with no base case and no memory limit. The fix is the same as in any job system: budgets, limits on depth and width, shared caches, and a plan that is checked before it runs.\n\n**Fix 1: scope the request before fanning out.** \"Optimize all my campaigns\" is vague. First do cheap, deterministic triage in code: pull account metrics once, find the campaigns that are actually underperforming or overspending, and group them by problem type. Then confirm the scope with the merchant: \"18 campaigns look worth changing, mainly because of low ROAS on Meta. Shall I look at those?\" Often that is 15 subtasks instead of 120.\n\n**Fix 2: hard limits in the harness, not the prompt.**\n\n- Depth: subagents cannot delegate, or only one level down.\n- Width: a maximum number of concurrent and total subagents per run.\n- Budget: a token or cost budget per run, split across subtasks, that the harness enforces. When it is spent, the run stops starting new work and summarizes what it has.\n- Time: a deadline per subagent and per run.\n\n```go\nfunc (h *Harness) Delegate(ctx context.Context, run *Run, parent *Agent, task Task) (Result, error) {\n\tswitch {\n\tcase parent.Depth >= h.MaxDepth:\n\t\treturn Result{}, toolError(\"delegation depth limit reached; do this task yourself\")\n\tcase run.Started >= h.MaxSubagents:\n\t\treturn Result{}, toolError(\"subagent limit reached for this run; summarize what you have\")\n\tcase run.Budget.Remaining() < task.EstimatedCost:\n\t\treturn Result{}, toolError(\"budget too low for another subagent\")\n\t}\n\trun.Started++\n\treturn h.runSubagent(ctx, run, parent.Depth+1, task)\n}\n```\n\n**Fix 3: share what subagents read.** Fetch account-level data once in the orchestrator, or behind a tool cache keyed by merchant, report and date range, and pass references to subagents instead of having each one call the ad platform. This cuts cost and also protects your ad-platform rate limits.\n\n**Fix 4: plan, estimate, approve.** For large requests, have the orchestrator produce a plan with the number of subtasks and an estimated cost, computed by the harness from past runs. Plans above a threshold need the merchant's or an operator's approval before any subagent starts. Show progress and allow cancelling mid-run.\n\n**Fix 5: make subagents cheaper where it is safe.** Well-scoped analysis tasks can run on a smaller model or at lower effort, while the orchestrator keeps the stronger model for planning and the final recommendation. Measure on your eval set that quality holds.\n\n**Trade-offs.** Strict limits can cut off a run that genuinely needed more work; return a partial result that clearly says what was not covered, rather than failing silently. Triage in code can miss unusual problems, so let the merchant ask for a deeper pass on specific campaigns. Track cost per completed request per merchant, and alert on outliers.",
+      "answer_zh": "**核心思路。** 委派会成倍放大成本：每个子 Agent 都要为它自己的指令、工具和探索过程付费，而多 Agent 运行消耗的 token 是单次对话的好多倍，这一点已经广为人知。一个开放式的请求，加上一个不受限制的 `delegate` 工具，就像一个没有终止条件、也没有内存上限的递归函数。解决办法和任何任务系统一样：预算、对深度和宽度的限制、共享缓存，以及在执行前经过检查的计划。\n\n**修复一：先确定范围，再扇出。** “优化我所有的广告系列”是一个模糊的请求。先用代码做低成本的确定性分诊：一次性拉取账户指标，找出确实表现不佳或超支的广告系列，再按问题类型分组。然后和商家确认范围：“有 18 个广告系列看起来值得调整，主要是 Meta 上的 ROAS 偏低。要我看看这些吗？”这样往往只需要 15 个子任务，而不是 120 个。\n\n**修复二：在 harness 里设置硬性限制，而不是写在提示词里。**\n\n- 深度：子 Agent 不能再委派，或者最多只能再往下委派一层。\n- 宽度：每次运行中并发和总计子 Agent 数量的上限。\n- 预算：每次运行有一个由 harness 强制执行的 token 或费用预算，并分配到各个子任务。预算用完后，这次运行就不再启动新的工作，而是总结已经得到的结果。\n- 时间：每个子 Agent 和每次运行都有截止时间。\n\n```go\nfunc (h *Harness) Delegate(ctx context.Context, run *Run, parent *Agent, task Task) (Result, error) {\n\tswitch {\n\tcase parent.Depth >= h.MaxDepth:\n\t\treturn Result{}, toolError(\"delegation depth limit reached; do this task yourself\")\n\tcase run.Started >= h.MaxSubagents:\n\t\treturn Result{}, toolError(\"subagent limit reached for this run; summarize what you have\")\n\tcase run.Budget.Remaining() < task.EstimatedCost:\n\t\treturn Result{}, toolError(\"budget too low for another subagent\")\n\t}\n\trun.Started++\n\treturn h.runSubagent(ctx, run, parent.Depth+1, task)\n}\n```\n\n**修复三：共享子 Agent 读取的数据。** 账户级数据在编排 Agent 里只拉取一次，或者放在一个以商家、报表和日期范围为键的工具缓存后面，把引用传给子 Agent，而不是让每个子 Agent 都去调用广告平台。这既能降低成本，也能保护你们在广告平台上的限流额度。\n\n**修复四：先计划、估算，再审批。** 对于大型请求，让编排 Agent 先产出一个计划，包括子任务数量和估算成本，成本由 harness 根据过往运行数据计算。超过阈值的计划，需要商家或运维人员批准后才能启动任何子 Agent。运行过程中要展示进度，并允许中途取消。\n\n**修复五：在安全的前提下让子 Agent 更便宜。** 范围明确的分析任务可以用更小的模型或更低的 effort 运行，编排 Agent 则保留更强的模型用于规划和最终建议。要在评测集上确认质量没有下降。\n\n**取舍。** 严格的限制可能会截断一个确实需要更多工作的运行；这时要返回部分结果，并清楚说明哪些部分没有覆盖，而不是悄无声息地失败。用代码分诊可能会漏掉少见的问题，所以要允许商家对特定的广告系列要求更深入的分析。按商家跟踪每个已完成请求的成本，并对异常值告警。",
+      "followups": [
+        "How would you estimate the cost of a plan before running it?",
+        "Should the budget be per merchant, per run, or both? Why?",
+        "A subagent hits its budget halfway through. What should the orchestrator do with its partial result?"
+      ],
+      "followups_zh": [
+        "你会如何在执行之前估算一个计划的成本？",
+        "预算应该按商家设置、按运行设置，还是两者都要？为什么？",
+        "某个子 Agent 做到一半就用完了预算。编排 Agent 应该如何处理它的部分结果？"
+      ],
+      "vocab": [
+        {
+          "en": "fan-out",
+          "zh": "扇出（把任务分发给多个执行者）"
+        },
+        {
+          "en": "delegation depth",
+          "zh": "委派深度"
+        },
+        {
+          "en": "run budget",
+          "zh": "运行预算"
+        },
+        {
+          "en": "triage",
+          "zh": "分诊（先筛选出值得处理的部分）"
+        },
+        {
+          "en": "Delegation multiplies cost; budget it like any other resource.",
+          "zh": "委派会成倍放大成本；要像对待其他资源一样为它设预算。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261018-5",
+      "topic": "Tools & MCP",
+      "difficulty": "Senior",
+      "title": "Letting merchants' own AI assistants manage their store through your MCP server",
+      "title_zh": "让商家自己的 AI 助手通过你们的 MCP server 管理店铺",
+      "question": "Merchants increasingly use their own AI assistants, such as Claude and others, and ask you for a way to let those assistants manage their store: check orders, update products, read ad performance. Product wants to ship a public, remote MCP server.\n\nDesign it. Cover authentication and authorization, tool design for clients you do not control, safety for write actions, and how you operate and evolve it.",
+      "question_zh": "越来越多的商家在使用自己的 AI 助手，比如 Claude 和其他产品，他们希望你们提供一种方式，让这些助手能管理他们的店铺：查看订单、更新商品、读取广告效果。产品团队想推出一个公开的远程 MCP server。\n\n请设计它。内容包括身份认证与授权、面向你无法控制的客户端如何设计工具、写操作的安全，以及如何运维和演进它。",
+      "answer": "**The core idea.** A public MCP server is a public API whose caller is a model you did not build, running in an application you do not control, on behalf of a merchant you must authenticate. Everything you know about public APIs still applies (auth, scopes, rate limits, versioning, audit). On top of that, the tool descriptions are prompts for unknown models, and anything your tools return may be read and acted on by an agent that also holds other tools.\n\n**Transport and auth.** Use the Streamable HTTP transport for a remote server, and the OAuth-based authorization that MCP defines for remote servers: the merchant signs in to your platform in a browser, sees which assistant is asking for which permissions, and approves. The client then holds a token scoped to that one merchant. Never accept a merchant ID from tool arguments; derive it from the token, exactly as you would in a REST API.\n\n**Scopes that match risk.** Offer separate scopes such as `orders:read`, `products:write`, `ads:read`, and let merchants grant read-only access by default. Keep some actions out of MCP entirely at first: refunds, payouts, deleting products, changing ad budgets. Add them later behind extra confirmation, if at all.\n\n**Tool design for unknown clients.** You cannot tune the prompt on the other side, so the tools must explain themselves:\n\n- A small set of task-shaped tools (`search_orders`, `get_product`, `update_product_fields`) rather than a mirror of every REST endpoint, because every tool description takes up space in the client's context.\n- Descriptions that say when to use each tool, with enums, units and examples, and annotations or naming that make read-only tools obviously read-only.\n- Compact, paginated results with stable IDs, and errors that tell the model how to recover.\n\n**Write safety: assume the client is fooled sometimes.** The assistant on the other side may be reading a malicious email or web page while it holds your tools. So validate every write server-side against business rules, cap the blast radius (rate limits per merchant and per tool, maximum items changed per call), support a dry-run mode that returns the diff, and make writes idempotent with a client-supplied key. Keep an audit log the merchant can see, with one-click undo for reversible changes.\n\n**Treat your own outputs as a risk to others.** Order notes, product descriptions and customer messages are written by third parties and may contain injected instructions. Return them as clearly labelled data fields, never inside text that reads like guidance to the model, and consider omitting free text the task does not need.\n\n```json\n{\n  \"order_id\": \"o_88231\",\n  \"status\": \"delivered\",\n  \"total\": {\"amount\": \"59.00\", \"currency\": \"EUR\"},\n  \"customer_note\": {\"untrusted_text\": \"Please leave at the door\"}\n}\n```\n\n**Operate and evolve it.** Version tool names and schemas carefully: changing a description changes model behaviour for every client, so test changes against an eval suite of real tasks run through more than one assistant. Monitor per-client error rates and unusual write patterns, let merchants revoke access instantly, and publish a changelog.\n\n**Trade-offs.** A small, safe tool set disappoints power users at first, but every tool you add is a permanent support and security commitment. Start read-heavy, learn from real usage, and add write tools one at a time behind scopes, limits and audit.",
+      "answer_zh": "**核心思路。** 公开的 MCP server 就是一个公开 API，只不过调用方是一个不由你构建的模型，运行在一个你无法控制的应用里，代表一个你必须认证身份的商家。你对公开 API 的所有认识依然适用（认证、权限范围、限流、版本管理、审计）。除此之外，工具描述就是写给未知模型的提示词，而你的工具返回的任何内容，都可能被一个同时持有其他工具的 Agent 读取并据此行动。\n\n**传输与认证。** 远程 server 使用 Streamable HTTP 传输，以及 MCP 为远程 server 定义的基于 OAuth 的授权：商家在浏览器里登录你们的平台，看到是哪个助手在申请哪些权限，然后批准。之后客户端持有一个只属于这个商家的 token。绝不要从工具参数中接收商家 ID，而要像在 REST API 中那样，从 token 中推导出来。\n\n**与风险相匹配的权限范围。** 提供彼此独立的权限范围，比如 `orders:read`、`products:write`、`ads:read`，并让商家默认只授予只读权限。一开始就把某些操作完全排除在 MCP 之外：退款、提现、删除商品、修改广告预算。之后如果要加，也要放在额外的确认步骤之后。\n\n**面向未知客户端的工具设计。** 你无法调整对方那一侧的提示词，所以工具必须能自己说清楚：\n\n- 提供一小组以任务为单位的工具（`search_orders`、`get_product`、`update_product_fields`），而不是把每个 REST 接口都照搬一遍，因为每个工具描述都会占用客户端的上下文空间。\n- 描述里写清楚每个工具什么时候使用，附上枚举值、单位和示例，并通过注解或命名让只读工具一眼就能看出是只读的。\n- 返回紧凑、分页的结果，带稳定的 ID；错误信息要告诉模型如何恢复。\n\n**写操作的安全：假设客户端有时会被骗。** 对方那一侧的助手在持有你们工具的同时，可能正在阅读一封恶意邮件或一个恶意网页。所以每个写操作都要在服务端按业务规则校验，限制影响范围（按商家和工具限流、每次调用最多修改的条目数），支持返回差异的试运行模式，并通过客户端提供的键让写操作幂等。保留一份商家可以查看的审计日志，可逆的修改支持一键撤销。\n\n**把你自己返回的内容也视为对他人的风险。** 订单备注、商品描述和顾客消息都是第三方写的，可能包含注入的指令。把它们作为清楚标注的数据字段返回，绝不要放在读起来像是给模型的指导的文字里；任务用不到的自由文本，可以考虑干脆不返回。\n\n```json\n{\n  \"order_id\": \"o_88231\",\n  \"status\": \"delivered\",\n  \"total\": {\"amount\": \"59.00\", \"currency\": \"EUR\"},\n  \"customer_note\": {\"untrusted_text\": \"Please leave at the door\"}\n}\n```\n\n**运维与演进。** 对工具名称和 schema 做审慎的版本管理：改一个描述，就会改变所有客户端里模型的行为，所以要用一套由真实任务组成、并在不止一个助手上运行的评测套件来测试改动。按客户端监控错误率和异常的写入模式，让商家能够随时撤销授权，并发布变更日志。\n\n**取舍。** 一套小而安全的工具一开始会让重度用户失望，但你加的每一个工具都是一份长期的支持和安全承诺。先以读操作为主，从真实使用中学习，再在权限范围、限流和审计的保护下，一次一个地加入写操作工具。",
+      "followups": [
+        "How would you test that your tool descriptions work well with assistants you do not control?",
+        "A merchant reports that \"the AI\" changed 2,000 product prices. How do you investigate and undo it?",
+        "Would you ever expose refunds over MCP? Under what conditions?"
+      ],
+      "followups_zh": [
+        "你会如何测试你们的工具描述能在你无法控制的助手上良好工作？",
+        "商家反馈说“AI”改了 2000 个商品价格。你如何调查并撤销？",
+        "你会不会通过 MCP 开放退款功能？在什么条件下？"
+      ],
+      "vocab": [
+        {
+          "en": "remote MCP server",
+          "zh": "远程 MCP server"
+        },
+        {
+          "en": "OAuth scope",
+          "zh": "OAuth 权限范围"
+        },
+        {
+          "en": "dry run",
+          "zh": "试运行"
+        },
+        {
+          "en": "audit log",
+          "zh": "审计日志"
+        },
+        {
+          "en": "Every tool you publish is a permanent commitment.",
+          "zh": "你发布的每一个工具都是一份长期的承诺。"
+        }
+      ]
+    }
+  ]
+}

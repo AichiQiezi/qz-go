@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 10 个模块、34 道题。
+共 11 个模块、39 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -131,3 +131,17 @@ Five new agent questions: designing tool errors the model can recover from, keep
 | 3 | Context & Memory | Hard | [The agent read a 200-page supplier contract and missed the clause on page 143](modules/daily-2026-10-17.md#q3) | Agent 读了一份 200 页的供应商合同，却漏掉了第 143 页的条款 |
 | 4 | Evals & Observability | Hard | [Task success fell from 91% to 84% overnight, and nobody deployed anything](modules/daily-2026-10-17.md#q4) | 任务成功率一夜之间从 91% 掉到 84%，而没有任何人发布过东西 |
 | 5 | Agent Loop | Senior | [An agent that waits hours for a merchant's approval, then continues safely](modules/daily-2026-10-17.md#q5) | Agent 等待商家审批几个小时后，如何安全地继续执行 |
+
+## [Daily set · Oct 18 · 每日新题 · 10 月 18 日](modules/daily-2026-10-18.md)
+
+Five new agent questions: a large overnight copy-generation job on a budget, migrating to a new embedding model, stopping an agent from making promises it is not allowed to make, keeping subagent fan-out under control, and designing a public MCP server for merchants' own assistants.
+
+> 五道新的 Agent 题：在预算内完成一个大型的夜间文案生成任务、迁移到新的 embedding 模型、阻止 Agent 做出它无权做出的承诺、控制子 Agent 的扇出规模，以及为商家自己的助手设计一个公开的 MCP server。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Production | Medium | [Ad copy for 50,000 products by tomorrow morning, on a fixed budget](modules/daily-2026-10-18.md#q1) | 明早之前为 5 万个商品生成广告文案，而且预算固定 |
+| 2 | RAG | Medium | [Switching to a new embedding model without breaking search](modules/daily-2026-10-18.md#q2) | 更换 embedding 模型，同时不让检索出问题 |
+| 3 | Safety & Security | Hard | [The support agent promised a full refund that the policy does not allow](modules/daily-2026-10-18.md#q3) | 客服 Agent 承诺了政策不允许的全额退款 |
+| 4 | Multi-agent | Hard | ["Optimize all my campaigns" turned into 300 subagents and a huge bill](modules/daily-2026-10-18.md#q4) | 一句“优化我所有的广告系列”变成了 300 个子 Agent 和一张巨额账单 |
+| 5 | Tools & MCP | Senior | [Letting merchants' own AI assistants manage their store through your MCP server](modules/daily-2026-10-18.md#q5) | 让商家自己的 AI 助手通过你们的 MCP server 管理店铺 |
