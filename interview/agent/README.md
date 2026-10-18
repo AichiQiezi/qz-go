@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 11 个模块、39 道题。
+共 12 个模块、44 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -145,3 +145,17 @@ Five new agent questions: a large overnight copy-generation job on a budget, mig
 | 3 | Safety & Security | Hard | [The support agent promised a full refund that the policy does not allow](modules/daily-2026-10-18.md#q3) | 客服 Agent 承诺了政策不允许的全额退款 |
 | 4 | Multi-agent | Hard | ["Optimize all my campaigns" turned into 300 subagents and a huge bill](modules/daily-2026-10-18.md#q4) | 一句“优化我所有的广告系列”变成了 300 个子 Agent 和一张巨额账单 |
 | 5 | Tools & MCP | Senior | [Letting merchants' own AI assistants manage their store through your MCP server](modules/daily-2026-10-18.md#q5) | 让商家自己的 AI 助手通过你们的 MCP server 管理店铺 |
+
+## [Daily set · Oct 19 · 每日新题 · 10 月 19 日](modules/daily-2026-10-19.md)
+
+Five new agent questions: getting parallel tool calls to happen, reading a close prompt comparison correctly, safe and correct text-to-SQL, migrating agents to a newer model, and designing a shared tracing and evaluation platform for many teams.
+
+> 五道新的 Agent 题：让并行工具调用真正发生、正确解读一次势均力敌的提示词对比、安全且正确的文本转 SQL、把 Agent 迁移到更新的模型，以及为多个团队设计共享的追踪与评测平台。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Agent Loop | Medium | [The agent fetches six independent reports one at a time, in six turns](modules/daily-2026-10-19.md#q1) | Agent 把六份互不相关的报表逐个拉取，用了六轮 |
+| 2 | Evals & Observability | Medium | [Prompt B beat prompt A 52 to 48 in an LLM-judged comparison. Ship it?](modules/daily-2026-10-19.md#q2) | 在 LLM 评审的对比中，提示词 B 以 52 比 48 胜过提示词 A。要上线吗？ |
+| 3 | RAG | Hard | [Letting the agent answer "which of my products..." questions with SQL](modules/daily-2026-10-19.md#q3) | 让 Agent 用 SQL 回答“我的哪些商品……”这类问题 |
+| 4 | Production | Hard | [Moving every agent to a newer model without surprising 3,000 merchants](modules/daily-2026-10-19.md#q4) | 把所有 Agent 迁移到更新的模型，同时不让 3000 个商家感到意外 |
+| 5 | Evals & Observability | Senior | [Twenty teams build agents. Design the shared tracing and evaluation platform](modules/daily-2026-10-19.md#q5) | 二十个团队都在构建 Agent，请设计共享的追踪与评测平台 |

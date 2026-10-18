@@ -1,0 +1,227 @@
+{
+  "id": "daily-2026-10-19",
+  "order": 20261019,
+  "kind": "daily",
+  "title": "Daily set · Oct 19",
+  "title_zh": "每日新题 · 10 月 19 日",
+  "summary": "Five new agent questions: getting parallel tool calls to happen, reading a close prompt comparison correctly, safe and correct text-to-SQL, migrating agents to a newer model, and designing a shared tracing and evaluation platform for many teams.",
+  "summary_zh": "五道新的 Agent 题：让并行工具调用真正发生、正确解读一次势均力敌的提示词对比、安全且正确的文本转 SQL、把 Agent 迁移到更新的模型，以及为多个团队设计共享的追踪与评测平台。",
+  "generatedAt": "2026-10-19T06:54:46+08:00",
+  "questions": [
+    {
+      "id": "agent-daily-20261019-1",
+      "topic": "Agent Loop",
+      "difficulty": "Medium",
+      "title": "The agent fetches six independent reports one at a time, in six turns",
+      "title_zh": "Agent 把六份互不相关的报表逐个拉取，用了六轮",
+      "question": "Your ad-performance agent answers \"How did my campaigns do last week?\" by calling `get_report` for Google, Meta and TikTok, for spend and for conversions: six independent calls. Traces show six model turns, one tool call each, and about 40 seconds per answer. The model is capable of requesting several tools at once, so why does this happen, and how do you fix it?",
+      "question_zh": "你们的广告效果 Agent 回答“我的广告系列上周表现如何？”时，会针对 Google、Meta 和 TikTok，分别为花费和转化调用 `get_report`：一共六个互不依赖的调用。链路追踪显示有六轮模型调用，每轮一个工具调用，每个回答大约要 40 秒。模型本身能够一次请求多个工具，那为什么会这样？你会怎么修？",
+      "answer": "**The core idea.** One model response can contain several `tool_use` blocks, and independent calls can then run concurrently, so six lookups cost one model turn instead of six. Parallel tool use is on by default in the Claude API, but whether the model actually uses it depends on how your harness answers and on how you describe the tools.\n\n**The usual causes.**\n\n- The harness splits results: when a response has several tool calls, it sends each `tool_result` back in a separate user message. That teaches the model, through the conversation history, that one call per turn is the pattern, and it stops making parallel calls.\n- Parallel calls are switched off: the request sets `disable_parallel_tool_use: true`, often copied from an old example.\n- The harness runs only the first `tool_use` block and ignores the rest, so the model learns that extra calls are wasted.\n- Nothing tells the model that the calls are independent, and the system prompt says \"call one tool at a time and check the result\".\n\n**The fix in the harness.** Execute every `tool_use` block in a response, concurrently when that is safe, and return all the `tool_result` blocks together in a single user message, each with its matching `tool_use_id`. A failed call still gets a result, with `is_error: true`; never drop it, because every `tool_use` needs a matching result.\n\n```go\nresults := make([]ToolResult, len(calls))\nvar wg sync.WaitGroup\nfor i, c := range calls {\n\twg.Add(1)\n\tgo func() {\n\t\tdefer wg.Done()\n\t\tout, err := h.run(ctx, c) // read-only tools run concurrently; writes go through a serial path\n\t\tresults[i] = ToolResult{ToolUseID: c.ID, Content: out, IsError: err != nil}\n\t}()\n}\nwg.Wait()\nmsgs = append(msgs, UserMessage(results...)) // one message carrying every result\n```\n\n**Help the model see independence.** Say in the system prompt that independent lookups should be requested together, and design tools so that independence is obvious: the six reports differ only by arguments. Often an even better fix is a batch-shaped tool, such as `get_reports([{platform, metric}])`, which turns six calls into one and lets your backend fetch them concurrently.\n\n**Know when not to parallelize.** Calls that depend on each other (find the campaign, then read its budget) must stay sequential. Writes need care: running two updates to the same product concurrently can race, so route side-effecting tools through a serial or locked path even when they arrive in one response. Also respect downstream rate limits with a concurrency cap per platform.\n\n**Measure it.** Track tool calls per model turn and turns per task in your traces. After the fix, the weekly-report question should take one or two turns, and latency should drop to roughly the slowest single report plus two model calls.",
+      "answer_zh": "**核心思路。** 一次模型响应可以包含多个 `tool_use` 块，互不依赖的调用随后就能并发执行，于是六次查询只需要一轮模型调用，而不是六轮。Claude API 默认开启并行工具调用，但模型实际会不会这么做，取决于你的 harness 怎样回传结果，以及你怎样描述这些工具。\n\n**常见原因。**\n\n- harness 把结果拆开回传：当一个响应里有多个工具调用时，它把每个 `tool_result` 放在单独的 user 消息里发回去。这会通过对话历史“教会”模型每轮只调用一次才是常态，于是它不再发起并行调用。\n- 并行调用被关掉了：请求里设置了 `disable_parallel_tool_use: true`，这往往是从旧示例里抄过来的。\n- harness 只执行第一个 `tool_use` 块，忽略其余的，于是模型学到多发的调用都是白费。\n- 没有任何地方告诉模型这些调用是互相独立的，系统提示词里反而写着“每次只调用一个工具，并检查结果”。\n\n**在 harness 中修复。** 执行一个响应里的每一个 `tool_use` 块，在安全的情况下并发执行，然后把所有 `tool_result` 块放在同一条 user 消息里一起返回，每个都带上对应的 `tool_use_id`。失败的调用也要返回结果，并设置 `is_error: true`；绝不能丢掉它，因为每个 `tool_use` 都需要一个对应的结果。\n\n```go\nresults := make([]ToolResult, len(calls))\nvar wg sync.WaitGroup\nfor i, c := range calls {\n\twg.Add(1)\n\tgo func() {\n\t\tdefer wg.Done()\n\t\tout, err := h.run(ctx, c) // read-only tools run concurrently; writes go through a serial path\n\t\tresults[i] = ToolResult{ToolUseID: c.ID, Content: out, IsError: err != nil}\n\t}()\n}\nwg.Wait()\nmsgs = append(msgs, UserMessage(results...)) // one message carrying every result\n```\n\n**帮助模型看出调用的独立性。** 在系统提示词里说明互不依赖的查询应该一起请求，并把工具设计得让独立性一目了然：这六份报表只是参数不同。更好的做法往往是提供一个批量形式的工具，比如 `get_reports([{platform, metric}])`，把六次调用变成一次，并由你的后端并发获取。\n\n**清楚什么时候不该并行。** 互相依赖的调用（先找到广告系列，再读它的预算）必须按顺序执行。写操作需要小心：对同一个商品并发执行两个更新可能产生竞态，所以即使有副作用的工具出现在同一个响应里，也要让它们走串行或加锁的路径。还要为每个平台设置并发上限，以遵守下游的限流。\n\n**度量效果。** 在链路追踪中统计每轮模型调用包含的工具调用数，以及每个任务的轮数。修复之后，周报这类问题应该只需要一到两轮，延迟大约会降到最慢的那一份报表的耗时，再加上两次模型调用。",
+      "followups": [
+        "Two of the six calls fail. What exactly do you send back?",
+        "When would you set disable_parallel_tool_use on purpose?",
+        "How would you run parallel write calls safely?"
+      ],
+      "followups_zh": [
+        "六个调用中有两个失败了。你具体要回传什么？",
+        "什么时候你会有意设置 disable_parallel_tool_use？",
+        "你会如何安全地执行并行的写操作调用？"
+      ],
+      "vocab": [
+        {
+          "en": "parallel tool use",
+          "zh": "并行工具调用"
+        },
+        {
+          "en": "round trip",
+          "zh": "往返"
+        },
+        {
+          "en": "batch-shaped tool",
+          "zh": "批量形式的工具"
+        },
+        {
+          "en": "concurrency cap",
+          "zh": "并发上限"
+        },
+        {
+          "en": "Return every tool result in one message.",
+          "zh": "把所有工具结果放在一条消息里返回。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261019-2",
+      "topic": "Evals & Observability",
+      "difficulty": "Medium",
+      "title": "Prompt B beat prompt A 52 to 48 in an LLM-judged comparison. Ship it?",
+      "title_zh": "在 LLM 评审的对比中，提示词 B 以 52 比 48 胜过提示词 A。要上线吗？",
+      "question": "You rewrote the system prompt of your ad-copy assistant. To compare, you generated copy for 100 products with prompt A and prompt B, showed each pair to an LLM judge (A's output first, B's second), and asked which is better. B won 52 times and A won 48. The PM asks whether B is better and should ship.",
+      "question_zh": "你重写了广告文案助手的系统提示词。为了对比，你用提示词 A 和提示词 B 分别为 100 个商品生成文案，把每一对结果交给一个 LLM 评审（A 的输出在前，B 的在后），问它哪个更好。B 赢了 52 次，A 赢了 48 次。产品经理问你：B 是不是更好，要不要上线？",
+      "answer": "**The core idea.** This result does not show that B is better. The sample is small, so 52 to 48 is well within chance; the comparison was always run in the same order, so the judge's position bias is mixed into the result; and nobody has checked that the judge agrees with people about what \"better\" means for ad copy.\n\n**Noise.** If A and B were equally good, the number of B wins out of 100 would still swing around 50 by several points: the standard error of a win rate near 50% with 100 comparisons is about 5 points, so a 95% interval is roughly plus or minus 10. A 52% win rate cannot be told apart from 50%. You would need a much larger difference, or many more comparisons, to conclude anything.\n\n**Position bias.** LLM judges tend to favour one position, often the first answer shown. Because A was always first, any such bias favoured A, and you cannot separate it from quality. Run every pair twice with the order swapped, and count a win only when the judge prefers the same output both times; treat inconsistent verdicts as ties.\n\n```go\nfunc judgePair(ctx context.Context, a, b string) Verdict {\n\tfirst := judge(ctx, a, b)  // a shown first\n\tsecond := judge(ctx, b, a) // b shown first\n\tswitch {\n\tcase first == Left && second == Right:\n\t\treturn WinA\n\tcase first == Right && second == Left:\n\t\treturn WinB\n\tdefault:\n\t\treturn Tie // inconsistent or tied: the judge cannot tell them apart\n\t}\n}\n```\n\n**A judge you can trust.** Before relying on the judge, have people label a sample of pairs and measure how often the judge agrees with them. Give the judge a concrete rubric (accurate attributes, platform length limits, brand voice, natural German) rather than \"which is better\", and ask for a reason before the verdict. Use a different model from the one that wrote the copy, to avoid self-preference.\n\n**Better decisions.** Combine the judge with hard checks in code (length, banned words, attribute errors), which are cheap and exact. Look at results per slice, such as language and category, because B may be better for English and worse for German. If the offline result is still close, either keep A, or run a small online test measuring what the business cares about, such as ad approval rate and click-through rate.\n\n**Trade-offs.** Swapped-order judging doubles judge cost, and more comparisons cost more, but both are cheap compared with shipping a prompt that is worse for a large group of merchants. When the difference is genuinely tiny, the honest answer is \"no measurable difference\", and other factors such as cost or simplicity can decide.",
+      "answer_zh": "**核心思路。** 这个结果并不能说明 B 更好。样本太小，52 比 48 完全在随机波动的范围之内；每次对比的先后顺序都一样，所以评审的位置偏好混进了结果；而且没有人确认过，在“广告文案怎样算更好”这件事上，这个评审和人的判断是否一致。\n\n**噪声。** 即使 A 和 B 一样好，100 次对比里 B 获胜的次数也会在 50 上下浮动好几个点：在胜率接近 50%、对比 100 次的情况下，胜率的标准误大约是 5 个百分点，所以 95% 区间大约是正负 10 个百分点。52% 的胜率与 50% 根本无法区分。要得出任何结论，你需要大得多的差距，或者多得多的对比次数。\n\n**位置偏好。** LLM 评审往往会偏向某个位置，通常是先展示的那个答案。由于 A 总是排在前面，这种偏好都对 A 有利，你也无法把它和质量区分开。每一对都要交换顺序评两次，只有两次评审都偏向同一个输出时才算胜出；前后矛盾的判定算作平局。\n\n```go\nfunc judgePair(ctx context.Context, a, b string) Verdict {\n\tfirst := judge(ctx, a, b)  // a shown first\n\tsecond := judge(ctx, b, a) // b shown first\n\tswitch {\n\tcase first == Left && second == Right:\n\t\treturn WinA\n\tcase first == Right && second == Left:\n\t\treturn WinB\n\tdefault:\n\t\treturn Tie // inconsistent or tied: the judge cannot tell them apart\n\t}\n}\n```\n\n**一个值得信任的评审。** 在依赖这个评审之前，先让人对一批样本对进行标注，衡量评审与人的判断一致的比例。给评审一份具体的评分细则（属性准确、符合平台长度限制、品牌语气、德语自然），而不是只问“哪个更好”，并要求它先给出理由再下结论。评审要使用与生成文案的模型不同的模型，以避免自我偏好。\n\n**更好的决策方式。** 把评审与代码里的硬性检查（长度、禁用词、属性错误）结合起来，后者既便宜又精确。按切片查看结果，比如语言和品类，因为 B 可能在英语上更好、在德语上更差。如果离线结果仍然很接近，要么保留 A，要么做一个小规模的线上测试，衡量业务真正关心的指标，比如广告审核通过率和点击率。\n\n**取舍。** 交换顺序评审会让评审成本翻倍，增加对比次数也要花更多钱，但与上线一个对一大批商家来说更差的提示词相比，这些都很便宜。当差距确实很小时，诚实的答案就是“没有可测量的差异”，这时可以由成本或简洁性等其他因素来决定。",
+      "followups": [
+        "How many pairs would you need to detect a 5-point difference in win rate?",
+        "The judge and humans agree only 70% of the time. What do you do?",
+        "When is a pairwise comparison better than scoring each output on its own?"
+      ],
+      "followups_zh": [
+        "要检测出胜率上 5 个百分点的差异，你大约需要多少对样本？",
+        "评审与人的判断只有 70% 的时候一致。你会怎么办？",
+        "什么时候两两对比比单独给每个输出打分更好？"
+      ],
+      "vocab": [
+        {
+          "en": "pairwise comparison",
+          "zh": "两两对比"
+        },
+        {
+          "en": "position bias",
+          "zh": "位置偏好"
+        },
+        {
+          "en": "standard error",
+          "zh": "标准误"
+        },
+        {
+          "en": "judge calibration",
+          "zh": "评审校准（检查评审与人的一致性）"
+        },
+        {
+          "en": "52 to 48 on 100 pairs is noise, not a result.",
+          "zh": "100 对样本里 52 比 48 只是噪声，不是结论。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261019-3",
+      "topic": "RAG",
+      "difficulty": "Hard",
+      "title": "Letting the agent answer \"which of my products...\" questions with SQL",
+      "title_zh": "让 Agent 用 SQL 回答“我的哪些商品……”这类问题",
+      "question": "Merchants ask data questions such as \"Which of my top 20 products by revenue last month have disapproved ads?\" or \"How did return rates change after I raised prices?\". Retrieval over documents cannot answer these; the facts live in your Postgres tables for orders, products and ad diagnostics. The team proposes a `run_sql(query)` tool so the model can write SQL.\n\nDesign this so that answers are correct and the system is safe in a multi-tenant database.",
+      "question_zh": "商家会提出这样的数据问题：“上个月按收入排名前 20 的商品里，哪些有被拒登的广告？”或者“我涨价之后，退货率有什么变化？”。基于文档的检索回答不了这些问题，这些事实存放在你们 Postgres 的订单、商品和广告诊断表里。团队提议提供一个 `run_sql(query)` 工具，让模型自己写 SQL。\n\n请设计这个方案，让回答正确，并且在多租户数据库中保证安全。",
+      "answer": "**The core idea.** Text-to-SQL is retrieval over structured data, and it fails in two ways: unsafe queries (reading other merchants' data, heavy queries that hurt production, writes) and wrong queries that run fine and return a confident, wrong number. Safety must come from the database and the tool, not from the prompt; correctness comes from giving the model a well-described, small schema and checking its work.\n\n**Safety in layers.**\n\n- Run on a read replica or analytics copy, with a database role that has read-only access to a curated set of views, never to raw tables.\n- Enforce tenancy in the database with row-level security: the tool sets the merchant ID for the session from the authenticated user, and every view filters on it. A query that forgets `WHERE merchant_id = ...` still sees only that merchant's rows.\n- Parse and check the query before running it: a single SELECT statement, only allowed views and functions, no comments or multiple statements.\n- Set a statement timeout and a row limit, and cap the cost per merchant per hour.\n\n```go\nfunc (t *SQLTool) Run(ctx context.Context, query string) (ToolResult, error) {\n\tif err := t.checker.AllowSelectOnViews(query); err != nil {\n\t\treturn errorResult(\"query rejected: \" + err.Error()), nil\n\t}\n\ttx, err := t.replica.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})\n\tif err != nil {\n\t\treturn ToolResult{}, err\n\t}\n\tdefer tx.Rollback()\n\t// Tenant scope comes from the session; row-level security policies read it.\n\tif _, err := tx.ExecContext(ctx, \"SELECT set_config('app.merchant_id', $1, true)\", auth.MerchantID(ctx)); err != nil {\n\t\treturn ToolResult{}, err\n\t}\n\tif _, err := tx.ExecContext(ctx, \"SET LOCAL statement_timeout = '5s'\"); err != nil {\n\t\treturn ToolResult{}, err\n\t}\n\treturn t.runLimited(ctx, tx, query, 500) // at most 500 rows back to the model\n}\n```\n\n**Correctness: a semantic layer.** Do not expose 80 raw tables with cryptic columns. Expose a few views with business names (`product_sales_daily`, `ad_item_status`) and a short description of each column, including units, currency, time zone, and definitions such as \"revenue excludes refunds\". Put this description in the tool description or a schema tool the model can call. Most wrong answers come from guessing what a column means.\n\n**Check the answer, not just the query.** Return the SQL and the result to the model together with row counts, and ask it to state the assumptions it made (date range, time zone, revenue definition) in its reply. For common questions, prefer parameterized, pre-written queries (\"top products by revenue\") that the model fills in, and keep free-form SQL for the long tail. Show merchants the assumptions so they can catch a wrong date range themselves.\n\n**Evaluate it.** Build a test set of real merchant questions with reference answers computed by trusted SQL on a fixed fixture database. Compare results, not query text, because many different queries are correct. Include questions that should be refused or clarified, such as ambiguous time ranges or data you do not have.\n\n**Trade-offs.** Free-form SQL is flexible but harder to make correct and safe; pre-written queries are safe and fast but cover fewer questions. The usual answer is both: a library of trusted queries for the common cases, and guarded free-form SQL on a curated semantic layer for the rest.",
+      "answer_zh": "**核心思路。** Text-to-SQL 是在结构化数据上的检索，它有两种失败方式：不安全的查询（读取其他商家的数据、拖垮生产库的重查询、写操作），以及能正常运行、却返回一个看似可信但错误的数字的查询。安全必须来自数据库和工具本身，而不是提示词；正确性则来自给模型一个描述清晰、规模较小的 schema，并检查它的结果。\n\n**分层保障安全。**\n\n- 在只读副本或分析库上运行，使用一个只对一组精选视图有只读权限的数据库角色，绝不直接访问原始表。\n- 在数据库层用行级安全强制租户隔离：工具根据已认证用户为会话设置商家 ID，所有视图都按它过滤。即使某个查询忘了写 `WHERE merchant_id = ...`，也只能看到该商家的数据。\n- 执行前先解析并检查查询：只能是一条 SELECT 语句，只能使用允许的视图和函数，不能有注释或多条语句。\n- 设置语句超时和返回行数上限，并限制每个商家每小时的查询开销。\n\n```go\nfunc (t *SQLTool) Run(ctx context.Context, query string) (ToolResult, error) {\n\tif err := t.checker.AllowSelectOnViews(query); err != nil {\n\t\treturn errorResult(\"query rejected: \" + err.Error()), nil\n\t}\n\ttx, err := t.replica.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})\n\tif err != nil {\n\t\treturn ToolResult{}, err\n\t}\n\tdefer tx.Rollback()\n\t// Tenant scope comes from the session; row-level security policies read it.\n\tif _, err := tx.ExecContext(ctx, \"SELECT set_config('app.merchant_id', $1, true)\", auth.MerchantID(ctx)); err != nil {\n\t\treturn ToolResult{}, err\n\t}\n\tif _, err := tx.ExecContext(ctx, \"SET LOCAL statement_timeout = '5s'\"); err != nil {\n\t\treturn ToolResult{}, err\n\t}\n\treturn t.runLimited(ctx, tx, query, 500) // at most 500 rows back to the model\n}\n```\n\n**正确性：语义层。** 不要暴露 80 张列名晦涩的原始表。只暴露几个用业务名称命名的视图（`product_sales_daily`、`ad_item_status`），并为每一列写一句简短说明，包括单位、币种、时区，以及诸如“收入不含退款”这样的定义。把这些说明放在工具描述里，或者放在一个模型可以调用的 schema 工具里。大多数错误答案，都源于猜错了某一列的含义。\n\n**检查答案，而不只是检查查询。** 把 SQL、查询结果和行数一起返回给模型，并要求它在回复中说明自己所做的假设（日期范围、时区、收入的定义）。对于常见问题，优先使用预先写好、由模型填参数的查询（比如“按收入排名的商品”），自由编写的 SQL 只留给长尾问题。把这些假设展示给商家，让他们自己也能发现日期范围之类的错误。\n\n**评估它。** 用真实的商家问题构建测试集，参考答案由可信的 SQL 在一个固定的测试数据库上计算得出。比较的是查询结果，而不是查询文本，因为很多不同的查询都是正确的。测试集中还要包括应该拒绝回答或需要澄清的问题，比如时间范围含糊，或者涉及你们并没有的数据。\n\n**取舍。** 自由编写的 SQL 很灵活，但更难保证正确和安全；预先写好的查询安全又快，但能覆盖的问题更少。通常的做法是两者兼用：常见问题用一组可信的预置查询，其余的则在精选的语义层之上，使用受保护的自由 SQL。",
+      "followups": [
+        "A merchant asks for data that would need a join across tenants, such as a market benchmark. How do you serve it?",
+        "How would you detect that a query ran but answered the wrong question?",
+        "When would you cache query results, and how would you invalidate them?"
+      ],
+      "followups_zh": [
+        "商家想要的数据需要跨租户关联，比如市场基准对比。你会如何提供？",
+        "你如何发现某个查询虽然执行成功了，却回答错了问题？",
+        "什么时候你会缓存查询结果？又如何让缓存失效？"
+      ],
+      "vocab": [
+        {
+          "en": "text-to-SQL",
+          "zh": "文本转 SQL"
+        },
+        {
+          "en": "row-level security",
+          "zh": "行级安全"
+        },
+        {
+          "en": "semantic layer",
+          "zh": "语义层"
+        },
+        {
+          "en": "read replica",
+          "zh": "只读副本"
+        },
+        {
+          "en": "Safety comes from the database, correctness from the schema description.",
+          "zh": "安全来自数据库，正确性来自 schema 说明。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261019-4",
+      "topic": "Production",
+      "difficulty": "Hard",
+      "title": "Moving every agent to a newer model without surprising 3,000 merchants",
+      "title_zh": "把所有 Agent 迁移到更新的模型，同时不让 3000 个商家感到意外",
+      "question": "A newer, cheaper and stronger model is available, and leadership wants all your agents (support, catalog fixing, ad copy) moved to it this month. Your code was written for an older model: it prefills the assistant turn to force JSON, forces a specific tool with `tool_choice`, and sets a fixed thinking budget.\n\nPlan the migration. What can break, what must you measure, and how do you roll it out?",
+      "question_zh": "一个更新、更便宜也更强的模型已经推出，管理层希望这个月就把你们所有的 Agent（客服、商品目录修复、广告文案）迁移过去。你们的代码是为旧模型写的：它通过预填 assistant 轮次来强制输出 JSON，用 `tool_choice` 强制调用某个工具，并设置了固定的思考预算。\n\n请规划这次迁移。哪些地方可能出问题？你必须衡量什么？又如何逐步上线？",
+      "answer": "**The core idea.** A model upgrade is a dependency upgrade with both API changes and behaviour changes. API changes fail loudly and are easy to find; behaviour changes are silent and only show up in evaluations and production metrics. Treat it like a major library upgrade: inventory, fix, evaluate, roll out gradually, keep rollback ready.\n\n**Step 1: inventory API breakage.** Read the provider's migration notes for the target model and search the code for each pattern. With newer Claude models, for example, these three patterns from the scenario all break:\n\n- Prefilling the assistant turn returns an error. Use structured outputs (a JSON schema on the response) or a prompt instruction instead.\n- The newest models reject forced tool choice (`any` or a named tool). Use `auto`, state in the prompt which tool to use, keep `strict: true` for schema-valid arguments, and check that a call was actually made.\n- Fixed thinking budgets are rejected; thinking is adaptive and depth is controlled with an effort setting, whose default can differ between models, so set it explicitly.\n\n**Step 2: re-baseline cost and context.** Tokenizers can change between model generations, so the same prompt may count as more or fewer tokens; recount real prompts with the token-counting endpoint instead of assuming the old numbers. Prompt caches are tied to a model, so expect a burst of cache writes right after the switch.\n\n**Step 3: evaluate behaviour per agent.** Run each agent's eval suite on the old and new model with several trials per case, and compare per slice: success rate, safety invariants, tool-call counts, output length, latency and cost per completed task. Newer models often need less prescriptive prompts; instructions written to push an older model (\"you MUST always...\") can make a newer one over-eager, so review prompts as part of the migration. Sweep the effort setting rather than assuming the old level.\n\n```text\nagent        metric                old     new\nsupport      resolved w/o human    81%     85%\nsupport      unapproved promises   0       0\ncatalog-fix  pass^4                62%     71%\nad-copy      German length errors  1.2%    3.8%   <- investigate before rollout\nad-copy      cost per 1k items     1.00x   0.64x\n```\n\n**Step 4: roll out per agent, with a canary.** Make the model ID part of each agent's versioned config, recorded on every trace. Move one agent at a time to a small, sticky share of merchants, compare against the control group, and widen gradually. Switch at conversation boundaries, not in the middle of a conversation, so caches and the conversation's earlier reasoning stay consistent. Keep the old model configured for instant rollback.\n\n**Trade-offs.** Migrating all agents at once is faster but makes regressions hard to attribute; one at a time takes longer but each change is measurable. Some agents may need prompt work before they benefit; it is fine to move the easy ones first and leave a hard one on the old model until its eval passes, as long as you know when the old model will be retired.",
+      "answer_zh": "**核心思路。** 升级模型就是一次依赖升级，既有 API 层面的变化，也有行为层面的变化。API 变化会直接报错，容易发现；行为变化则悄无声息，只会在评测和线上指标中显现。要像对待一次大版本的库升级那样处理：盘点、修复、评测、逐步上线，并随时准备回滚。\n\n**第一步：盘点 API 层面的破坏性变化。** 阅读服务商针对目标模型的迁移说明，并在代码里逐一搜索相关写法。以较新的 Claude 模型为例，场景中的这三种写法都会出问题：\n\n- 预填 assistant 轮次会直接报错。改用结构化输出（为响应指定 JSON schema）或在提示词中说明。\n- 最新的模型会拒绝强制工具选择（`any` 或指定某个工具）。改用 `auto`，在提示词中说明应该使用哪个工具，保留 `strict: true` 以保证参数符合 schema，并检查是否真的发起了调用。\n- 固定的思考预算会被拒绝；思考是自适应的，深度通过 effort 设置控制，而不同模型的默认值可能不同，所以要显式设置。\n\n**第二步：重新确定成本与上下文的基线。** 不同代的模型可能使用不同的分词器，同样的提示词计算出的 token 数可能更多或更少；要用 token 计数接口重新统计真实的提示词，而不是沿用旧的数字。prompt 缓存与模型绑定，所以切换之后会短暂出现一大波缓存写入。\n\n**第三步：逐个 Agent 评估行为。** 用旧模型和新模型分别运行每个 Agent 的评测套件，每个案例跑多次，并按切片对比：成功率、安全约束、工具调用次数、输出长度、延迟，以及每个完成任务的成本。较新的模型通常需要不那么“命令式”的提示词；为驱动旧模型而写的指令（“你必须总是……”）可能会让新模型过度执行，所以审查提示词也是迁移的一部分。要对 effort 设置做一轮扫描，而不是想当然地沿用旧的级别。\n\n```text\nagent        metric                old     new\nsupport      resolved w/o human    81%     85%\nsupport      unapproved promises   0       0\ncatalog-fix  pass^4                62%     71%\nad-copy      German length errors  1.2%    3.8%   <- investigate before rollout\nad-copy      cost per 1k items     1.00x   0.64x\n```\n\n**第四步：按 Agent 逐个上线，并做金丝雀发布。** 把模型 ID 纳入每个 Agent 有版本管理的配置中，并记录在每条链路追踪上。每次只迁移一个 Agent，先迁给一小部分固定的商家，与对照组比较，再逐步扩大范围。在对话之间切换，而不是在对话中途切换，这样缓存和对话中先前的推理都能保持一致。保留旧模型的配置，以便随时回滚。\n\n**取舍。** 一次性迁移所有 Agent 更快，但出现回退时很难定位原因；逐个迁移耗时更长，但每次变化都可以衡量。有些 Agent 可能要先改提示词才能受益；可以先迁移容易的，把难的那个暂时留在旧模型上，直到它的评测通过，只要你清楚旧模型什么时候会下线。",
+      "followups": [
+        "The new model is better on average but worse for German ad copy. What do you do?",
+        "How would you find every place in a large codebase that depends on old model behaviour?",
+        "What would make you roll back after the canary starts?"
+      ],
+      "followups_zh": [
+        "新模型平均表现更好，但在德语广告文案上更差。你会怎么做？",
+        "在一个大型代码库里，你如何找出所有依赖旧模型行为的地方？",
+        "金丝雀发布开始后，出现什么情况会让你回滚？"
+      ],
+      "vocab": [
+        {
+          "en": "model migration",
+          "zh": "模型迁移"
+        },
+        {
+          "en": "breaking change",
+          "zh": "破坏性变更"
+        },
+        {
+          "en": "re-baseline",
+          "zh": "重新确定基线"
+        },
+        {
+          "en": "canary rollout",
+          "zh": "金丝雀发布"
+        },
+        {
+          "en": "API changes fail loudly; behaviour changes fail silently.",
+          "zh": "API 变化会直接报错；行为变化则悄无声息。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261019-5",
+      "topic": "Evals & Observability",
+      "difficulty": "Senior",
+      "title": "Twenty teams build agents. Design the shared tracing and evaluation platform",
+      "title_zh": "二十个团队都在构建 Agent，请设计共享的追踪与评测平台",
+      "question": "Your company now has about twenty teams building agents: support, catalog, ads, finance operations and more. Each team logs differently, evaluates (or doesn't) in its own way, and nobody can answer \"what did agents cost us last month, and which ones got worse after a change?\".\n\nYou are asked to design a shared platform for tracing and evaluation. What are its parts, what do you standardize, and what do you leave to teams?",
+      "question_zh": "你们公司现在有大约二十个团队在构建 Agent：客服、商品目录、广告、财务运营等等。每个团队的日志方式各不相同，评测方式也各自为政（或者干脆不做），没有人能回答“上个月 Agent 花了我们多少钱？哪些 Agent 在改动后变差了？”。\n\n你被要求设计一个用于追踪和评测的共享平台。它由哪些部分组成？你会统一哪些东西？又会把哪些留给各个团队？",
+      "answer": "**The core idea.** Standardize the shapes, not the logic. Every agent should emit traces in the same format, be identified by a versioned config, and register its eval suite in the same place, so that cost, quality and regressions can be compared across teams. What counts as success for a support agent versus a finance agent stays with the team that owns it.\n\n**Part 1: one tracing standard.** Use OpenTelemetry with the GenAI semantic conventions (`gen_ai.*` attributes) for model calls and tool calls, plus a few company attributes: team, agent name, agent config version, tenant and task ID. Provide a thin wrapper library per language so teams get this for free; the Claude SDKs can also emit these spans themselves. Content capture (prompts and responses) is off by default and turned on per agent with redaction, retention and access rules owned by the platform.\n\n**Part 2: agent config registry.** Every deployed agent has a versioned config: prompt, tool set, model ID, effort and other parameters, stored in the repository and registered on deploy. Every trace carries the config version, so any change in cost or quality can be tied to a specific change, and rollback is a config flip.\n\n**Part 3: eval service.** Teams register datasets (cases with fixtures and expected outcomes) and graders (code checks, LLM judges with rubrics, human review queues). The service runs suites on demand and in CI with repeated trials, stores results per config version, and reports per slice with confidence intervals. Offline runs can use a batch API at lower cost. The platform provides shared judges for common needs, such as tone, language and policy promises, calibrated against human labels.\n\n**Part 4: release gates.** A config change cannot reach production until its suite has run against the current version. Gates combine hard rules (zero safety violations) and team-chosen thresholds (no significant drop in the main success metric, cost within budget). After release, canary metrics and online dashboards use the same metric names as the offline suite.\n\n**Part 5: cost attribution and dashboards.** Aggregate token usage, including cache reads and writes, per team, agent, config version and tenant, and turn it into cost per completed task. One dashboard answers the leadership questions: spend by agent, trend in success rate, and which recent changes moved either.\n\n- Standardize: trace schema, config versioning, dataset and result formats, release-gate mechanism, privacy rules.\n- Leave to teams: their success definitions, graders, thresholds and datasets, within the shared formats.\n\n**Adoption.** A platform nobody uses is worthless, so make the easy path the right path: wrapper libraries, templates for a first eval suite built from a team's own traces, and a pilot with two teams that have real pain. Show each team something it could not see before, such as its cost per task, in the first week.\n\n**Trade-offs.** Too much central control slows teams down and invites workarounds; too little leaves you with twenty incompatible systems again. Storing full content enables replay and debugging but raises privacy risk and cost, so keep metadata for everything and content for samples and failures. Shared LLM judges save effort but must be recalibrated whenever their model or rubric changes.",
+      "answer_zh": "**核心思路。** 统一的是结构，而不是逻辑。每个 Agent 都应该以相同的格式输出链路追踪数据，用有版本的配置来标识，并把评测套件登记在同一个地方，这样才能跨团队比较成本、质量和回退。至于客服 Agent 和财务 Agent 各自怎样算成功，仍由负责它们的团队自己决定。\n\n**第一部分：统一的追踪标准。** 对模型调用和工具调用使用 OpenTelemetry 及其 GenAI 语义约定（`gen_ai.*` 属性），再加上几个公司自定义的属性：团队、Agent 名称、Agent 配置版本、租户和任务 ID。为每种语言提供一个轻量的封装库，让各团队不费力就能接入；Claude SDK 本身也能输出这些 span。内容采集（提示词和响应）默认关闭，按 Agent 单独开启，脱敏、保留期限和访问规则由平台统一负责。\n\n**第二部分：Agent 配置注册中心。** 每个已部署的 Agent 都有一份有版本的配置：提示词、工具集、模型 ID、effort 和其他参数，存放在代码仓库中，并在发布时登记。每条链路追踪都带有配置版本，因此成本或质量的任何变化都能对应到某一次具体改动，回滚也只是切换一下配置。\n\n**第三部分：评测服务。** 各团队登记数据集（带有测试夹具和预期结果的案例）和评分器（代码检查、带评分细则的 LLM 评审、人工评审队列）。评测服务可以按需运行，也可以在 CI 中运行，每个案例多次试验，按配置版本存储结果，并按切片给出带置信区间的报告。离线运行可以使用 Batch API 以降低成本。平台为常见需求提供共享的评审，比如语气、语言和政策承诺，并用人工标注对其进行校准。\n\n**第四部分：发布关卡。** 任何配置变更，都必须先针对当前版本跑完评测套件，才能进入生产环境。关卡结合了硬性规则（零安全违规）和各团队自选的阈值（主要成功指标没有显著下降、成本在预算之内）。发布之后，金丝雀指标和线上看板使用与离线评测套件相同的指标名称。\n\n**第五部分：成本归属与看板。** 按团队、Agent、配置版本和租户汇总 token 用量（包括缓存读取和写入），并换算成每个完成任务的成本。用一个看板回答管理层的问题：各 Agent 的花费、成功率的趋势，以及最近哪些改动让这两者发生了变化。\n\n- 统一的部分：链路追踪的数据结构、配置的版本管理、数据集和结果的格式、发布关卡的机制、隐私规则。\n- 留给团队的部分：在共享格式之内，各自的成功定义、评分器、阈值和数据集。\n\n**推广落地。** 一个没人用的平台毫无价值，所以要让最省事的做法恰好就是正确的做法：提供封装库、提供从团队自己的链路追踪数据生成第一套评测的模板，并先与两个确实有痛点的团队试点。第一周就让每个团队看到它以前看不到的东西，比如自己每个任务的成本。\n\n**取舍。** 集中管控过多会拖慢各团队，还会诱发绕开平台的做法；管控过少，又会回到二十套互不兼容的系统。保存完整内容便于重放和调试，但会增加隐私风险和成本，所以元数据全部保留，完整内容只保留抽样和失败的部分。共享的 LLM 评审能省力，但每当其模型或评分细则变化时，都必须重新校准。",
+      "followups": [
+        "How would you get a reluctant team to adopt the platform?",
+        "Which three metrics would you show leadership every week?",
+        "How do you build eval datasets from production traces without exposing customer data?"
+      ],
+      "followups_zh": [
+        "你会如何让一个不情愿的团队接入这个平台？",
+        "你每周会向管理层展示哪三个指标？",
+        "你如何在不暴露客户数据的前提下，用线上链路追踪数据构建评测数据集？"
+      ],
+      "vocab": [
+        {
+          "en": "semantic conventions",
+          "zh": "语义约定"
+        },
+        {
+          "en": "config registry",
+          "zh": "配置注册中心"
+        },
+        {
+          "en": "release gate",
+          "zh": "发布关卡"
+        },
+        {
+          "en": "cost attribution",
+          "zh": "成本归属"
+        },
+        {
+          "en": "Standardize the shapes, not the logic.",
+          "zh": "统一的是结构，而不是逻辑。"
+        }
+      ]
+    }
+  ]
+}
