@@ -1,0 +1,209 @@
+{
+  "date": "2026-10-19",
+  "generatedAt": "2026-10-19T16:15:12+08:00",
+  "questions": [
+    {
+      "id": "20261019-1",
+      "topic": "Go",
+      "difficulty": "Medium",
+      "title": "The API returns null instead of an empty list, and a client crashes",
+      "title_zh": "API 返回了 null 而不是空列表，导致客户端崩溃",
+      "question": "A Go endpoint returns a merchant's disapproved products. When there are none, the response body is `{\"items\":null}` instead of `{\"items\":[]}`, and the merchant's mobile app crashes because it calls `items.length`. The handler looks like this:\n\n```go\ntype Resp struct {\n\tItems []Product `json:\"items\"`\n}\n\nfunc disapproved(all []Product) []Product {\n\tvar out []Product\n\tfor _, p := range all {\n\t\tif p.Status == \"disapproved\" {\n\t\t\tout = append(out, p)\n\t\t}\n\t}\n\treturn out\n}\n```\n\nExplain why this happens and how you would fix it so it stays fixed.",
+      "question_zh": "一个 Go 接口返回商家被拒登的商品。当一个都没有时，响应体是 `{\"items\":null}` 而不是 `{\"items\":[]}`，商家的移动端应用因为调用了 `items.length` 而崩溃。处理函数如下：\n\n```go\ntype Resp struct {\n\tItems []Product `json:\"items\"`\n}\n\nfunc disapproved(all []Product) []Product {\n\tvar out []Product\n\tfor _, p := range all {\n\t\tif p.Status == \"disapproved\" {\n\t\t\tout = append(out, p)\n\t\t}\n\t}\n\treturn out\n}\n```\n\n解释为什么会这样，以及你会如何修复，并保证以后不再出现。",
+      "answer": "**Why it happens.** In Go, `var out []Product` is a nil slice: it has length 0 and no backing array. If nothing is appended, the function returns nil. `encoding/json` encodes a nil slice as `null` and a non-nil empty slice as `[]`. Both have length 0 in Go, so the bug is invisible in Go code and only shows up on the wire. Maps behave the same way: a nil map encodes as `null`.\n\n**The fix.** Decide the API contract (\"lists are always arrays, never null\") and enforce it where the response is built, not in every helper:\n\n- Initialize with `out := make([]Product, 0)` or `[]Product{}` when an empty list is a valid result.\n- Normalize in the response layer: before encoding, replace nil slices with empty ones, for example in a constructor such as `NewResp(items)`.\n- Add a handler test that asserts the exact JSON for the empty case, so a later refactor cannot bring `null` back.\n\n```go\nfunc NewResp(items []Product) Resp {\n\tif items == nil {\n\t\titems = []Product{} // the contract: always an array\n\t}\n\treturn Resp{Items: items}\n}\n```\n\n**Related traps.** `omitempty` drops both nil and empty slices, so the field disappears entirely; that is a third shape clients must handle, so do not mix it into a contract that promises an array. When decoding, `{\"items\":null}` produces a nil slice, which is safe to range over and to call `len` on in Go, so Go clients are fine; the problem is clients in other languages. Document the contract in your OpenAPI spec (`type: array`, not nullable).\n\n**Trade-offs.** Always allocating an empty slice costs almost nothing. The real cost is consistency: pick one rule for the whole API, and enforce it with a shared response helper and contract tests rather than relying on every developer to remember.",
+      "answer_zh": "**原因。** 在 Go 中，`var out []Product` 是一个 nil 切片：长度为 0，没有底层数组。如果什么都没追加，函数返回的就是 nil。`encoding/json` 会把 nil 切片编码成 `null`，把非 nil 的空切片编码成 `[]`。两者在 Go 里的长度都是 0，所以这个 bug 在 Go 代码中看不出来，只有在网络传输的数据里才会暴露。map 也是一样：nil map 会被编码成 `null`。\n\n**修复。** 先确定 API 契约（“列表永远是数组，绝不是 null”），然后在构造响应的地方强制执行，而不是在每个辅助函数里处理：\n\n- 当空列表是合法结果时，用 `out := make([]Product, 0)` 或 `[]Product{}` 初始化。\n- 在响应层统一处理：编码之前，把 nil 切片替换成空切片，比如放在 `NewResp(items)` 这样的构造函数里。\n- 加一个处理函数的测试，断言空结果时的确切 JSON，这样以后的重构就不会把 `null` 带回来。\n\n```go\nfunc NewResp(items []Product) Resp {\n\tif items == nil {\n\t\titems = []Product{} // the contract: always an array\n\t}\n\treturn Resp{Items: items}\n}\n```\n\n**相关的陷阱。** `omitempty` 会把 nil 切片和空切片都省略，字段会整个消失；这是客户端必须处理的第三种形态，所以不要把它混进一个承诺返回数组的契约里。解码时，`{\"items\":null}` 会得到一个 nil 切片，在 Go 里对它 range 或调用 `len` 都是安全的，所以 Go 客户端没问题；出问题的是其他语言的客户端。在 OpenAPI 规范里写明契约（`type: array`，不可为 null）。\n\n**取舍。** 总是分配一个空切片几乎没有任何开销。真正的成本在于一致性：为整个 API 选定一条规则，并用共享的响应辅助函数和契约测试来保证，而不是指望每个开发者都记得。",
+      "followups": [
+        "How would you find every endpoint in a large codebase that can return null lists?",
+        "When is it reasonable for a field to be null instead of an empty array?"
+      ],
+      "followups_zh": [
+        "在一个大型代码库里，你会如何找出所有可能返回 null 列表的接口？",
+        "什么情况下，字段为 null 而不是空数组是合理的？"
+      ],
+      "vocab": [
+        {
+          "en": "nil slice",
+          "zh": "nil 切片"
+        },
+        {
+          "en": "API contract",
+          "zh": "API 契约"
+        },
+        {
+          "en": "contract test",
+          "zh": "契约测试"
+        },
+        {
+          "en": "omitempty",
+          "zh": "omitempty（为空时省略字段）"
+        }
+      ]
+    },
+    {
+      "id": "20261019-2",
+      "topic": "System Design",
+      "difficulty": "Hard",
+      "title": "An audit log that merchants and auditors can trust",
+      "title_zh": "一份商家和审计人员都能信任的审计日志",
+      "question": "Merchants and their auditors want a record of every important change in their store: price edits, refunds, permission changes, API key creation, and actions taken by your AI agents. They want to search it, export it, and be confident that nobody, including your own engineers, quietly edited or deleted entries.\n\nDesign the audit log: what an entry contains, how it is written, stored and queried, and how you make tampering detectable.",
+      "question_zh": "商家和他们的审计人员希望记录店铺里每一次重要变更：改价、退款、权限变更、API 密钥创建，以及你们的 AI Agent 执行的操作。他们希望能搜索、能导出，并且确信没有任何人（包括你们自己的工程师）悄悄修改或删除过记录。\n\n请设计这份审计日志：一条记录包含什么，如何写入、存储和查询，以及如何让篡改可以被发现。",
+      "answer": "**What an entry contains.** Who (user, API key or agent, plus the human it acts for), what (action, target type and ID), when (server timestamp), where from (IP, client, request ID), and the change itself (before and after values of the changed fields). Give each entry a unique ID and a per-merchant sequence number.\n\n**Writing it reliably.** The audit entry must exist if and only if the change happened. Write it in the same database transaction as the business change, into an outbox table, and ship it from there to the audit store asynchronously. Writing directly to a separate store from application code risks losing entries when the second write fails.\n\n**Making tampering detectable.** Chain the entries: each entry stores the hash of the previous entry for the same merchant together with its own content, so changing or deleting any entry breaks every hash after it. Periodically publish a checkpoint (the latest hash per merchant) somewhere your engineers cannot rewrite, such as a write-once object store with retention locks, or send it to the merchant. An auditor can then recompute the chain from an export and compare it with the checkpoints.\n\n```go\n// hash = SHA-256(prevHash || canonical JSON of this entry without the hash field)\nfunc chain(prevHash []byte, e Entry) []byte {\n\th := sha256.New()\n\th.Write(prevHash)\n\th.Write(canonicalJSON(e)) // stable key order, so the same entry always hashes the same\n\treturn h.Sum(nil)\n}\n```\n\n**Storage and queries.** The log is append-only: the service account that writes it has no UPDATE or DELETE rights. Partition by merchant and month, index by actor, target and time, and move old partitions to cheaper storage. Exports for auditors are generated as files with the chain hashes included. Retention follows your contracts and law; deleting a whole expired partition is fine, editing single entries is not.\n\n**Personal data.** Audit entries can contain customer data, and privacy law may require deleting it. Store personal fields separately or encrypted with a per-customer key, so you can erase them (crypto-shredding) without breaking the hash chain, which covers only the references.\n\n**Trade-offs.** Hash chains make tampering detectable, not impossible, and they add work on write. The outbox adds a short delay before entries are searchable. In return you can prove to an auditor that the history is complete, which is the whole point of the feature.",
+      "answer_zh": "**一条记录包含什么。** 谁（用户、API 密钥或 Agent，以及它代表的那个人）、做了什么（操作、目标类型和 ID）、什么时候（服务器时间戳）、从哪里（IP、客户端、请求 ID），以及变更本身（被修改字段的修改前后值）。每条记录都有唯一 ID 和一个按商家递增的序号。\n\n**可靠地写入。** 审计记录必须在且仅在变更真正发生时存在。把它和业务变更写在同一个数据库事务里，写入一张 outbox 表，再从那里异步投递到审计存储。如果在应用代码里直接写入另一个独立的存储，一旦第二次写入失败，就可能丢失记录。\n\n**让篡改可以被发现。** 把记录串成链：每条记录除了自身内容，还保存同一商家上一条记录的哈希值，这样修改或删除任何一条记录，都会破坏其后所有记录的哈希。定期把检查点（每个商家最新的哈希值）发布到工程师无法改写的地方，比如带保留锁的一次写入对象存储，或者发给商家。审计人员就可以根据导出的数据重新计算哈希链，并与检查点比对。\n\n```go\n// hash = SHA-256(prevHash || canonical JSON of this entry without the hash field)\nfunc chain(prevHash []byte, e Entry) []byte {\n\th := sha256.New()\n\th.Write(prevHash)\n\th.Write(canonicalJSON(e)) // stable key order, so the same entry always hashes the same\n\treturn h.Sum(nil)\n}\n```\n\n**存储与查询。** 日志只能追加：负责写入的服务账号没有 UPDATE 或 DELETE 权限。按商家和月份分区，按操作者、目标和时间建索引，旧分区迁移到更便宜的存储。给审计人员的导出以文件形式生成，并包含哈希链。保留期限遵循合同和法律要求；删除整个已过期的分区没问题，但修改单条记录不行。\n\n**个人数据。** 审计记录中可能包含顾客数据，而隐私法可能要求删除这些数据。把个人信息字段单独存储，或者用每个顾客专属的密钥加密，这样就能在不破坏哈希链的前提下删除它们（加密粉碎），因为哈希链只覆盖对这些数据的引用。\n\n**取舍。** 哈希链让篡改可以被发现，而不是不可能发生，并且会增加写入时的工作量。outbox 会让记录在可被搜索之前有一小段延迟。换来的是你能向审计人员证明历史记录是完整的，而这正是这个功能存在的意义。",
+      "followups": [
+        "How would you let an auditor verify the log without trusting your servers?",
+        "How do you record actions taken by an AI agent on behalf of a user?",
+        "What happens to the chain when you must delete a customer's personal data?"
+      ],
+      "followups_zh": [
+        "你会如何让审计人员在不信任你们服务器的前提下验证这份日志？",
+        "你会如何记录 AI Agent 代表用户执行的操作？",
+        "当你必须删除某个顾客的个人数据时，哈希链会怎样？"
+      ],
+      "vocab": [
+        {
+          "en": "append-only",
+          "zh": "只追加"
+        },
+        {
+          "en": "hash chain",
+          "zh": "哈希链"
+        },
+        {
+          "en": "transactional outbox",
+          "zh": "事务性 outbox"
+        },
+        {
+          "en": "tamper-evident",
+          "zh": "可发现篡改的"
+        },
+        {
+          "en": "crypto-shredding",
+          "zh": "加密粉碎（删除密钥使数据无法解密）"
+        }
+      ]
+    },
+    {
+      "id": "20261019-3",
+      "topic": "Database",
+      "difficulty": "Senior",
+      "title": "Tables keep growing and queries slow down, although rows are being deleted",
+      "title_zh": "表在不断膨胀、查询越来越慢，尽管一直在删除数据",
+      "question": "On your Postgres primary, the `order_events` table keeps growing on disk and queries on it get slower every week, even though a nightly job deletes old rows. `pg_stat_user_tables` shows a very high `n_dead_tup` for it, and autovacuum runs often but the count does not go down.\n\nWhat is likely going on, how would you confirm it, and how would you fix and prevent it?",
+      "question_zh": "在你们的 Postgres 主库上，`order_events` 表占用的磁盘空间不断增长，针对它的查询每周都在变慢，尽管每晚都有任务删除旧数据。`pg_stat_user_tables` 显示它的 `n_dead_tup` 非常高，autovacuum 运行得很频繁，但这个数字就是降不下来。\n\n可能是什么原因？你会如何确认？又会如何修复和预防？",
+      "answer": "**How Postgres cleans up.** With MVCC, an UPDATE or DELETE does not remove the old row version; it becomes a dead tuple. VACUUM can only remove dead tuples that no running transaction could still need to see. The oldest snapshot still in use anywhere sets this limit, often called the xmin horizon. If something holds the horizon back, autovacuum keeps running but cannot remove anything, and the table and its indexes bloat.\n\n**The usual suspects.**\n\n- A long-running or forgotten transaction: a session in state `idle in transaction`, for example an application that began a transaction and never committed, or an analytics query running for hours on the primary.\n- A replica with `hot_standby_feedback` on, running long queries: it reports its oldest snapshot to the primary, which then keeps rows for it.\n- An abandoned replication slot: it can hold back the horizon (and retain WAL) until it is dropped.\n\n**Confirming it.** Look for what holds the oldest xmin:\n\n```sql\n-- sessions holding old snapshots\nSELECT pid, state, xact_start, backend_xmin, left(query, 60)\nFROM pg_stat_activity\nWHERE backend_xmin IS NOT NULL\nORDER BY age(backend_xmin) DESC\nLIMIT 5;\n\n-- replication slots holding the horizon back\nSELECT slot_name, active, xmin, catalog_xmin, restart_lsn\nFROM pg_replication_slots;\n```\n\n**Fixing it.** End the culprit: terminate the stuck session, move long reports to a replica without feedback or to the warehouse, drop the abandoned slot. Then VACUUM can remove the dead tuples, but the file usually does not shrink; reclaiming disk space needs a table rewrite, for example with `pg_repack`, which avoids the long exclusive lock that `VACUUM FULL` takes. Indexes can be rebuilt with `REINDEX CONCURRENTLY`.\n\n**Preventing it.** Set `idle_in_transaction_session_timeout` for application roles, keep transactions short in code (no network calls inside a transaction), alert on the age of the oldest `backend_xmin` and on inactive replication slots, and tune autovacuum per table for high-churn tables. For time-based data like `order_events`, partition by time and drop old partitions instead of deleting rows: dropping a partition is instant and leaves no dead tuples.\n\n**Trade-offs.** `hot_standby_feedback` protects replica queries from being cancelled, but at the cost of bloat on the primary; for heavy analytics a separate warehouse is usually better. Aggressive timeouts can kill legitimate long jobs, so give those jobs their own role and settings.",
+      "answer_zh": "**Postgres 如何清理。** 在 MVCC 机制下，UPDATE 或 DELETE 不会移除旧的行版本，而是让它成为一个死元组。VACUUM 只能移除那些没有任何正在运行的事务还可能需要看到的死元组。整个系统中仍在使用的最老快照决定了这个界限，通常称为 xmin 视界。如果有什么东西拖住了这个视界，autovacuum 虽然一直在运行，却什么也清理不掉，表和索引就会膨胀。\n\n**常见嫌疑。**\n\n- 长时间运行或被遗忘的事务：处于 `idle in transaction` 状态的会话，比如某个应用开启了事务却一直没有提交，或者在主库上跑了几个小时的分析查询。\n- 开启了 `hot_standby_feedback` 并在运行长查询的副本：它会把自己最老的快照上报给主库，主库于是为它保留这些行。\n- 被遗弃的复制槽：在被删除之前，它会一直拖住视界（并保留 WAL）。\n\n**如何确认。** 找出是谁持有最老的 xmin：\n\n```sql\n-- sessions holding old snapshots\nSELECT pid, state, xact_start, backend_xmin, left(query, 60)\nFROM pg_stat_activity\nWHERE backend_xmin IS NOT NULL\nORDER BY age(backend_xmin) DESC\nLIMIT 5;\n\n-- replication slots holding the horizon back\nSELECT slot_name, active, xmin, catalog_xmin, restart_lsn\nFROM pg_replication_slots;\n```\n\n**修复。** 先处理罪魁祸首：终止卡住的会话，把长报表迁移到不回传反馈的副本或数据仓库，删除被遗弃的复制槽。之后 VACUUM 就能清理死元组了，但文件通常不会缩小；要回收磁盘空间需要重写整张表，比如使用 `pg_repack`，它可以避免 `VACUUM FULL` 所需的长时间排他锁。索引可以用 `REINDEX CONCURRENTLY` 重建。\n\n**预防。** 为应用使用的角色设置 `idle_in_transaction_session_timeout`，在代码里保持事务简短（不要在事务中发起网络调用），对最老的 `backend_xmin` 的年龄以及不活跃的复制槽设置告警，并针对变更频繁的表单独调整 autovacuum 参数。对于 `order_events` 这种按时间增长的数据，按时间分区，用删除旧分区代替逐行删除：删除分区是瞬间完成的，也不会留下死元组。\n\n**取舍。** `hot_standby_feedback` 能保护副本上的查询不被取消，但代价是主库膨胀；对于繁重的分析任务，单独的数据仓库通常更合适。过于激进的超时设置可能会杀掉正当的长任务，所以要给这些任务单独的角色和配置。",
+      "followups": [
+        "Why does a long transaction on one table cause bloat in other tables too?",
+        "How would you reclaim space on a 500 GB table without downtime?",
+        "When would you choose partitioning over tuning autovacuum?"
+      ],
+      "followups_zh": [
+        "为什么一张表上的长事务，也会导致其他表膨胀？",
+        "你会如何在不停机的情况下回收一张 500 GB 表的空间？",
+        "什么时候你会选择分区，而不是调优 autovacuum？"
+      ],
+      "vocab": [
+        {
+          "en": "dead tuple",
+          "zh": "死元组"
+        },
+        {
+          "en": "xmin horizon",
+          "zh": "xmin 视界（VACUUM 可清理的界限）"
+        },
+        {
+          "en": "table bloat",
+          "zh": "表膨胀"
+        },
+        {
+          "en": "idle in transaction",
+          "zh": "事务中空闲"
+        },
+        {
+          "en": "replication slot",
+          "zh": "复制槽"
+        }
+      ]
+    },
+    {
+      "id": "20261019-4",
+      "topic": "Middleware",
+      "difficulty": "Medium",
+      "title": "Searching for SKU \"AB-1234\" in Elasticsearch finds nothing",
+      "title_zh": "在 Elasticsearch 里搜索 SKU“AB-1234”什么也搜不到",
+      "question": "Your product search uses Elasticsearch. Merchants report that searching for an exact SKU such as `AB-1234` returns nothing, while searching for `ab` returns hundreds of unrelated products. The search code sends a `term` query on the `sku` field, and the index was created with dynamic mapping.\n\nExplain what is happening and how you would fix the mapping and the queries.",
+      "question_zh": "你们的商品搜索使用 Elasticsearch。商家反馈说，搜索像 `AB-1234` 这样的精确 SKU 什么都搜不到，而搜索 `ab` 却返回几百个不相关的商品。搜索代码对 `sku` 字段发送的是 `term` 查询，而索引是通过动态映射创建的。\n\n解释发生了什么，以及你会如何修正映射和查询。",
+      "answer": "**Why it happens.** With dynamic mapping, a string field becomes a `text` field (plus a `keyword` sub-field). A `text` field is analyzed at index time: the standard analyzer lowercases and splits `AB-1234` into the tokens `ab` and `1234`. A `term` query is not analyzed, so it looks for the exact token `AB-1234`, which does not exist in the index. Meanwhile any search for `ab` matches every SKU that starts with `AB-`.\n\n**The rule.** Identifiers (SKU, GTIN, order ID, status) are `keyword` fields and are searched with `term` or `terms`. Human text (titles, descriptions) is `text` and is searched with `match`. Mixing them up causes exactly these two symptoms.\n\n**The fix.** Define an explicit mapping instead of relying on dynamic mapping:\n\n```json\n{\n  \"mappings\": {\n    \"dynamic\": \"strict\",\n    \"properties\": {\n      \"sku\":   {\"type\": \"keyword\", \"normalizer\": \"lowercase_norm\"},\n      \"title\": {\"type\": \"text\", \"fields\": {\"raw\": {\"type\": \"keyword\"}}}\n    }\n  },\n  \"settings\": {\n    \"analysis\": {\"normalizer\": {\"lowercase_norm\": {\"type\": \"custom\", \"filter\": [\"lowercase\"]}}}\n  }\n}\n```\n\n- A `keyword` field with a lowercase normalizer keeps the SKU as one token but makes exact search case-insensitive.\n- `\"dynamic\": \"strict\"` rejects documents with unexpected fields instead of guessing their types.\n- You cannot change an existing field's type in place: create a new index with the new mapping, reindex into it, and switch an alias to it so the application never notices.\n\n**One search box for both.** If shoppers type either a SKU or words into the same box, run a `bool` query with a `should` clause for the SKU `term` (with a high boost) and a `match` on the title. An exact SKU hit then ranks first, and normal words still work.\n\n**Trade-offs.** Explicit mappings take effort up front and every new field needs a mapping change, but they prevent silent type guesses that are expensive to fix later, because fixing a mapping means reindexing.",
+      "answer_zh": "**原因。** 在动态映射下，字符串字段会被映射成一个 `text` 字段（外加一个 `keyword` 子字段）。`text` 字段在索引时会被分析：标准分析器会把 `AB-1234` 转成小写并拆分为 `ab` 和 `1234` 两个词元。`term` 查询不会被分析，所以它要找的是精确的词元 `AB-1234`，而索引里根本没有这个词元。与此同时，任何对 `ab` 的搜索，都会匹配所有以 `AB-` 开头的 SKU。\n\n**原则。** 标识符（SKU、GTIN、订单 ID、状态）应该是 `keyword` 字段，用 `term` 或 `terms` 搜索。人类书写的文本（标题、描述）应该是 `text` 字段，用 `match` 搜索。把两者搞混，正好会出现这两种症状。\n\n**修复。** 定义显式的映射，而不是依赖动态映射：\n\n```json\n{\n  \"mappings\": {\n    \"dynamic\": \"strict\",\n    \"properties\": {\n      \"sku\":   {\"type\": \"keyword\", \"normalizer\": \"lowercase_norm\"},\n      \"title\": {\"type\": \"text\", \"fields\": {\"raw\": {\"type\": \"keyword\"}}}\n    }\n  },\n  \"settings\": {\n    \"analysis\": {\"normalizer\": {\"lowercase_norm\": {\"type\": \"custom\", \"filter\": [\"lowercase\"]}}}\n  }\n}\n```\n\n- 带小写 normalizer 的 `keyword` 字段会把 SKU 保持为一个词元，同时让精确搜索不区分大小写。\n- `\"dynamic\": \"strict\"` 会拒绝包含意外字段的文档，而不是去猜测它们的类型。\n- 已有字段的类型无法原地修改：用新映射创建一个新索引，把数据重建索引到新索引里，然后把别名切换过去，应用程序完全感知不到。\n\n**一个搜索框同时支持两者。** 如果顾客在同一个搜索框里既可能输入 SKU，也可能输入词语，就用一个 `bool` 查询，在 `should` 子句中对 SKU 做 `term` 查询（并给予较高的权重），同时对标题做 `match` 查询。这样精确的 SKU 命中会排在最前面，普通词语的搜索也照样有效。\n\n**取舍。** 显式映射需要事先投入精力，每增加一个字段都要修改映射，但它能避免悄无声息的类型猜测，这种问题事后修复的代价很高，因为修正映射就意味着要重建索引。",
+      "followups": [
+        "How would you support searching by a partial SKU, such as \"1234\"?",
+        "How do you reindex 50 million products with no downtime?"
+      ],
+      "followups_zh": [
+        "你会如何支持按部分 SKU 搜索，比如“1234”？",
+        "你会如何在不停机的情况下为 5000 万个商品重建索引？"
+      ],
+      "vocab": [
+        {
+          "en": "analyzer",
+          "zh": "分析器"
+        },
+        {
+          "en": "keyword field",
+          "zh": "keyword 字段（不分词的精确值）"
+        },
+        {
+          "en": "dynamic mapping",
+          "zh": "动态映射"
+        },
+        {
+          "en": "index alias",
+          "zh": "索引别名"
+        }
+      ]
+    },
+    {
+      "id": "20261019-5",
+      "topic": "Java & CS",
+      "difficulty": "Hard",
+      "title": "Money bugs: 1.0 is not equal to 1.00, and split discounts lose a cent",
+      "title_zh": "金额 bug：1.0 不等于 1.00，拆分的折扣少了一分钱",
+      "question": "A Java order service has three money bugs. A `HashSet<BigDecimal>` of price points contains both `1.0` and `1.00`. A ¥1,000 discount shown on a Japanese order appears as ¥1,000.00 and the payment provider rejects the amount. And a €10.00 order-level discount split across three lines gives 3.33 each, so the order total is off by one cent.\n\nExplain each bug and how you would design money handling to avoid them.",
+      "question_zh": "一个 Java 订单服务有三个与金额相关的 bug。一个 `HashSet<BigDecimal>` 价格集合里同时有 `1.0` 和 `1.00`。日本订单上显示的 1,000 日元折扣变成了 ¥1,000.00，支付服务商拒绝了这个金额。还有一个订单级别的 10.00 欧元折扣，平摊到三行商品后每行是 3.33，导致订单总额差了一分钱。\n\n解释每个 bug，以及你会如何设计金额处理来避免它们。",
+      "answer": "**Bug 1: `equals` compares scale.** `BigDecimal.equals` treats `1.0` and `1.00` as different because their scales differ, and their hash codes differ too, so a `HashSet` keeps both. `compareTo` returns 0 for them, so a `TreeSet` keeps one. Use `compareTo` for numeric comparison, or normalize the scale (`setScale` to the currency's digits) before using values as keys.\n\n```java\nBigDecimal a = new BigDecimal(\"1.0\"), b = new BigDecimal(\"1.00\");\na.equals(b);                               // false: scales 1 and 2\na.compareTo(b);                            // 0\nnew HashSet<>(List.of(a, b)).size();       // 2\nnew TreeSet<>(List.of(a, b)).size();       // 1\n```\n\n**Bug 2: currencies have different minor units.** JPY has no minor unit, EUR has two decimal places, and some currencies have three. Hard-coding two decimals is wrong. `Currency.getInstance(\"JPY\").getDefaultFractionDigits()` returns 0, so round to that scale. Better still, store amounts as integers in minor units (cents, yen) together with the currency code, and convert only for display.\n\n**Bug 3: splitting loses remainders.** 10.00 / 3 rounded down is 3.33, and three times 3.33 is 9.99. Any allocation must distribute the remainder explicitly: compute the base share in minor units, then give one extra unit to the first few lines (or by largest fractional part), so the parts always add up to the total.\n\n```java\nlong[] allocate(long totalMinor, int parts) {\n    long base = totalMinor / parts, rest = totalMinor % parts;\n    long[] out = new long[parts];\n    for (int i = 0; i < parts; i++) out[i] = base + (i < rest ? 1 : 0);\n    return out; // 1000 cents over 3 lines -> 334, 333, 333\n}\n```\n\n**Other rules worth stating.** Never use `double` for money (`0.1 + 0.2` is `0.30000000000000004`), and never build a BigDecimal from a double: `new BigDecimal(0.1)` captures the binary error, while `BigDecimal.valueOf(0.1)` or a string gives `0.1`. Always pass a rounding mode when dividing, because `divide` throws for non-terminating results such as 10 / 3. Choose the rounding mode deliberately (for example `HALF_EVEN` to reduce bias in aggregates) and apply it at defined steps, such as per line or per invoice, as tax rules require.\n\n**Design.** Wrap money in a small value type (`Money(long minor, Currency currency)`) with arithmetic that refuses to mix currencies, and an `allocate` method. Then these rules live in one place instead of in every service.",
+      "answer_zh": "**Bug 1：`equals` 会比较小数位数。** `BigDecimal.equals` 认为 `1.0` 和 `1.00` 不相等，因为它们的小数位数（scale）不同，哈希码也不同，所以 `HashSet` 会把两个都保留下来。`compareTo` 对它们返回 0，所以 `TreeSet` 只保留一个。数值比较要用 `compareTo`；或者在把值用作键之前统一小数位数（按币种的位数调用 `setScale`）。\n\n```java\nBigDecimal a = new BigDecimal(\"1.0\"), b = new BigDecimal(\"1.00\");\na.equals(b);                               // false: scales 1 and 2\na.compareTo(b);                            // 0\nnew HashSet<>(List.of(a, b)).size();       // 2\nnew TreeSet<>(List.of(a, b)).size();       // 1\n```\n\n**Bug 2：不同币种的最小单位不同。** 日元没有更小的单位，欧元有两位小数，还有一些币种有三位小数。把小数位写死为两位是错的。`Currency.getInstance(\"JPY\").getDefaultFractionDigits()` 返回 0，所以要按这个位数取整。更好的做法是：以最小单位的整数（分、日元）存储金额，同时保存币种代码，只在展示时才做转换。\n\n**Bug 3：拆分时丢失余数。** 10.00 除以 3 向下取整是 3.33，三个 3.33 加起来是 9.99。任何分摊都必须显式地分配余数：先以最小单位计算每份的基础金额，再把多出来的单位逐个分给前几行（或者按小数部分从大到小分配），这样各部分加起来永远等于总额。\n\n```java\nlong[] allocate(long totalMinor, int parts) {\n    long base = totalMinor / parts, rest = totalMinor % parts;\n    long[] out = new long[parts];\n    for (int i = 0; i < parts; i++) out[i] = base + (i < rest ? 1 : 0);\n    return out; // 1000 cents over 3 lines -> 334, 333, 333\n}\n```\n\n**还值得强调的规则。** 永远不要用 `double` 表示金额（`0.1 + 0.2` 的结果是 `0.30000000000000004`），也永远不要用 double 构造 BigDecimal：`new BigDecimal(0.1)` 会把二进制误差带进来，而 `BigDecimal.valueOf(0.1)` 或者用字符串构造会得到 `0.1`。做除法时一定要传入舍入模式，因为对于 10 / 3 这样无限不循环的结果，`divide` 会抛出异常。要有意识地选择舍入模式（比如用 `HALF_EVEN` 来减少汇总时的偏差），并在规定的步骤上应用，比如按行或按发票，具体取决于税务规则的要求。\n\n**设计。** 把金额封装成一个小型值类型（`Money(long minor, Currency currency)`），让它的运算拒绝混用不同币种，并提供一个 `allocate` 方法。这样这些规则就集中在一个地方，而不是散落在每个服务里。",
+      "followups": [
+        "Where in an order would you round tax: per line or on the total? What changes?",
+        "How would you store prices for a currency whose minor unit changes?",
+        "Why does the allocation algorithm matter for refunds?"
+      ],
+      "followups_zh": [
+        "订单里的税应该在哪里取整：按行还是按总额？会有什么不同？",
+        "如果某个币种的最小单位发生了变化，你会如何存储价格？",
+        "为什么分摊算法对退款很重要？"
+      ],
+      "vocab": [
+        {
+          "en": "scale",
+          "zh": "小数位数（scale）"
+        },
+        {
+          "en": "minor unit",
+          "zh": "最小货币单位（如分）"
+        },
+        {
+          "en": "rounding mode",
+          "zh": "舍入模式"
+        },
+        {
+          "en": "allocation",
+          "zh": "分摊"
+        },
+        {
+          "en": "value object",
+          "zh": "值对象"
+        }
+      ]
+    }
+  ]
+}

@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 7 天、35 道题。
+共 8 天、40 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-10-19](days/2026-10-19.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Medium | [The API returns null instead of an empty list, and a client crashes](days/2026-10-19.md#q1) | API 返回了 null 而不是空列表，导致客户端崩溃 |
+| 2 | System Design | Hard | [An audit log that merchants and auditors can trust](days/2026-10-19.md#q2) | 一份商家和审计人员都能信任的审计日志 |
+| 3 | Database | Senior | [Tables keep growing and queries slow down, although rows are being deleted](days/2026-10-19.md#q3) | 表在不断膨胀、查询越来越慢，尽管一直在删除数据 |
+| 4 | Middleware | Medium | [Searching for SKU "AB-1234" in Elasticsearch finds nothing](days/2026-10-19.md#q4) | 在 Elasticsearch 里搜索 SKU“AB-1234”什么也搜不到 |
+| 5 | Java & CS | Hard | [Money bugs: 1.0 is not equal to 1.00, and split discounts lose a cent](days/2026-10-19.md#q5) | 金额 bug：1.0 不等于 1.00，拆分的折扣少了一分钱 |
 
 ## [2026-10-15](days/2026-10-15.md)
 
