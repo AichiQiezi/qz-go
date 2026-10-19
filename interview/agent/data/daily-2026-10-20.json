@@ -1,0 +1,221 @@
+{
+  "id": "daily-2026-10-20",
+  "order": 20261020,
+  "kind": "daily",
+  "title": "Daily set · Oct 20",
+  "title_zh": "每日新题 · 10 月 20 日",
+  "summary": "Five new agent questions: trimming an overgrown system prompt, making a writer-critic loop converge, changing a tool's schema without breaking live conversations, stopping generated descriptions from inventing product claims, and threat-modelling an agent platform before launch.",
+  "summary_zh": "五道新的 Agent 题：精简过度膨胀的系统提示词、让撰写者与评审者的循环收敛、在不破坏进行中对话的前提下修改工具 schema、阻止生成的描述编造商品宣称，以及在上线前为 Agent 平台做威胁建模。",
+  "generatedAt": "2026-10-20T06:54:42+08:00",
+  "questions": [
+    {
+      "id": "agent-daily-20261020-1",
+      "topic": "Context & Memory",
+      "difficulty": "Medium",
+      "title": "A 15,000-token system prompt, and the agent still ignores half the rules",
+      "title_zh": "系统提示词长达 1.5 万 token，Agent 却仍然无视一半的规则",
+      "question": "Your support agent's system prompt has grown for a year: every incident added a rule. It is now about 15,000 tokens, with sections such as \"IMPORTANT\", \"NEVER\", \"ALWAYS\", per-platform policies, tone guides and fifty examples. Despite this, the agent sometimes ignores rules, and two rules recently contradicted each other in a refund case.\n\nHow would you fix the prompt, and what would you move out of it?",
+      "question_zh": "你们客服 Agent 的系统提示词已经膨胀了一年：每出一次事故就加一条规则。现在它大约有 1.5 万 token，里面有“重要”“绝不”“必须”等段落，还有各平台的政策、语气指南和五十个示例。尽管如此，Agent 有时还是会无视规则，最近在一个退款案例中还出现了两条规则互相矛盾的情况。\n\n你会如何修正这份提示词？哪些内容应该从中移出去？",
+      "answer": "**The core idea.** A system prompt is not a rulebook that gets more reliable as it grows. Every request pays for all of it, attention is spread across all of it, and rules added in a hurry pile up into duplicates and contradictions. Keep in the prompt only what is needed on most turns, written clearly once; move the rest to places where it is loaded when relevant, or enforced in code.\n\n**Step 1: audit it.** Read the prompt like code under review: find rules that duplicate each other, rules that conflict, rules for situations that no longer exist, and rules the tools already enforce. Shouting (\"IMPORTANT\", \"you MUST\") was often added to push older models; newer models tend to follow plain instructions and can overreact to emphasis, so rewrite rules as calm, specific statements with the reason behind them.\n\n**Step 2: move things out.**\n\n- Hard rules about actions (refund limits, who may be emailed) belong in tool handlers and policy checks, where they are enforced every time, not in prose the model may weigh against other prose.\n- Facts that change (refund windows, plan prices, platform policies) come from tools or retrieval, so they are current and live in one place.\n- Situation-specific guidance (Meta disapprovals, chargebacks, German tone) loads only when the situation arises: as a skill, a retrieved playbook, or a sub-prompt chosen by a router.\n- Examples: keep a few diverse, representative ones; fifty examples mostly teach the model to copy their surface patterns.\n\n**Step 3: resolve conflicts explicitly.** When two policies can collide, write the priority order once (\"safety and legal rules, then merchant policy, then tone\"), and when a case is genuinely ambiguous, tell the agent to escalate rather than choose. Test the known conflict cases.\n\n**Step 4: prove it with evals.** Every rule exists because of some case. Turn those cases into an eval set before editing, run it before and after, and keep the shorter prompt only if it does at least as well. From then on, a new rule needs a failing case first, which stops the prompt from growing by reflex.\n\n**Trade-offs.** A shorter, stable system prompt is cheaper and caches well; content loaded on demand changes per request, so place it after the cached prefix. Moving rules into code is more work up front but turns \"usually followed\" into \"always enforced\" for the rules that matter most.",
+      "answer_zh": "**核心思路。** 系统提示词不是一本越厚越可靠的规则手册。每个请求都要为它的全部内容付费，模型的注意力也被分散到所有内容上，而匆忙加上的规则会堆积成重复和矛盾。提示词里只保留大多数轮次都需要的内容，并且每条都清楚地写一次；其余内容要么移到相关时才加载的地方，要么用代码来强制执行。\n\n**第一步：审查。** 像评审代码一样阅读这份提示词：找出互相重复的规则、互相冲突的规则、针对早已不存在的情况的规则，以及工具层已经在强制执行的规则。那些“大喊大叫”的写法（“重要”“你必须”）往往是为了驱动旧模型而加的；较新的模型通常能遵循平实的指令，反而可能对强调过度反应，所以要把规则改写成平静、具体的陈述，并写明背后的原因。\n\n**第二步：把内容移出去。**\n\n- 关于操作的硬性规则（退款上限、可以给谁发邮件）应该放在工具处理程序和策略检查里，在那里每次都会被强制执行，而不是写成文字，让模型拿去与其他文字权衡。\n- 会变化的事实（退款期限、套餐价格、平台政策）应该通过工具或检索获取，这样它们总是最新的，而且只维护在一个地方。\n- 针对特定情境的指导（Meta 拒登、拒付、德语语气）只在该情境出现时才加载：可以做成一个 skill、一份检索出来的处理手册，或者由路由器选择的子提示词。\n- 示例：只保留少量多样、有代表性的；五十个示例大多只会让模型去模仿它们的表面模式。\n\n**第三步：显式地解决冲突。** 当两条政策可能发生冲突时，把优先级顺序写一次（“先安全与法律规则，再商家政策，最后是语气”）；当某个案例确实模棱两可时，告诉 Agent 要升级处理，而不是自己选择。为已知的冲突案例编写测试。\n\n**第四步：用评测来证明。** 每条规则的存在都源于某个案例。在修改之前，先把这些案例变成评测集，修改前后各跑一次，只有当更短的提示词表现至少一样好时才保留它。从此以后，加一条新规则必须先有一个失败的案例，这样提示词就不会再条件反射式地膨胀。\n\n**取舍。** 更短、更稳定的系统提示词更便宜，也更容易命中缓存；按需加载的内容每个请求都不同，所以要放在缓存前缀之后。把规则移到代码里前期工作量更大，但能让最重要的那些规则从“通常会遵守”变成“始终被强制执行”。",
+      "followups": [
+        "How would you decide whether a rule belongs in the prompt or in code?",
+        "Who should own the system prompt, and how should changes to it be reviewed?"
+      ],
+      "followups_zh": [
+        "你会如何判断一条规则应该放在提示词里还是放在代码里？",
+        "系统提示词应该由谁负责？对它的修改应该如何评审？"
+      ],
+      "vocab": [
+        {
+          "en": "prompt bloat",
+          "zh": "提示词膨胀"
+        },
+        {
+          "en": "conflicting instructions",
+          "zh": "相互冲突的指令"
+        },
+        {
+          "en": "load on demand",
+          "zh": "按需加载"
+        },
+        {
+          "en": "priority order",
+          "zh": "优先级顺序"
+        },
+        {
+          "en": "A new rule needs a failing case first.",
+          "zh": "加一条新规则之前，先要有一个失败的案例。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261020-2",
+      "topic": "Multi-agent",
+      "difficulty": "Medium",
+      "title": "The writer and the critic agents argue in circles and never finish",
+      "title_zh": "撰写 Agent 和评审 Agent 来回争执，永远完不成",
+      "question": "Your ad-copy pipeline uses two model calls in a loop: a writer drafts a product description, a critic reviews it and returns feedback, the writer revises, and so on until the critic says \"approved\". Some products finish in two rounds; others loop ten or more times until a timeout, and the descriptions sometimes get worse with each round, for example longer and full of superlatives.\n\nWhy does this happen, and how would you make the loop converge?",
+      "question_zh": "你们的广告文案流水线让两次模型调用循环往复：撰写者起草商品描述，评审者审阅后给出反馈，撰写者修改，如此反复，直到评审者说“通过”。有些商品两轮就完成了；另一些则循环十次以上直到超时，而且描述有时一轮比一轮差，比如越写越长、满是夸张的形容词。\n\n为什么会这样？你会如何让这个循环收敛？",
+      "answer": "**The core idea.** This is the evaluator-optimizer pattern: one step generates, another evaluates and gives feedback, and you loop. It works when the evaluation criteria are clear and the feedback is actionable. With a vague critic (\"make it better\") there is no fixed target, so each round chases a new opinion, and with no stop rule other than approval, a picky critic never approves.\n\n**Why quality drifts.** Each critique adds a request (\"more persuasive\", \"mention the material\"), the writer adds text to satisfy it, and nothing ever asks it to remove anything. Without a length limit or a reference to the source data, the description grows and becomes generic. Two calls of the same model with similar prompts can also disagree on taste indefinitely.\n\n**Make the critic a checklist, not an opinion.** Give the critic a fixed rubric with yes/no criteria and ask it to return structured results:\n\n```json\n{\n  \"checks\": {\n    \"within_length_limit\": true,\n    \"mentions_material_from_source\": false,\n    \"no_unverified_claims\": true,\n    \"brand_voice_formal\": true\n  },\n  \"fix\": [\"Mention the material: 100% merino wool (from the product data)\"]\n}\n```\n\n- Run every check that code can do in code first: length, banned words, required attributes present. Only the subjective checks go to the model.\n- Feed back only the failed checks with concrete fixes, not a full essay, so the writer changes what is wrong and leaves the rest alone.\n- Stop when all checks pass, after a small maximum number of rounds, or when a round makes no progress; then keep the best version so far, not the last one, and send failures to review.\n\n**When the loop is worth it.** Evaluator-optimizer pays off when a first draft often misses clear criteria and feedback reliably fixes them, as with translation nuances or strict format rules. If most drafts pass on the first try, run the checks once and send failures to a single repair step, which is simpler and cheaper.\n\n**Trade-offs.** Each round costs two calls and adds latency, so measure the pass rate per round on real products and pick the maximum rounds from data. A critic using a different model or a very different prompt catches different problems, but must still use the same rubric, or you are back to arguing about taste.",
+      "answer_zh": "**核心思路。** 这就是评估者-优化者（evaluator-optimizer）模式：一步负责生成，另一步负责评估并给出反馈，然后循环。当评估标准清晰、反馈可以据此行动时，它很有效。如果评审者含糊其辞（“写得更好一点”），就没有固定的目标，每一轮都在追逐一个新的意见；而如果除了“通过”之外没有别的停止规则，一个挑剔的评审者就永远不会通过。\n\n**为什么质量会走偏。** 每次评审都会多提一个要求（“更有说服力”“提一下材质”），撰写者就加内容来满足它，却从来没有任何要求让它删掉什么。没有长度限制，也不参照源数据，描述就会越写越长、越来越空泛。两次使用相同模型、提示词又相似的调用，也可能在“品味”上无休止地意见不合。\n\n**让评审者变成一份清单，而不是一个意见。** 给评审者一份由是/否标准组成的固定评分细则，并要求它返回结构化的结果：\n\n```json\n{\n  \"checks\": {\n    \"within_length_limit\": true,\n    \"mentions_material_from_source\": false,\n    \"no_unverified_claims\": true,\n    \"brand_voice_formal\": true\n  },\n  \"fix\": [\"Mention the material: 100% merino wool (from the product data)\"]\n}\n```\n\n- 所有能用代码完成的检查都先在代码里做：长度、禁用词、必需属性是否出现。只有主观的检查才交给模型。\n- 只回传未通过的检查项及具体的修改方法，而不是一大段评论，这样撰写者只改错的部分，其余保持不变。\n- 当所有检查都通过、达到很小的最大轮数，或者某一轮没有任何进展时就停止；然后保留目前为止最好的版本，而不是最后一个版本，并把失败的交给人工审核。\n\n**什么时候值得用这个循环。** 当初稿经常不满足明确的标准、而反馈又能可靠地修正它们时，评估者-优化者模式就很划算，比如翻译中的细微差别或严格的格式规则。如果大多数初稿第一次就能通过，那就只检查一次，把没通过的交给一次单独的修复步骤，这样更简单也更便宜。\n\n**取舍。** 每一轮都要两次调用并增加延迟，所以要在真实商品上衡量每一轮的通过率，并根据数据确定最大轮数。使用不同模型或差别很大的提示词的评审者，能发现不同的问题，但它仍必须使用同一份评分细则，否则又会回到争论品味的局面。",
+      "followups": [
+        "How would you measure whether the loop actually improves quality?",
+        "Should the writer and the critic use the same model? Why or why not?"
+      ],
+      "followups_zh": [
+        "你会如何衡量这个循环是否真的提升了质量？",
+        "撰写者和评审者应该使用同一个模型吗？为什么？"
+      ],
+      "vocab": [
+        {
+          "en": "evaluator-optimizer",
+          "zh": "评估者-优化者模式"
+        },
+        {
+          "en": "rubric",
+          "zh": "评分细则"
+        },
+        {
+          "en": "stopping condition",
+          "zh": "停止条件"
+        },
+        {
+          "en": "actionable feedback",
+          "zh": "可据此行动的反馈"
+        },
+        {
+          "en": "Keep the best version, not the last one.",
+          "zh": "保留最好的版本，而不是最后一个版本。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261020-3",
+      "topic": "Tools & MCP",
+      "difficulty": "Hard",
+      "title": "Renaming one tool parameter broke the agent for a day",
+      "title_zh": "改了一个工具参数名，Agent 坏了一整天",
+      "question": "A developer renamed the `sku` parameter of the `get_product` tool to `product_id`, updated the tool's JSON schema and the handler, and deployed on a busy afternoon. For the rest of the day the agent failed on many conversations: some calls still sent `sku` and were rejected, some conversations that started before the deploy went in circles, and the model bill rose for a few hours.\n\nExplain each symptom and how you would change tools safely.",
+      "question_zh": "一位开发者把 `get_product` 工具的 `sku` 参数改名为 `product_id`，更新了工具的 JSON schema 和处理程序，并在一个繁忙的下午发布上线。那天剩下的时间里，Agent 在很多对话中都出了问题：有些调用仍然传 `sku` 而被拒绝，有些在发布之前就开始的对话陷入了循环，而模型费用也在几个小时内上涨了。\n\n解释每一个症状，以及你会如何安全地修改工具。",
+      "answer": "**The core idea.** A tool definition is an API contract with a client you cannot redeploy: the model, plus every conversation already in progress whose history contains calls in the old shape. Change it like a public API: backward compatible first, then migrate, then remove.\n\n**Why each symptom happened.**\n\n- Calls still sending `sku`: conversations that started before the deploy have earlier `tool_use` blocks with `sku` in their history, and the model imitates its own past calls. The new handler rejected them.\n- Looping conversations: the rejection message was vague, so the model kept retrying with the old name or guessing new ones.\n- Higher bill: tool definitions come first in the prompt, so changing one invalidates the prompt cache for every conversation, and every next request paid full price to rebuild it. The retries and loops added more.\n\n**A safe change, step by step.**\n\n- Accept both: the handler accepts `product_id` and still accepts `sku` as a deprecated alias, mapping it internally. The schema documents the new name; old calls keep working.\n- Make errors teach: if something is wrong, return a tool error that names the correct parameter, for example \"unknown parameter sku; use product_id\".\n- Version the tool set with the agent config and roll it out like a model change: evals first, then a canary, applied to new conversations; conversations already in progress keep the version they started with.\n- Deploy tool changes off-peak and expect one round of cache rebuilding; batch several tool changes into one release rather than many small ones.\n- Remove the alias only when metrics show no more calls use it.\n\n```go\ntype GetProductInput struct {\n\tProductID string `json:\"product_id\"`\n\tSKU       string `json:\"sku\"` // deprecated alias; remove when usage reaches zero\n}\n\nfunc (in GetProductInput) id() (string, error) {\n\tswitch {\n\tcase in.ProductID != \"\":\n\t\treturn in.ProductID, nil\n\tcase in.SKU != \"\":\n\t\tmetrics.Inc(\"get_product.deprecated_sku\")\n\t\treturn in.SKU, nil\n\tdefault:\n\t\treturn \"\", errors.New(\"missing product_id: pass the product ID, e.g. {\\\"product_id\\\": \\\"p_123\\\"}\")\n\t}\n}\n```\n\n**Trade-offs.** Keeping aliases adds a little code and a little ambiguity in the schema, but it is far cheaper than a day of failures. If you use a strict schema with no extra properties, you cannot silently accept the old name; then version the tool name instead (`get_product_v2`) and run both for a while.",
+      "answer_zh": "**核心思路。** 工具定义是一份 API 契约，而它的客户端是你无法重新部署的：模型本身，以及每一个正在进行中、历史记录里包含旧格式调用的对话。要像修改公开 API 一样修改它：先保持向后兼容，再迁移，最后才删除。\n\n**每个症状的原因。**\n\n- 调用仍然传 `sku`：发布之前就开始的对话，其历史中较早的 `tool_use` 块里用的是 `sku`，而模型会模仿自己过去的调用。新的处理程序拒绝了这些调用。\n- 陷入循环的对话：拒绝信息含糊不清，模型于是不停地用旧名称重试，或者瞎猜新名称。\n- 费用上涨：工具定义位于提示词的最前面，所以改动其中一个就会让所有对话的 prompt 缓存失效，接下来的每个请求都要全价重建缓存。重试和循环又进一步增加了费用。\n\n**安全修改的步骤。**\n\n- 两者都接受：处理程序接受 `product_id`，同时仍然接受 `sku` 作为已弃用的别名，并在内部做映射。schema 中记录新名称，旧调用照常有效。\n- 让错误信息起到指导作用：如果出了问题，就返回一个指明正确参数的工具错误，比如“未知参数 sku；请使用 product_id”。\n- 把工具集和 Agent 配置一起做版本管理，并像更换模型一样上线：先跑评测，再做金丝雀发布，只对新对话生效；正在进行的对话继续使用它们开始时的版本。\n- 在低峰期发布工具改动，并预期会有一轮缓存重建；把多项工具改动合并成一次发布，而不是拆成很多次小发布。\n- 只有当指标显示已经没有调用再使用旧别名时，才删除它。\n\n```go\ntype GetProductInput struct {\n\tProductID string `json:\"product_id\"`\n\tSKU       string `json:\"sku\"` // deprecated alias; remove when usage reaches zero\n}\n\nfunc (in GetProductInput) id() (string, error) {\n\tswitch {\n\tcase in.ProductID != \"\":\n\t\treturn in.ProductID, nil\n\tcase in.SKU != \"\":\n\t\tmetrics.Inc(\"get_product.deprecated_sku\")\n\t\treturn in.SKU, nil\n\tdefault:\n\t\treturn \"\", errors.New(\"missing product_id: pass the product ID, e.g. {\\\"product_id\\\": \\\"p_123\\\"}\")\n\t}\n}\n```\n\n**取舍。** 保留别名会增加一点代码，也会让 schema 稍显含糊，但这比一整天的故障便宜得多。如果你使用的是不允许额外属性的严格 schema，就无法悄悄接受旧名称；这时改为给工具名加版本号（`get_product_v2`），并让两个版本并行运行一段时间。",
+      "followups": [
+        "How would you test a tool change against conversations already in progress?",
+        "When is it acceptable to break a tool contract immediately?",
+        "How would you apply the same discipline to an MCP server other teams depend on?"
+      ],
+      "followups_zh": [
+        "你会如何针对正在进行中的对话测试一次工具改动？",
+        "什么情况下可以立即打破工具契约？",
+        "你会如何把同样的规范应用到其他团队所依赖的 MCP server 上？"
+      ],
+      "vocab": [
+        {
+          "en": "backward compatible",
+          "zh": "向后兼容"
+        },
+        {
+          "en": "deprecated alias",
+          "zh": "已弃用的别名"
+        },
+        {
+          "en": "tool contract",
+          "zh": "工具契约"
+        },
+        {
+          "en": "cache invalidation",
+          "zh": "缓存失效"
+        },
+        {
+          "en": "A tool definition is an API contract.",
+          "zh": "工具定义就是一份 API 契约。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261020-4",
+      "topic": "RAG",
+      "difficulty": "Hard",
+      "title": "Generated product descriptions claim features the product does not have",
+      "title_zh": "生成的商品描述宣称商品具备它其实没有的功能",
+      "question": "Your agent writes product descriptions for merchants from supplier data. Merchants complain: a jacket was described as \"waterproof\" when it is only water-resistant, a kettle as \"BPA-free\" with no such claim in the data, and a T-shirt as \"organic cotton\". One complaint came from a customer who returned the jacket.\n\nWhy does the model add these claims, and how would you stop it?",
+      "question_zh": "你们的 Agent 根据供应商数据为商家撰写商品描述。商家投诉说：一件夹克被描述成“防水”，而它其实只是防泼水；一个水壶被写成“不含 BPA”，数据里根本没有这种说法；一件 T 恤被写成“有机棉”。其中一个投诉来自一位退回了那件夹克的顾客。\n\n为什么模型会加上这些说法？你会如何阻止它？",
+      "answer": "**The core idea.** The model writes what typically appears in descriptions of similar products, so plausible attributes leak in from its general knowledge. For product claims that is not acceptable: anything stated as a fact about the product must come from the product data, and the system must be able to check that.\n\n**Fix 1: give clean, structured facts and a clear rule.** Pass the supplier data as structured attributes (material, care, certifications, dimensions), not a noisy blob, and state the rule: describe only attributes present in the data; never add certifications, materials or performance claims; if something important is missing, leave it out.\n\n**Fix 2: generate claims separately from prose.** Ask for structured output with two parts: the description and a list of factual claims, each linked to the attribute it comes from. Code then checks every claim against the data.\n\n```json\n{\n  \"description\": \"A lightweight jacket with a water-resistant shell and a packable hood...\",\n  \"claims\": [\n    {\"text\": \"water-resistant shell\", \"attribute\": \"water_resistance\", \"value\": \"water-resistant\"},\n    {\"text\": \"packable hood\", \"attribute\": \"hood\", \"value\": \"packable\"}\n  ]\n}\n```\n\n**Fix 3: check the prose too.** The claims list only helps if the description does not say more than the list. Run a second check that reads the description and extracts every factual statement, then match each one against the data. Keep a list of high-risk terms (waterproof, organic, BPA-free, hypoallergenic, medical or safety claims) that must map to a specific attribute or certification, and block the text if they do not.\n\n- Near-synonyms matter: water-resistant and waterproof are different claims, so the term list must encode such distinctions, not just exact strings.\n- Some claims are regulated in some markets. Route descriptions for sensitive categories (cosmetics, children's products, health) to human review.\n\n**Measure it.** Build an evaluation set of products with known attributes, including tricky near-misses like water-resistant jackets, and count unsupported claims per description. Track merchant edits and customer returns that mention the description as production signals.\n\n**Trade-offs.** Strict grounding makes descriptions a little plainer, and checks add latency and cost. For product claims that create legal and return risk, that is the right trade; the creative freedom belongs in tone and structure, not in facts.",
+      "answer_zh": "**核心思路。** 模型写的是同类商品描述中常见的内容，所以一些听起来合理的属性会从它的通用知识里“漏”进来。对于商品宣称来说，这是不可接受的：凡是作为商品事实陈述的内容，都必须来自商品数据，而且系统必须能够核实这一点。\n\n**修复一：提供干净、结构化的事实和明确的规则。** 把供应商数据作为结构化属性传入（材质、保养方式、认证、尺寸），而不是一大段杂乱的文本，并写明规则：只描述数据中存在的属性；绝不添加认证、材质或性能方面的宣称；如果缺少重要信息，就不写。\n\n**修复二：把宣称和正文分开生成。** 要求结构化输出，包含两部分：描述正文，以及一个事实宣称列表，每条宣称都关联到它所依据的属性。然后由代码逐条对照数据检查这些宣称。\n\n```json\n{\n  \"description\": \"A lightweight jacket with a water-resistant shell and a packable hood...\",\n  \"claims\": [\n    {\"text\": \"water-resistant shell\", \"attribute\": \"water_resistance\", \"value\": \"water-resistant\"},\n    {\"text\": \"packable hood\", \"attribute\": \"hood\", \"value\": \"packable\"}\n  ]\n}\n```\n\n**修复三：正文也要检查。** 只有当描述正文说的内容不超出宣称列表时，这个列表才有用。再做一次检查：读取描述正文，提取其中所有的事实陈述，并逐条与数据比对。维护一份高风险词清单（防水、有机、不含 BPA、低过敏性、医疗或安全方面的宣称），这些词必须对应到某个具体的属性或认证，否则就拦截这段文字。\n\n- 近义词很关键：防泼水和防水是不同的宣称，所以高风险词清单必须体现这类区别，而不仅仅是精确匹配字符串。\n- 有些宣称在某些市场是受监管的。把敏感品类（化妆品、儿童用品、健康类）的描述交给人工审核。\n\n**度量它。** 用属性已知的商品构建评测集，其中要包含像防泼水夹克这样容易混淆的例子，并统计每篇描述中没有依据的宣称数量。把商家对描述的修改，以及提到描述的顾客退货，作为线上信号进行跟踪。\n\n**取舍。** 严格的依据要求会让描述稍显平淡，检查也会增加延迟和成本。但对于会带来法律和退货风险的商品宣称来说，这是正确的取舍；创意的空间应该在语气和结构上，而不是在事实上。",
+      "followups": [
+        "Supplier data itself contains a false claim. Whose problem is it, and what can the system do?",
+        "How would you build the claim-extraction check without a large labelled dataset?"
+      ],
+      "followups_zh": [
+        "供应商数据本身就包含不实的宣称。这是谁的问题？系统能做些什么？",
+        "在没有大量标注数据的情况下，你会如何构建宣称提取的检查？"
+      ],
+      "vocab": [
+        {
+          "en": "grounding",
+          "zh": "有据可依（只基于给定的数据）"
+        },
+        {
+          "en": "unsupported claim",
+          "zh": "没有依据的宣称"
+        },
+        {
+          "en": "high-risk term",
+          "zh": "高风险词"
+        },
+        {
+          "en": "structured output",
+          "zh": "结构化输出"
+        },
+        {
+          "en": "Facts come from the data; creativity goes into tone.",
+          "zh": "事实来自数据；创意体现在语气上。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261020-5",
+      "topic": "Safety & Security",
+      "difficulty": "Senior",
+      "title": "Threat-model the agent platform before it launches to merchants",
+      "title_zh": "在面向商家上线之前，为 Agent 平台做威胁建模",
+      "question": "Your company is about to launch an agent platform for merchants: agents read orders, products, customer emails and ad accounts; they can update products, draft and send emails, adjust ad budgets within limits, and connect to third-party MCP servers chosen by the merchant. Security asks you to lead the threat model before launch.\n\nHow do you run it, what are the main threats, and what must be in place before launch?",
+      "question_zh": "你们公司即将面向商家推出一个 Agent 平台：Agent 可以读取订单、商品、顾客邮件和广告账户；可以更新商品、起草并发送邮件、在限额内调整广告预算，还可以连接商家自选的第三方 MCP server。安全团队要求你在上线前牵头完成威胁建模。\n\n你会如何开展？主要威胁有哪些？上线之前必须准备好哪些措施？",
+      "answer": "**The core idea.** Threat modelling an agent is ordinary threat modelling with one extra assumption: the model is a component that can be talked into anything by text it reads. So map where untrusted text enters, what the agent can reach, and where data can leave, then make sure that even a fully manipulated model cannot cause unacceptable harm.\n\n**Step 1: map the system.** Draw the data flow: users, the agent loop, the model API, each tool and its backend, memory, logs and traces, third-party MCP servers. Mark trust boundaries and list the assets: customer personal data, merchant credentials, money (refunds, ad spend), the merchant's catalog and reputation.\n\n**Step 2: list entry points for untrusted text.** Customer emails, product data from suppliers, web pages, ad-platform messages, file uploads, memory written earlier, and tool descriptions and results from third-party MCP servers. Any of these can carry instructions.\n\n**Step 3: the main threats.**\n\n- Data exfiltration: the agent has private data, reads untrusted content and can send email, the dangerous combination often called the lethal trifecta.\n- Unauthorized actions: injected or confused instructions cause product changes, emails or budget changes the merchant did not want.\n- Cross-tenant access: a bug or a manipulated tool argument reaches another merchant's data.\n- Malicious or compromised MCP servers: poisoned tool descriptions, harmful results, or a server that changes behaviour after it was approved.\n- Leakage through the platform itself: secrets in prompts, personal data in logs, traces and eval sets, and memory that persists injected instructions.\n- Abuse and cost attacks: inputs designed to make the agent loop, fan out or generate huge outputs.\n\n**Step 4: controls that must exist before launch.** Tenant isolation enforced in tool handlers from the authenticated session; credentials only in handlers, never in context; least-privilege, narrow tools; hard limits and approval gates on money and outbound messages; recipient and domain allowlists; an allowlist and pinned versions for third-party MCP servers, with their output treated as untrusted; redaction and retention rules for logs and traces; budgets and loop limits per run; an audit log of every action; and a kill switch per merchant and per tool.\n\n**Step 5: verify and keep it alive.** Red-team before launch with injection attempts through every entry point, run an automated injection and cross-tenant suite in CI, define incident response (how to stop an agent, notify merchants, and investigate from traces), and revisit the model whenever a tool, data source or integration is added.\n\n**Trade-offs.** Every control reduces what the agent can do on its own. Prioritize by impact: the strictest controls on money, data leaving the system and cross-tenant access, lighter ones on read-only work. Launch with narrower capabilities and widen them as evidence accumulates.",
+      "answer_zh": "**核心思路。** 为 Agent 做威胁建模，就是在普通威胁建模的基础上多加一个假设：模型这个组件，可以被它读到的文字说服去做任何事。所以要梳理清楚：不可信的文本从哪里进入、Agent 能触及哪些东西、数据可能从哪里流出，然后确保即使模型被完全操纵，也不会造成不可接受的危害。\n\n**第一步：梳理系统。** 画出数据流：用户、Agent 循环、模型 API、每个工具及其后端、记忆、日志与链路追踪、第三方 MCP server。标出信任边界，并列出资产：顾客个人数据、商家凭证、资金（退款、广告花费）、商家的商品目录和声誉。\n\n**第二步：列出不可信文本的入口。** 顾客邮件、来自供应商的商品数据、网页、广告平台的消息、上传的文件、之前写入的记忆，以及第三方 MCP server 的工具描述和返回结果。其中任何一个都可能夹带指令。\n\n**第三步：主要威胁。**\n\n- 数据外泄：Agent 拥有私有数据、会读取不可信内容，还能发送邮件，这正是常被称为“致命三要素”的危险组合。\n- 未经授权的操作：被注入或被混淆的指令，导致商家并不想要的商品修改、邮件发送或预算调整。\n- 跨租户访问：一个 bug 或被操纵的工具参数，访问到了其他商家的数据。\n- 恶意或被攻破的 MCP server：被投毒的工具描述、有害的返回结果，或者在获得批准之后改变行为的 server。\n- 通过平台自身泄露：提示词里的密钥、日志、链路追踪和评测集里的个人数据，以及让注入的指令得以持久化的记忆。\n- 滥用与成本攻击：专门设计的输入，让 Agent 陷入循环、大量扇出或生成巨量输出。\n\n**第四步：上线前必须具备的控制措施。** 在工具处理程序中基于已认证会话强制执行租户隔离；凭证只存在于处理程序中，绝不进入上下文；最小权限、职责单一的工具；对资金和外发消息设置硬性上限和审批关卡；收件人和域名白名单；第三方 MCP server 的白名单和版本锁定，并把它们的输出视为不可信；日志和链路追踪的脱敏与保留规则；每次运行的预算和循环次数上限；记录每个操作的审计日志；以及按商家、按工具的紧急关停开关。\n\n**第五步：验证并持续维护。** 上线前通过每一个入口进行注入尝试的红队测试，在 CI 中运行自动化的注入和跨租户测试套件，制定事件响应流程（如何停掉一个 Agent、通知商家、根据链路追踪展开调查），并在每次新增工具、数据源或集成时重新审视威胁模型。\n\n**取舍。** 每一项控制措施都会削减 Agent 自主行事的能力。要按影响程度排定优先级：对资金、数据流出系统和跨租户访问施加最严格的控制，对只读操作施加较轻的控制。先以较窄的能力范围上线，再随着证据的积累逐步放宽。",
+      "followups": [
+        "Which three controls would you refuse to launch without, and why?",
+        "How would you vet a third-party MCP server a merchant wants to connect?",
+        "What does incident response look like when an agent misbehaves for one merchant?"
+      ],
+      "followups_zh": [
+        "哪三项控制措施是你坚持没有就不上线的？为什么？",
+        "商家想接入一个第三方 MCP server，你会如何审核它？",
+        "当 Agent 在某个商家那里出现异常行为时，事件响应流程是怎样的？"
+      ],
+      "vocab": [
+        {
+          "en": "threat model",
+          "zh": "威胁模型"
+        },
+        {
+          "en": "trust boundary",
+          "zh": "信任边界"
+        },
+        {
+          "en": "entry point",
+          "zh": "入口点"
+        },
+        {
+          "en": "kill switch",
+          "zh": "紧急关停开关"
+        },
+        {
+          "en": "Assume the model can be talked into anything by text it reads.",
+          "zh": "假设模型可以被它读到的文字说服去做任何事。"
+        }
+      ]
+    }
+  ]
+}

@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 12 个模块、44 道题。
+共 13 个模块、49 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -159,3 +159,17 @@ Five new agent questions: getting parallel tool calls to happen, reading a close
 | 3 | RAG | Hard | [Letting the agent answer "which of my products..." questions with SQL](modules/daily-2026-10-19.md#q3) | 让 Agent 用 SQL 回答“我的哪些商品……”这类问题 |
 | 4 | Production | Hard | [Moving every agent to a newer model without surprising 3,000 merchants](modules/daily-2026-10-19.md#q4) | 把所有 Agent 迁移到更新的模型，同时不让 3000 个商家感到意外 |
 | 5 | Evals & Observability | Senior | [Twenty teams build agents. Design the shared tracing and evaluation platform](modules/daily-2026-10-19.md#q5) | 二十个团队都在构建 Agent，请设计共享的追踪与评测平台 |
+
+## [Daily set · Oct 20 · 每日新题 · 10 月 20 日](modules/daily-2026-10-20.md)
+
+Five new agent questions: trimming an overgrown system prompt, making a writer-critic loop converge, changing a tool's schema without breaking live conversations, stopping generated descriptions from inventing product claims, and threat-modelling an agent platform before launch.
+
+> 五道新的 Agent 题：精简过度膨胀的系统提示词、让撰写者与评审者的循环收敛、在不破坏进行中对话的前提下修改工具 schema、阻止生成的描述编造商品宣称，以及在上线前为 Agent 平台做威胁建模。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Context & Memory | Medium | [A 15,000-token system prompt, and the agent still ignores half the rules](modules/daily-2026-10-20.md#q1) | 系统提示词长达 1.5 万 token，Agent 却仍然无视一半的规则 |
+| 2 | Multi-agent | Medium | [The writer and the critic agents argue in circles and never finish](modules/daily-2026-10-20.md#q2) | 撰写 Agent 和评审 Agent 来回争执，永远完不成 |
+| 3 | Tools & MCP | Hard | [Renaming one tool parameter broke the agent for a day](modules/daily-2026-10-20.md#q3) | 改了一个工具参数名，Agent 坏了一整天 |
+| 4 | RAG | Hard | [Generated product descriptions claim features the product does not have](modules/daily-2026-10-20.md#q4) | 生成的商品描述宣称商品具备它其实没有的功能 |
+| 5 | Safety & Security | Senior | [Threat-model the agent platform before it launches to merchants](modules/daily-2026-10-20.md#q5) | 在面向商家上线之前，为 Agent 平台做威胁建模 |
