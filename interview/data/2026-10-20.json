@@ -1,0 +1,199 @@
+{
+  "date": "2026-10-20",
+  "generatedAt": "2026-10-20T06:44:58+08:00",
+  "questions": [
+    {
+      "id": "20261020-1",
+      "topic": "Go",
+      "difficulty": "Hard",
+      "title": "A product-sync worker pool hangs forever when one item fails",
+      "title_zh": "商品同步的 worker 池在某个商品失败后永远卡住",
+      "question": "A sync job pushes 10,000 products to an ad platform with a small worker pool. Most nights it finishes, but some nights it hangs forever and has to be killed. It always hangs on nights when at least one product fails. Simplified:\n\n```go\njobs := make(chan Product)\nerrc := make(chan error)\nvar wg sync.WaitGroup\nfor w := 0; w < 8; w++ {\n\twg.Add(1)\n\tgo func() {\n\t\tdefer wg.Done()\n\t\tfor p := range jobs {\n\t\t\tif err := push(p); err != nil {\n\t\t\t\terrc <- err\n\t\t\t\treturn\n\t\t\t}\n\t\t}\n\t}()\n}\nfor _, p := range products {\n\tjobs <- p\n}\nclose(jobs)\nwg.Wait()\n```\n\nFind the bug, explain exactly why it hangs, and rewrite it properly.",
+      "question_zh": "一个同步任务用一个小型 worker 池把 1 万个商品推送到广告平台。大多数晚上它都能跑完，但有些晚上会永远卡住，只能手动杀掉。卡住的那些晚上，总是至少有一个商品推送失败。简化后的代码如下：\n\n```go\njobs := make(chan Product)\nerrc := make(chan error)\nvar wg sync.WaitGroup\nfor w := 0; w < 8; w++ {\n\twg.Add(1)\n\tgo func() {\n\t\tdefer wg.Done()\n\t\tfor p := range jobs {\n\t\t\tif err := push(p); err != nil {\n\t\t\t\terrc <- err\n\t\t\t\treturn\n\t\t\t}\n\t\t}\n\t}()\n}\nfor _, p := range products {\n\tjobs <- p\n}\nclose(jobs)\nwg.Wait()\n```\n\n找出 bug，准确解释它为什么会卡住，并正确地重写它。",
+      "answer": "**Why it hangs.** `errc` is unbuffered and nobody reads it until all jobs are sent and all workers have finished, which never happens. The worker that fails blocks forever on `errc <- err`, so `wg.Wait()` can never return. Worse, each failing worker also stops taking jobs: if eight items fail, all workers are blocked on `errc` and the main goroutine blocks on `jobs <- p`. In a small program the runtime reports \"all goroutines are asleep - deadlock!\", but in a real service other goroutines (HTTP server, timers) are alive, so it simply hangs silently.\n\n**The general lesson.** Every channel send needs a guaranteed receiver or a way out. When a pipeline can fail, the producer, the workers and the error reporting must all be able to stop when something goes wrong, which is what a shared cancellation context provides.\n\n```go\nfunc syncAll(ctx context.Context, products []Product) error {\n\tg, ctx := errgroup.WithContext(ctx) // first error cancels ctx\n\tjobs := make(chan Product)\n\tg.Go(func() error {\n\t\tdefer close(jobs)\n\t\tfor _, p := range products {\n\t\t\tselect {\n\t\t\tcase jobs <- p:\n\t\t\tcase <-ctx.Done(): // stop producing once a worker failed\n\t\t\t\treturn ctx.Err()\n\t\t\t}\n\t\t}\n\t\treturn nil\n\t})\n\tfor w := 0; w < 8; w++ {\n\t\tg.Go(func() error {\n\t\t\tfor p := range jobs {\n\t\t\t\tif err := push(ctx, p); err != nil {\n\t\t\t\t\treturn fmt.Errorf(\"product %s: %w\", p.ID, err)\n\t\t\t\t}\n\t\t\t}\n\t\t\treturn nil\n\t\t})\n\t}\n\treturn g.Wait() // returns the first error\n}\n```\n\n**Should one failure stop everything?** For a sync of 10,000 products, usually not: one bad product should not block the other 9,999. Then record failures instead of returning them: collect them in a mutex-protected slice or send them to a buffered or concurrently drained channel, keep going, and report the failed IDs at the end for retry. Stop early only for errors that affect everything, such as an expired token or a rate limit, and make `push` respect the context so in-flight calls end quickly.\n\n**How to catch this class of bug.** Run the job in tests with injected failures and a timeout, use `go test -race`, and in production expose a goroutine dump (`net/http/pprof`) so a hung job shows exactly which line every goroutine is blocked on.",
+      "answer_zh": "**为什么会卡住。** `errc` 是无缓冲的，而在所有任务发送完毕、所有 worker 结束之前，没有人去读它，可这个时刻永远不会到来。失败的那个 worker 会永远阻塞在 `errc <- err` 上，所以 `wg.Wait()` 永远无法返回。更糟的是，每个失败的 worker 也不再领取任务：如果有八个商品失败，所有 worker 都会阻塞在 `errc` 上，主 goroutine 则阻塞在 `jobs <- p` 上。在小程序里，运行时会报告“all goroutines are asleep - deadlock!”，但在真实的服务中还有其他 goroutine 存活（HTTP 服务、定时器），所以它只会悄无声息地卡住。\n\n**一般性的教训。** 每一次向 channel 发送，都需要有确定的接收方，或者有退出的途径。当一条流水线可能失败时，生产者、worker 和错误上报都必须能在出问题时停下来，而共享的可取消 context 正好提供了这一点。\n\n```go\nfunc syncAll(ctx context.Context, products []Product) error {\n\tg, ctx := errgroup.WithContext(ctx) // first error cancels ctx\n\tjobs := make(chan Product)\n\tg.Go(func() error {\n\t\tdefer close(jobs)\n\t\tfor _, p := range products {\n\t\t\tselect {\n\t\t\tcase jobs <- p:\n\t\t\tcase <-ctx.Done(): // stop producing once a worker failed\n\t\t\t\treturn ctx.Err()\n\t\t\t}\n\t\t}\n\t\treturn nil\n\t})\n\tfor w := 0; w < 8; w++ {\n\t\tg.Go(func() error {\n\t\t\tfor p := range jobs {\n\t\t\t\tif err := push(ctx, p); err != nil {\n\t\t\t\t\treturn fmt.Errorf(\"product %s: %w\", p.ID, err)\n\t\t\t\t}\n\t\t\t}\n\t\t\treturn nil\n\t\t})\n\t}\n\treturn g.Wait() // returns the first error\n}\n```\n\n**一个失败就应该停掉一切吗？** 对于同步 1 万个商品，通常不应该：一个有问题的商品不应该阻塞其余 9999 个。这时要记录失败，而不是把错误返回：把它们收集到一个加锁保护的切片里，或者发送到一个有缓冲或被并发读取的 channel，继续处理，最后汇报失败的 ID 以便重试。只有遇到影响全局的错误时才提前停止，比如 token 过期或被限流，并让 `push` 遵守 context，使正在进行的调用能尽快结束。\n\n**如何发现这类 bug。** 在测试中注入失败并设置超时来运行这个任务，使用 `go test -race`，在生产环境中暴露 goroutine 转储（`net/http/pprof`），这样任务卡住时就能准确看到每个 goroutine 阻塞在哪一行。",
+      "followups": [
+        "How would you add a per-platform rate limit to this worker pool?",
+        "What changes if push must be retried with backoff?"
+      ],
+      "followups_zh": [
+        "你会如何为这个 worker 池加上按平台的限流？",
+        "如果 push 需要带退避的重试，会有什么变化？"
+      ],
+      "vocab": [
+        {
+          "en": "unbuffered channel",
+          "zh": "无缓冲 channel"
+        },
+        {
+          "en": "goroutine leak",
+          "zh": "goroutine 泄漏"
+        },
+        {
+          "en": "cancellation",
+          "zh": "取消"
+        },
+        {
+          "en": "errgroup",
+          "zh": "errgroup（带错误传播的 goroutine 组）"
+        }
+      ]
+    },
+    {
+      "id": "20261020-2",
+      "topic": "System Design",
+      "difficulty": "Medium",
+      "title": "Product images: uploads, resizing, CDN, and old images that never go away",
+      "title_zh": "商品图片：上传、缩放、CDN，以及怎么也去不掉的旧图",
+      "question": "Merchants upload product photos that are shown in the storefront and sent to Google Shopping and Meta catalogs. Today the API server resizes images during the upload request, uploads are slow and sometimes time out, and when a merchant replaces a photo the old one keeps showing for hours in the storefront and in ads.\n\nDesign the image pipeline.",
+      "question_zh": "商家上传的商品照片会展示在店铺前台，并发送到 Google Shopping 和 Meta 的商品目录。现在 API 服务器在上传请求中同步缩放图片，上传很慢，有时还会超时；而且商家替换照片后，旧照片还会在店铺前台和广告中显示好几个小时。\n\n请设计这条图片处理流水线。",
+      "answer": "**Upload directly to object storage.** The API server issues a short-lived pre-signed upload URL, the client uploads the file straight to object storage, and then calls the API to confirm. Large files never pass through your servers, so uploads no longer compete with API traffic or hit request timeouts.\n\n**Process asynchronously.** The confirmation publishes an event to a queue. Workers validate the file (real image type, size limits, malware scan), strip metadata, and generate the variants the storefront and ad platforms need. The product shows the image once processing finishes; until then the UI shows \"processing\".\n\n**Fix stale images with immutable URLs.** Name every stored image by a hash of its content, for example `img/3f9a.../800w.webp`. A new photo gets a new URL, so the CDN and browsers can cache each URL forever, and replacing a photo is just pointing the product at a new URL. No cache purge is needed, and the old image disappears as soon as pages and feeds reference the new one.\n\n- Storefront: serve variants (sizes, WebP or AVIF) from the CDN, chosen with responsive image markup.\n- Ad platforms: they fetch images from the URL in your feed and keep their own copy, so a changed URL is what makes them fetch the new image. Reusing the same URL with new content is exactly why ads kept the old photo.\n- Cleanup: a background job deletes images no product has referenced for a while, after a grace period so feeds and caches have moved on.\n\n**Trade-offs.** Asynchronous processing means the image is not usable immediately, so the UI must handle a processing state. Generating variants up front costs storage; resizing on demand at the CDN edge with caching is the alternative and suits catalogs with many sizes. Content-hash URLs make caching trivial but require the product record, not a fixed path, to be the source of truth for which image is current.",
+      "answer_zh": "**直接上传到对象存储。** API 服务器签发一个短时有效的预签名上传 URL，客户端直接把文件上传到对象存储，然后调用 API 确认。大文件不再经过你们的服务器，上传也就不会再和 API 流量争抢资源，或者触发请求超时。\n\n**异步处理。** 上传确认后向队列发布一个事件。worker 校验文件（真实的图片类型、大小限制、恶意文件扫描），去除元数据，并生成店铺前台和广告平台所需的各种尺寸版本。处理完成后商品才会展示这张图片；在此之前界面显示“处理中”。\n\n**用不可变 URL 解决旧图问题。** 每张存储的图片都按其内容的哈希值命名，例如 `img/3f9a.../800w.webp`。新照片会得到新的 URL，所以 CDN 和浏览器可以永久缓存每个 URL；替换照片只是让商品指向新的 URL。这样不需要清除缓存，只要页面和商品 feed 引用了新图片，旧图片就会消失。\n\n- 店铺前台：从 CDN 提供各种版本（不同尺寸，WebP 或 AVIF），通过响应式图片标记来选择。\n- 广告平台：它们会从你们 feed 中的 URL 抓取图片并保存自己的副本，所以正是 URL 的变化促使它们去抓取新图片。用同一个 URL 存放新内容，正是广告里一直显示旧照片的原因。\n- 清理：由一个后台任务删除一段时间内没有任何商品引用的图片，并预留一段宽限期，确保 feed 和缓存都已切换到新图。\n\n**取舍。** 异步处理意味着图片不能马上使用，所以界面必须处理“处理中”的状态。预先生成各种尺寸会占用存储；另一种做法是在 CDN 边缘按需缩放并缓存，适合需要很多尺寸的商品目录。按内容哈希命名的 URL 让缓存变得非常简单，但要求由商品记录（而不是某个固定路径）来决定当前使用的是哪张图片。",
+      "followups": [
+        "How would you protect the system from a malicious file disguised as an image?",
+        "A merchant uploads 5,000 images at once. What changes?"
+      ],
+      "followups_zh": [
+        "你会如何防止伪装成图片的恶意文件？",
+        "一个商家一次上传 5000 张图片。会有什么变化？"
+      ],
+      "vocab": [
+        {
+          "en": "pre-signed URL",
+          "zh": "预签名 URL"
+        },
+        {
+          "en": "immutable URL",
+          "zh": "不可变 URL"
+        },
+        {
+          "en": "cache invalidation",
+          "zh": "缓存失效"
+        },
+        {
+          "en": "content hash",
+          "zh": "内容哈希"
+        }
+      ]
+    },
+    {
+      "id": "20261020-3",
+      "topic": "Database",
+      "difficulty": "Hard",
+      "title": "Deep pages of the order list are slow, and rows go missing between pages",
+      "title_zh": "订单列表翻到后面很慢，而且翻页时会漏掉数据",
+      "question": "The merchant admin lists orders newest first with `ORDER BY created_at DESC LIMIT 50 OFFSET :n`. Large merchants complain that page 200 takes seconds, and an export job that pages through all orders this way sometimes misses orders or includes the same order twice.\n\nExplain both problems and how you would fix them.",
+      "question_zh": "商家后台按最新优先列出订单，用的是 `ORDER BY created_at DESC LIMIT 50 OFFSET :n`。大商家抱怨翻到第 200 页要好几秒，而一个用同样方式分页遍历所有订单的导出任务，有时会漏掉订单，或者把同一个订单导出两次。\n\n解释这两个问题，以及你会如何修复。",
+      "answer": "**Why deep pages are slow.** OFFSET does not jump: to return rows 10,001 to 10,050 the database must produce and discard the first 10,000 rows in order. The cost grows with the page number, and a sort without a matching index makes it worse.\n\n**Why rows go missing or repeat.** OFFSET counts positions, and positions shift while you page. If a new order arrives between two requests, every row moves down one place and the next page repeats a row; if an order is deleted or its sort value changes, rows move up and one is skipped. Ties make it worse: many orders share the same `created_at`, and without a unique tie-breaker the database may return tied rows in a different order on each query.\n\n**The fix: keyset (cursor) pagination.** Sort by a unique key, remember the last row of the page, and ask for rows after it. With an index on `(merchant_id, created_at DESC, id DESC)`, each page is an index range scan of 50 rows, no matter how deep:\n\n```sql\nCREATE INDEX orders_m_created_id ON orders (merchant_id, created_at DESC, id DESC);\n\nSELECT id, created_at, total\nFROM orders\nWHERE merchant_id = $1\n  AND (created_at, id) < ($2, $3)   -- the last row of the previous page\nORDER BY created_at DESC, id DESC\nLIMIT 50;\n```\n\nThe API returns an opaque cursor (the encoded `created_at` and `id` of the last row) instead of a page number. New orders no longer shift later pages, and the unique `id` tie-breaker makes the order stable.\n\n**For the export job.** Use the same keyset loop, ideally on a replica, over a stable column that never changes (an ID, or creation time plus ID), not over a column such as `updated_at` that changes during the export. If the export must reflect one exact moment, run it inside a single repeatable-read transaction, or export from a snapshot.\n\n**Trade-offs.** Keyset pagination cannot jump to page 200 directly; most interfaces are fine with next and previous plus filters and search, which is what users actually need. If page numbers are required, cap the depth or show an approximate total count instead of computing exact positions.",
+      "answer_zh": "**为什么越往后翻越慢。** OFFSET 并不能直接跳过去：为了返回第 10001 到 10050 行，数据库必须按顺序生成并丢弃前 10000 行。成本随页码增长，如果排序没有匹配的索引，情况会更糟。\n\n**为什么会漏数据或重复。** OFFSET 计算的是位置，而在翻页的过程中位置会变。如果两次请求之间来了一个新订单，所有行都会往后挪一位，下一页就会重复一行；如果有订单被删除或者排序字段变了，行会往前挪，就会跳过一行。并列值让情况更糟：很多订单的 `created_at` 相同，如果没有唯一的次级排序键，数据库每次查询返回这些并列行的顺序都可能不同。\n\n**修复：键集（游标）分页。** 按一个唯一的键排序，记住当前页的最后一行，然后查询排在它之后的行。在 `(merchant_id, created_at DESC, id DESC)` 上建立索引后，无论翻到多深，每一页都只是在索引上扫描 50 行的一个区间：\n\n```sql\nCREATE INDEX orders_m_created_id ON orders (merchant_id, created_at DESC, id DESC);\n\nSELECT id, created_at, total\nFROM orders\nWHERE merchant_id = $1\n  AND (created_at, id) < ($2, $3)   -- the last row of the previous page\nORDER BY created_at DESC, id DESC\nLIMIT 50;\n```\n\nAPI 返回一个不透明的游标（最后一行的 `created_at` 和 `id` 编码后的值），而不是页码。新订单不再会让后面的页发生偏移，唯一的 `id` 作为次级排序键也让顺序变得稳定。\n\n**对于导出任务。** 使用同样的键集循环，最好在只读副本上运行，并且基于一个永不改变的列（ID，或者创建时间加 ID），而不是像 `updated_at` 这样在导出过程中会变化的列。如果导出必须反映某个精确的时刻，就在单个可重复读事务里运行，或者从快照导出。\n\n**取舍。** 键集分页无法直接跳到第 200 页；大多数界面有“下一页”“上一页”加上筛选和搜索就够了，这也正是用户真正需要的。如果一定要页码，就限制最大页数，或者显示一个近似的总数，而不是计算精确的位置。",
+      "followups": [
+        "How would you support sorting by total amount with keyset pagination?",
+        "How do you implement a \"previous page\" button with cursors?",
+        "Why must the cursor be opaque to clients?"
+      ],
+      "followups_zh": [
+        "在键集分页下，你会如何支持按订单金额排序？",
+        "用游标分页时，你会如何实现“上一页”按钮？",
+        "为什么游标对客户端来说必须是不透明的？"
+      ],
+      "vocab": [
+        {
+          "en": "keyset pagination",
+          "zh": "键集分页"
+        },
+        {
+          "en": "tie-breaker",
+          "zh": "次级排序键（用于打破并列）"
+        },
+        {
+          "en": "opaque cursor",
+          "zh": "不透明游标"
+        },
+        {
+          "en": "index range scan",
+          "zh": "索引区间扫描"
+        }
+      ]
+    },
+    {
+      "id": "20261020-4",
+      "topic": "Middleware",
+      "difficulty": "Senior",
+      "title": "Retries at every layer turned a slow payment service into duplicate charges",
+      "title_zh": "每一层都在重试，把一个变慢的支付服务变成了重复扣款",
+      "question": "A request to capture a payment passes through the mobile app, an API gateway, the order service and the payment service, which calls an external payment provider. One evening the provider slows down. Within minutes the payment service is overloaded, error rates climb across the platform, and some customers are charged twice.\n\nEvery layer retries on timeout: the app 3 times, the gateway 2 times, and the order service's HTTP client 3 times. Explain what happened and redesign timeouts and retries for this path.",
+      "question_zh": "一个扣款请求会依次经过移动端应用、API 网关、订单服务和支付服务，再由支付服务调用外部支付服务商。某天晚上，支付服务商变慢了。几分钟之内支付服务就过载了，整个平台的错误率都在攀升，有些顾客还被扣了两次款。\n\n每一层在超时时都会重试：应用重试 3 次，网关重试 2 次，订单服务的 HTTP 客户端重试 3 次。解释发生了什么，并为这条调用链重新设计超时和重试。",
+      "answer": "**Retries multiply.** Each layer counts its own attempts, so one user action can turn into up to 4 x 3 x 4 = 48 calls to the payment service, and they arrive exactly when it is slowest. Its queues fill up, latency rises further, more callers time out and retry: a retry storm. Retries help with brief, random failures; against an overloaded dependency they make things worse.\n\n**Why customers were charged twice.** A timeout does not mean the operation failed. The provider may have captured the payment and only the response was slow. When a layer retried a non-idempotent capture, a second charge went through. Gateways and proxies differ here: Nginx, for example, by default does not pass a non-idempotent request such as POST to another upstream once it has been sent, but that can be turned on, and service meshes and client libraries have their own retry rules. You cannot assume someone else protects you.\n\n**Redesign: one retry owner, idempotency everywhere.**\n\n- Make the capture idempotent end to end: the app generates an idempotency key per payment attempt, every layer passes it through, the payment service stores it with a unique constraint and returns the original result for a repeat, and it forwards the key to the provider if the provider supports one.\n- Retry in one place only, usually closest to the failing call (the payment service's provider client), with a small number of attempts, exponential backoff with jitter, and only for errors known to be safe. Set retries to zero in the gateway and the order service for this route.\n- Use a deadline, not stacked timeouts: the app sets an overall deadline, and each layer passes the remaining time down (for example in a header or the request context), so an inner layer never keeps working after the caller has given up.\n- Protect the dependency: a retry budget (retries limited to a small fraction of traffic), a circuit breaker that fails fast when the provider is unhealthy, and bounded queues with load shedding in the payment service.\n\n**Unknown outcomes.** When the provider times out, record the payment as \"pending, outcome unknown\", show the customer that the payment is being confirmed, and reconcile: query the provider by the idempotency key or reference, or wait for its webhook. Never answer a timeout with \"failed, please try again\" for an operation that moves money.\n\n**Trade-offs.** Fewer retries mean some transient failures surface to users, which is acceptable when the alternative is double charges and cascading outages. Deadlines and budgets need consistent support across services; a shared client library is the practical way to get it.",
+      "answer_zh": "**重试会层层相乘。** 每一层各自计算重试次数，所以用户的一次操作，最多可能变成 4 x 3 x 4 = 48 次对支付服务的调用，而且这些调用恰好在它最慢的时候到来。它的队列被塞满，延迟进一步升高，更多调用方超时并重试：这就是重试风暴。重试对短暂、随机的失败有帮助；但面对一个已经过载的依赖，只会让情况更糟。\n\n**为什么顾客被扣了两次款。** 超时并不代表操作失败了。支付服务商可能已经完成了扣款，只是响应很慢。当某一层重试了一个非幂等的扣款操作时，第二笔扣款就发生了。不同的网关和代理在这一点上表现不同：以 Nginx 为例，默认情况下，POST 这类非幂等请求一旦已经发送给某个上游，就不会再转发给另一个上游，但这个行为可以被打开；服务网格和客户端库也各有自己的重试规则。你不能假设别人会替你挡住。\n\n**重新设计：只有一层负责重试，处处保证幂等。**\n\n- 让扣款端到端幂等：应用为每次支付尝试生成一个幂等键，每一层都原样透传，支付服务用唯一约束保存它，遇到重复请求时返回原来的结果；如果服务商支持幂等键，也把它转发给服务商。\n- 只在一个地方重试，通常是离失败调用最近的地方（支付服务调用服务商的客户端），重试次数要少，使用带抖动的指数退避，而且只对明确安全的错误重试。在网关和订单服务中，把这条路由的重试次数设为零。\n- 使用截止时间，而不是层层叠加的超时：应用设置一个总的截止时间，每一层把剩余时间向下传递（比如放在请求头或请求 context 里），这样内层永远不会在调用方已经放弃之后还在继续工作。\n- 保护被依赖的服务：设置重试预算（重试只能占流量的一小部分）；在服务商不健康时快速失败的熔断器；以及支付服务里有界的队列和负载削减。\n\n**结果未知的情况。** 当服务商超时时，把这笔支付记录为“待定，结果未知”，告诉顾客支付正在确认中，然后进行对账：按幂等键或参考号向服务商查询，或者等待它的 webhook。对于涉及资金的操作，绝不要在超时后回复“失败，请重试”。\n\n**取舍。** 减少重试意味着一些暂时性失败会暴露给用户，但与重复扣款和级联故障相比，这是可以接受的。截止时间和重试预算需要各个服务一致地支持；一个共享的客户端库是实现这一点的务实方式。",
+      "followups": [
+        "How would you find every layer that retries on a given call path?",
+        "The provider has no idempotency key. How do you avoid double captures?",
+        "How would you test this behaviour before the next peak?"
+      ],
+      "followups_zh": [
+        "你会如何找出某条调用链上所有会重试的层？",
+        "支付服务商不支持幂等键。你如何避免重复扣款？",
+        "在下一次流量高峰之前，你会如何测试这些行为？"
+      ],
+      "vocab": [
+        {
+          "en": "retry storm",
+          "zh": "重试风暴"
+        },
+        {
+          "en": "idempotency key",
+          "zh": "幂等键"
+        },
+        {
+          "en": "deadline propagation",
+          "zh": "截止时间传递"
+        },
+        {
+          "en": "retry budget",
+          "zh": "重试预算"
+        },
+        {
+          "en": "load shedding",
+          "zh": "负载削减"
+        }
+      ]
+    },
+    {
+      "id": "20261020-5",
+      "topic": "Java & CS",
+      "difficulty": "Medium",
+      "title": "Two equal quantities compare as different, but only above 127",
+      "title_zh": "两个相等的数量比较结果却不相等，而且只在超过 127 时出现",
+      "question": "A Java service checks whether the quantity reserved in the warehouse matches the quantity ordered. Tests pass, but in production some matching orders are flagged as mismatches. Both quantities are `Integer` values read from maps:\n\n```java\nInteger ordered = orderedQty.get(sku);\nInteger reserved = reservedQty.get(sku);\nif (ordered != reserved) {\n    flagMismatch(sku);\n}\n```\n\nWhy does this fail only for some orders, and how do you fix it?",
+      "question_zh": "一个 Java 服务检查仓库预留的数量是否与下单数量一致。测试都能通过，但在生产环境中，一些数量其实一致的订单被标记成了不一致。两个数量都是从 map 里读出来的 `Integer` 值：\n\n```java\nInteger ordered = orderedQty.get(sku);\nInteger reserved = reservedQty.get(sku);\nif (ordered != reserved) {\n    flagMismatch(sku);\n}\n```\n\n为什么只有部分订单会出错？你会如何修复？",
+      "answer": "**Why it happens.** `!=` on two `Integer` objects compares references, not values. Autoboxing uses `Integer.valueOf`, which returns cached objects for values from -128 to 127 by default, so two boxed 5s are the same object and the comparison happens to work. Above that range each boxing creates a new object, so two boxed 1000s are different objects and `!=` is true. Test data used small quantities; production has bulk orders.\n\n```java\nInteger a = 127, b = 127, c = 128, d = 128;\na == b;          // true: same cached object\nc == d;          // false: two different objects\nc.equals(d);     // true\n```\n\n**The fix.** Compare values: `Objects.equals(ordered, reserved)` handles nulls too, or unbox explicitly to `int` when you know both are present. Long, Short, Byte and Character have similar caches, so the same bug appears with `Long` IDs above 127.\n\n**A related trap: null.** If a SKU is missing from one map, `get` returns null. Writing `int ordered = orderedQty.get(sku);` then throws a `NullPointerException` during unboxing. Decide what a missing value means (zero, or an error) and handle it explicitly, for example with `getOrDefault(sku, 0)`.\n\n**Preventing it.** Static analysis tools flag reference comparison of boxed numbers, so turn that rule on as an error in CI. Prefer primitive types in domain code where null is not a valid value, and include values above 127 in tests: boundary values are where these bugs hide.",
+      "answer_zh": "**原因。** 对两个 `Integer` 对象使用 `!=` 比较的是引用，而不是值。自动装箱使用 `Integer.valueOf`，默认情况下，对 -128 到 127 之间的值会返回缓存的对象，所以两个装箱后的 5 是同一个对象，比较结果碰巧是对的。超出这个范围后，每次装箱都会创建新对象，于是两个装箱后的 1000 是不同的对象，`!=` 的结果就是 true。测试数据用的都是小数量，而生产环境里有批量订单。\n\n```java\nInteger a = 127, b = 127, c = 128, d = 128;\na == b;          // true: same cached object\nc == d;          // false: two different objects\nc.equals(d);     // true\n```\n\n**修复。** 比较值：`Objects.equals(ordered, reserved)` 还能处理 null；或者在确定两者都存在时，显式拆箱成 `int`。Long、Short、Byte 和 Character 也有类似的缓存，所以对于超过 127 的 `Long` 类型 ID，也会出现同样的 bug。\n\n**相关的陷阱：null。** 如果某个 SKU 在其中一个 map 里不存在，`get` 会返回 null。这时写 `int ordered = orderedQty.get(sku);` 会在拆箱时抛出 `NullPointerException`。要明确缺失值代表什么（是零，还是错误），并显式处理，比如使用 `getOrDefault(sku, 0)`。\n\n**预防。** 静态分析工具能发现对装箱数字的引用比较，所以要在 CI 中把这条规则设为报错。在 null 不是合法值的领域代码里，优先使用基本类型；测试里也要包含大于 127 的值：边界值正是这类 bug 藏身的地方。",
+      "followups": [
+        "Why does Java cache only a small range of Integer values?",
+        "What happens when you use Integer keys in a HashMap but compare them with ==?"
+      ],
+      "followups_zh": [
+        "为什么 Java 只缓存一小段范围内的 Integer 值？",
+        "在 HashMap 中使用 Integer 作为键，但用 == 比较它们，会发生什么？"
+      ],
+      "vocab": [
+        {
+          "en": "autoboxing",
+          "zh": "自动装箱"
+        },
+        {
+          "en": "reference equality",
+          "zh": "引用相等"
+        },
+        {
+          "en": "Integer cache",
+          "zh": "Integer 缓存"
+        },
+        {
+          "en": "boundary value",
+          "zh": "边界值"
+        }
+      ]
+    }
+  ]
+}

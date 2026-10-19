@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 8 天、40 道题。
+共 9 天、45 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-10-20](days/2026-10-20.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Hard | [A product-sync worker pool hangs forever when one item fails](days/2026-10-20.md#q1) | 商品同步的 worker 池在某个商品失败后永远卡住 |
+| 2 | System Design | Medium | [Product images: uploads, resizing, CDN, and old images that never go away](days/2026-10-20.md#q2) | 商品图片：上传、缩放、CDN，以及怎么也去不掉的旧图 |
+| 3 | Database | Hard | [Deep pages of the order list are slow, and rows go missing between pages](days/2026-10-20.md#q3) | 订单列表翻到后面很慢，而且翻页时会漏掉数据 |
+| 4 | Middleware | Senior | [Retries at every layer turned a slow payment service into duplicate charges](days/2026-10-20.md#q4) | 每一层都在重试，把一个变慢的支付服务变成了重复扣款 |
+| 5 | Java & CS | Medium | [Two equal quantities compare as different, but only above 127](days/2026-10-20.md#q5) | 两个相等的数量比较结果却不相等，而且只在超过 127 时出现 |
 
 ## [2026-10-19](days/2026-10-19.md)
 
