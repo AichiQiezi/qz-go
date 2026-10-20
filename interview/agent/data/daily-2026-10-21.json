@@ -1,0 +1,219 @@
+{
+  "id": "daily-2026-10-21",
+  "order": 20261021,
+  "kind": "daily",
+  "title": "Daily set · Oct 21",
+  "title_zh": "每日新题 · 10 月 21 日",
+  "summary": "Five new agent questions: when an agent should ask and when it should act, metering and limiting model usage per merchant, evaluating multi-turn conversations with a simulated merchant, reconciling specialist agents that give contradictory advice, and designing how context is assembled on every turn.",
+  "summary_zh": "五道新的 Agent 题：Agent 什么时候该提问、什么时候该行动，按商家计量和限制模型用量，用模拟商家评测多轮对话，协调给出相互矛盾建议的专职 Agent，以及设计每一轮上下文的组装方式。",
+  "generatedAt": "2026-10-21T06:54:13+08:00",
+  "questions": [
+    {
+      "id": "agent-daily-20261021-1",
+      "topic": "Agent Loop",
+      "difficulty": "Medium",
+      "title": "The agent either interrogates the merchant or guesses wildly",
+      "title_zh": "Agent 要么把商家问个没完，要么胡乱猜测",
+      "question": "Merchants give your catalog agent short requests such as \"fix my Google Shopping errors\" or \"make the titles better\". One prompt version asked four or five clarifying questions before doing anything, and merchants complained it was useless. The next version never asks: it guessed that \"better titles\" meant adding keywords and rewrote 3,000 titles, which the merchant then had to roll back.\n\nHow should an agent decide when to ask and when to act?",
+      "question_zh": "商家给商品目录 Agent 的请求通常很简短，比如“修复我的 Google Shopping 错误”或者“把标题改好一点”。有一版提示词在动手之前会先问四五个澄清问题，商家抱怨它毫无用处。下一版则从不提问：它猜测“更好的标题”就是加关键词，于是改写了 3000 个标题，结果商家只好再全部回滚。\n\nAgent 应该如何决定什么时候提问、什么时候直接行动？",
+      "answer": "**The core idea.** Asking has a cost (the merchant's time and patience), and so does guessing wrong (rework, risk). The right choice depends on two things: how ambiguous the request is, and how expensive a wrong guess would be to undo. Cheap, reversible, well-defined work should just happen; expensive or irreversible work built on a guess should not.\n\n**A practical policy.**\n\n- Investigate before asking. \"Fix my Google Shopping errors\" is clear once the agent reads the diagnostics; it should look first and ask only about what the data cannot answer.\n- Act on low-risk, reversible steps and report what was done, for example fixing a missing GTIN that is present in the supplier data.\n- For anything large or subjective, show a small sample first: rewrite ten titles, explain the approach, and ask \"apply this style to the other 2,990?\". One concrete question beats five abstract ones.\n- Ask before irreversible or expensive actions, and when two reasonable readings lead to very different outcomes.\n- Ask at most one or two questions at a time, each with a suggested default the merchant can accept with one click.\n\n**Make it enforceable, not just a prompt.** The harness can classify tools by risk and require a confirmation step for bulk or irreversible ones, so the model cannot skip asking where it matters. In the prompt, describe the policy with examples of good questions and of cases where the agent should simply proceed, rather than \"always ask\" or \"never ask\".\n\n```go\n// The harness decides when confirmation is required, whatever the model prefers.\nfunc needsConfirmation(call ToolCall) bool {\n\tswitch {\n\tcase call.Tool.Irreversible:\n\t\treturn true\n\tcase call.ItemCount() > 50: // bulk change: preview a sample first\n\t\treturn true\n\tdefault:\n\t\treturn false\n\t}\n}\n```\n\n**Measure the balance.** Track how often the agent asks, how often merchants accept the suggested default without changes (a sign the question was unnecessary), and how often its changes are rolled back (a sign it should have asked). Tune the thresholds from those numbers.",
+      "answer_zh": "**核心思路。** 提问有成本（商家的时间和耐心），猜错也有成本（返工、风险）。正确的选择取决于两件事：请求有多模糊，以及猜错之后撤销的代价有多大。成本低、可撤销、定义明确的工作应该直接做；建立在猜测之上、代价高或不可撤销的工作则不应该。\n\n**一套实用的策略。**\n\n- 先调查，再提问。“修复我的 Google Shopping 错误”在 Agent 读过诊断信息之后就很清楚了；它应该先去看，只就数据无法回答的问题提问。\n- 对低风险、可撤销的步骤直接执行，并汇报做了什么，比如补上供应商数据里有、但商品上缺失的 GTIN。\n- 对于任何规模大或带主观色彩的工作，先展示一个小样本：改写十个标题，说明思路，然后问“要把这种风格应用到其余 2990 个吗？”。一个具体的问题胜过五个抽象的问题。\n- 在执行不可撤销或代价高的操作之前要问；当两种合理的理解会导致截然不同的结果时也要问。\n- 每次最多问一两个问题，每个问题都附上一个建议的默认选项，让商家点一下就能接受。\n\n**让它可以被强制执行，而不只是写在提示词里。** harness 可以按风险对工具分类，对批量或不可撤销的工具要求一个确认步骤，这样在关键的地方，模型就没法跳过提问。在提示词里，用示例来描述这套策略：哪些是好的问题，哪些情况下 Agent 应该直接继续，而不是写“总是要问”或“从不提问”。\n\n```go\n// The harness decides when confirmation is required, whatever the model prefers.\nfunc needsConfirmation(call ToolCall) bool {\n\tswitch {\n\tcase call.Tool.Irreversible:\n\t\treturn true\n\tcase call.ItemCount() > 50: // bulk change: preview a sample first\n\t\treturn true\n\tdefault:\n\t\treturn false\n\t}\n}\n```\n\n**度量这种平衡。** 跟踪 Agent 提问的频率、商家不做修改就直接接受建议默认选项的频率（说明这个问题本可以不问），以及它所做修改被回滚的频率（说明它本应该先问）。根据这些数字来调整阈值。",
+      "followups": [
+        "How would you handle a merchant who answers clarifying questions vaguely?",
+        "Should the agent remember a merchant's answers to avoid asking again? What are the risks?"
+      ],
+      "followups_zh": [
+        "如果商家对澄清问题的回答也很含糊，你会怎么处理？",
+        "Agent 应该记住商家的回答以免再次提问吗？有什么风险？"
+      ],
+      "vocab": [
+        {
+          "en": "clarifying question",
+          "zh": "澄清问题"
+        },
+        {
+          "en": "reversible action",
+          "zh": "可撤销的操作"
+        },
+        {
+          "en": "sensible default",
+          "zh": "合理的默认选项"
+        },
+        {
+          "en": "preview a sample",
+          "zh": "先预览一个样本"
+        },
+        {
+          "en": "Investigate before asking.",
+          "zh": "先调查，再提问。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261021-2",
+      "topic": "Production",
+      "difficulty": "Medium",
+      "title": "One merchant's agent usage costs more than their subscription",
+      "title_zh": "某个商家使用 Agent 的成本比他的订阅费还高",
+      "question": "Your SaaS includes an AI assistant in every plan. Finance finds that a handful of merchants generate most of the model costs; one of them runs automated scripts that call the assistant thousands of times a day, and its model bill exceeds what it pays you. Today you cannot even say what each merchant costs.\n\nDesign usage metering and limits for the assistant.",
+      "question_zh": "你们的 SaaS 在每个套餐里都包含一个 AI 助手。财务发现，少数几个商家产生了大部分的模型成本；其中一个商家用自动化脚本每天调用助手几千次，它产生的模型费用超过了它付给你们的钱。而现在你们甚至说不清每个商家各花了多少成本。\n\n请为这个助手设计用量计量和限额机制。",
+      "answer": "**The core idea.** Treat model usage like any metered resource in a multi-tenant system: measure it per tenant, attribute it to the feature that caused it, and enforce limits before a request runs, not after the bill arrives.\n\n**Measure accurately.** Every model response reports its usage. Record, per call, the merchant, feature, model, and all token counts: uncached input, cache writes, cache reads and output. They are priced differently, so cost must be computed from all of them, using a price table you keep in config. Aggregate into a usage table per merchant per day, and expose it on an internal dashboard and, eventually, to the merchant.\n\n**Enforce limits before the call.**\n\n- Plan quotas: each plan includes a monthly budget, measured in credits or tasks rather than raw tokens, which merchants cannot reason about.\n- Rate limits: per merchant requests per minute and concurrent runs, so one tenant cannot starve others or trip your own provider rate limits.\n- Soft and hard limits: warn at 80% of the budget, slow down or switch to a cheaper configuration near the limit, and stop at the hard limit with a clear upgrade message.\n- Per-run budgets: cap tokens and tool calls per task, so one runaway conversation cannot spend a month's budget.\n\n```go\nfunc (m *Meter) Admit(ctx context.Context, merchant string, est Cost) error {\n\tif !m.rate.Allow(merchant) {\n\t\treturn ErrRateLimited // 429 to the client with a retry hint\n\t}\n\tused := m.usage.MonthToDate(ctx, merchant)\n\tif used+est > m.plans.HardLimit(merchant) {\n\t\treturn ErrQuotaExceeded\n\t}\n\treturn nil // actual cost is recorded after the call from response usage\n}\n```\n\n**Handle automated traffic deliberately.** Scripted heavy use is often a sign of a real need: offer an API product with its own pricing, or move bulk jobs to an asynchronous batch path, which is cheaper to serve. Distinguish it from abuse by looking at the pattern (steady scripted calls versus a person chatting).\n\n**Trade-offs.** Strict limits protect margins but frustrate good customers at the worst moment, so give warnings early and make limits visible in the product. Metering adds a write per call; batch the writes and reconcile the totals against the provider's invoice monthly.",
+      "answer_zh": "**核心思路。** 像对待多租户系统中任何按量计费的资源一样对待模型用量：按租户计量，归属到引发它的功能上，并且在请求执行之前就强制执行限额，而不是等账单来了才处理。\n\n**准确计量。** 每次模型响应都会报告用量。对每次调用，记录商家、功能、模型，以及所有的 token 数：未缓存的输入、缓存写入、缓存读取和输出。它们的价格各不相同，所以成本必须根据全部这些数字计算，价格表则保存在配置里。按商家、按天汇总成一张用量表，在内部看板上展示，最终也展示给商家。\n\n**在调用之前强制执行限额。**\n\n- 套餐配额：每个套餐包含一份月度预算，以积分或任务数计量，而不是原始 token 数，因为商家无法理解 token。\n- 速率限制：按商家限制每分钟请求数和并发运行数，这样一个租户就无法挤占其他租户，也不会触发你们自己在服务商那里的限流。\n- 软限额与硬限额：用到预算的 80% 时发出提醒，接近上限时降速或切换到更便宜的配置，达到硬上限时停止，并给出清晰的升级提示。\n- 单次运行预算：限制每个任务的 token 数和工具调用次数，这样一次失控的对话就不会花掉一个月的预算。\n\n```go\nfunc (m *Meter) Admit(ctx context.Context, merchant string, est Cost) error {\n\tif !m.rate.Allow(merchant) {\n\t\treturn ErrRateLimited // 429 to the client with a retry hint\n\t}\n\tused := m.usage.MonthToDate(ctx, merchant)\n\tif used+est > m.plans.HardLimit(merchant) {\n\t\treturn ErrQuotaExceeded\n\t}\n\treturn nil // actual cost is recorded after the call from response usage\n}\n```\n\n**有意识地处理自动化流量。** 用脚本大量调用往往说明确实存在需求：可以提供一个单独定价的 API 产品，或者把批量任务迁移到异步批处理通道，这样服务成本更低。通过调用模式来区分它和滥用（持续稳定的脚本调用，还是一个人在聊天）。\n\n**取舍。** 严格的限额能保护利润，但会在最糟糕的时刻让好客户感到挫败，所以要尽早提醒，并让限额在产品里清晰可见。计量会让每次调用多一次写入；把写入批量化，并每月把汇总数与服务商的账单进行对账。",
+      "followups": [
+        "How would you price the assistant once you know the cost per merchant?",
+        "Should cache reads count against the merchant's quota? Why or why not?"
+      ],
+      "followups_zh": [
+        "知道了每个商家的成本之后，你会如何为这个助手定价？",
+        "缓存读取应该计入商家的配额吗？为什么？"
+      ],
+      "vocab": [
+        {
+          "en": "metering",
+          "zh": "计量"
+        },
+        {
+          "en": "quota",
+          "zh": "配额"
+        },
+        {
+          "en": "noisy neighbor",
+          "zh": "吵闹邻居（挤占共享资源的租户）"
+        },
+        {
+          "en": "cost attribution",
+          "zh": "成本归属"
+        },
+        {
+          "en": "Enforce limits before the call, not after the bill.",
+          "zh": "在调用之前强制限额，而不是等账单来了再说。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261021-3",
+      "topic": "Evals & Observability",
+      "difficulty": "Hard",
+      "title": "Your eval only tests single questions, but the failures happen in conversations",
+      "title_zh": "评测只覆盖单个问题，而故障都发生在多轮对话里",
+      "question": "Your support agent's eval set has 400 single-turn cases and scores well. In production, the failures are conversational: the agent forgets a constraint the merchant gave three turns earlier, asks for information it already has, or gives up when the merchant pushes back. You want to test multi-turn behaviour before each release.\n\nDesign a multi-turn evaluation using a simulated merchant.",
+      "question_zh": "你们客服 Agent 的评测集有 400 个单轮案例，分数很好看。但线上的故障都出在对话中：Agent 忘了商家三轮之前提出的约束条件，索要它其实已经掌握的信息，或者在商家提出异议时就放弃了。你希望在每次发布前测试多轮对话的表现。\n\n请设计一个使用模拟商家的多轮评测。",
+      "answer": "**The core idea.** A second model plays the merchant. It receives a scenario: a goal, private facts it reveals only when asked, a personality, and rules for when to stop. The agent under test talks to it through the normal loop, with tools backed by a fixture environment. When the conversation ends, graders check the final state and the transcript. This is the approach popularized by tau-bench, which pairs a simulated user with tool-using agents.\n\n```json\n{\n  \"id\": \"gmc-gtin-pushback-07\",\n  \"goal\": \"Get the disapproved shoes fixed without changing prices\",\n  \"private_facts\": {\"gtin_source\": \"supplier sheet uploaded on Oct 2\", \"constraint\": \"do not change any price\"},\n  \"persona\": \"busy, terse, mentions the price constraint once in turn 2, pushes back once\",\n  \"stop_when\": \"the agent confirms the fix, or after 12 turns\",\n  \"fixture\": \"fixtures/shoe_store_v4.json\",\n  \"expect\": {\"end_state\": {\"items_with_valid_gtin\": 12}, \"must_not_call\": [\"update_price\"]}\n}\n```\n\n**Grading.** Grade the end state in code (were the right products fixed, did any price change), then the transcript: did the agent ask for something the merchant had already said, did it respect the constraint from turn 2, did it handle the pushback. Use code checks where possible (a forbidden tool call, a repeated question detected by matching against earlier turns) and an LLM judge with a rubric for the rest.\n\n**Keep the simulator honest.**\n\n- The simulator only knows its scenario; it never sees the agent's tools or the expected outcome, or it will \"help\" the agent pass.\n- Validate simulator behaviour: sample transcripts and check that it reveals facts only when asked and follows its persona. A simulator that is too cooperative makes every agent look good.\n- Both sides are nondeterministic, so run each scenario several times and report reliability across runs (pass^k), not one lucky pass.\n- Pin the simulator's model and prompt, so a score change means the agent changed, not the simulated merchant.\n\n**Where scenarios come from.** Mine real conversations that went wrong (escalations, repeated questions, complaints), anonymize them, and turn each into a scenario with its private facts. Cover personas you actually see: terse, chatty, wrong about their own setup, writing in German.\n\n**Trade-offs.** Simulated conversations cost several model calls per turn on both sides and are noisier than single-turn tests, so keep a smaller, high-value multi-turn suite next to the large single-turn one, and run it before releases rather than on every commit.",
+      "answer_zh": "**核心思路。** 由第二个模型扮演商家。它会拿到一个场景：一个目标、只在被问到时才透露的私有事实、一种性格设定，以及何时结束对话的规则。被测试的 Agent 通过正常的循环与它对话，工具则由一个测试夹具环境提供支持。对话结束后，由评分器检查最终状态和对话记录。这正是 tau-bench 推广开来的做法，它把模拟用户与会使用工具的 Agent 配对测试。\n\n```json\n{\n  \"id\": \"gmc-gtin-pushback-07\",\n  \"goal\": \"Get the disapproved shoes fixed without changing prices\",\n  \"private_facts\": {\"gtin_source\": \"supplier sheet uploaded on Oct 2\", \"constraint\": \"do not change any price\"},\n  \"persona\": \"busy, terse, mentions the price constraint once in turn 2, pushes back once\",\n  \"stop_when\": \"the agent confirms the fix, or after 12 turns\",\n  \"fixture\": \"fixtures/shoe_store_v4.json\",\n  \"expect\": {\"end_state\": {\"items_with_valid_gtin\": 12}, \"must_not_call\": [\"update_price\"]}\n}\n```\n\n**评分。** 先用代码给最终状态打分（该修的商品修好了没有，有没有任何价格被改动），再给对话记录打分：Agent 有没有索要商家已经说过的信息，有没有遵守第 2 轮提出的约束，有没有妥善应对异议。能用代码检查的就用代码（禁止的工具调用、通过与之前轮次比对来发现的重复提问），其余部分用带评分细则的 LLM 评审。\n\n**让模拟器保持可信。**\n\n- 模拟器只知道它自己的场景；绝不能让它看到 Agent 的工具或预期结果，否则它会“帮助”Agent 通过。\n- 验证模拟器的行为：抽查对话记录，确认它只在被问到时才透露事实，并且遵循设定的性格。过于配合的模拟器会让每个 Agent 看起来都很好。\n- 对话双方都是不确定的，所以每个场景要运行多次，并报告跨多次运行的可靠性（pass^k），而不是某一次碰巧通过的结果。\n- 锁定模拟器的模型和提示词，这样分数的变化就意味着是 Agent 变了，而不是模拟商家变了。\n\n**场景从哪里来。** 从真实的失败对话（升级、重复提问、投诉）中挖掘，匿名化处理后，把每一个都变成带有私有事实的场景。覆盖你们真实遇到的各种性格：言简意赅的、话多的、对自己的配置理解有误的、用德语写信的。\n\n**取舍。** 模拟对话每一轮在双方都要消耗多次模型调用，噪声也比单轮测试大，所以要在大型单轮测试集之外，另外保留一个规模较小、价值较高的多轮测试集，并在发布前运行，而不是每次提交都运行。",
+      "followups": [
+        "How would you detect that the simulator itself drifted after a model upgrade?",
+        "Which failures can a simulated merchant never reveal?"
+      ],
+      "followups_zh": [
+        "模型升级之后，你会如何发现模拟器本身发生了漂移？",
+        "哪些故障是模拟商家永远无法暴露出来的？"
+      ],
+      "vocab": [
+        {
+          "en": "user simulator",
+          "zh": "用户模拟器"
+        },
+        {
+          "en": "scenario",
+          "zh": "场景"
+        },
+        {
+          "en": "persona",
+          "zh": "人物设定"
+        },
+        {
+          "en": "multi-turn evaluation",
+          "zh": "多轮评测"
+        },
+        {
+          "en": "A cooperative simulator makes every agent look good.",
+          "zh": "一个过于配合的模拟器会让每个 Agent 都显得很好。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261021-4",
+      "topic": "Multi-agent",
+      "difficulty": "Hard",
+      "title": "The pricing agent says lower prices, the ads agent says raise bids",
+      "title_zh": "定价 Agent 说要降价，广告 Agent 说要提高出价",
+      "question": "Your platform has several specialist agents that each send merchants recommendations: a pricing agent, an ads agent and an inventory agent. One merchant received, on the same morning, \"lower the price of the winter jacket by 15% to clear stock\" from the pricing agent and \"raise bids on the winter jacket; it is your best performer\" from the ads agent. The merchant asked support which one to trust.\n\nWhy does this happen, and how would you redesign the system so merchants get coherent advice?",
+      "question_zh": "你们的平台有好几个专职 Agent，各自给商家发送建议：定价 Agent、广告 Agent 和库存 Agent。有一个商家在同一天早上，既收到了定价 Agent 的“把冬季夹克降价 15% 以清理库存”，又收到了广告 Agent 的“提高冬季夹克的出价，它是你表现最好的商品”。商家问客服到底该信哪一个。\n\n为什么会这样？你会如何重新设计系统，让商家得到前后一致的建议？",
+      "answer": "**The core idea.** Each agent optimizes its own goal with its own view of the data, so contradictions are inevitable unless something owns the overall goal. Specialists are good at analysis; deciding between competing objectives is a separate job that needs shared context and a single owner.\n\n**Why the two recommendations clash.** The pricing agent sees high stock and slowing sales; the ads agent sees a high return on ad spend over the last weeks. Both are right about their slice. Neither knows what the other is about to recommend, and nothing checks whether recommendations for the same product conflict before they reach the merchant.\n\n**Redesign.**\n\n- Specialists produce proposals, not messages. Each proposal is structured: product, action, expected effect, evidence, confidence.\n- A coordinator collects the proposals per merchant, groups them by product, and detects conflicts with rules (opposite price and bid directions on one product) before anything is sent.\n- Conflicts are resolved against the merchant's stated goal (clear stock, protect margin, grow revenue), which lives in a shared merchant profile all agents read.\n- The merchant gets one combined recommendation per product with the trade-off explained, for example \"discount 10% and keep bids flat: you said clearing winter stock matters more than margin\".\n- When the goal is unknown or the trade-off is close, present both options side by side and let the merchant choose, instead of two agents arguing through separate messages.\n\n```go\ntype Proposal struct {\n\tAgent      string  // \"pricing\", \"ads\", \"inventory\"\n\tProductID  string\n\tAction     string  // \"price_down\", \"bid_up\", ...\n\tEvidence   string\n\tConfidence float64\n}\n\n// Conflicts lists products where proposals pull in opposite directions.\nfunc Conflicts(ps []Proposal) map[string][]Proposal {\n\tbyProduct := map[string][]Proposal{}\n\tfor _, p := range ps {\n\t\tbyProduct[p.ProductID] = append(byProduct[p.ProductID], p)\n\t}\n\tout := map[string][]Proposal{}\n\tfor id, group := range byProduct {\n\t\tif opposing(group) { // e.g. price_down with bid_up, or restock with clearance\n\t\t\tout[id] = group\n\t\t}\n\t}\n\treturn out\n}\n```\n\n**Shared facts.** Contradictions also come from different data: different date ranges, attribution windows or stale snapshots. Give all agents the same metrics layer and the same time window per run, and include the evidence in each proposal so the coordinator can tell a real trade-off from a data mismatch.\n\n**Trade-offs.** A coordinator adds latency and another component to maintain, and rule-based conflict detection misses subtle interactions. But sending merchants contradictory advice destroys trust in all the agents at once, so a single voice per merchant is worth the extra layer.",
+      "answer_zh": "**核心思路。** 每个 Agent 都用自己看到的数据去优化自己的目标，所以除非有某个角色对整体目标负责，否则矛盾是不可避免的。专职 Agent 擅长分析；在相互竞争的目标之间做取舍是另一项工作，它需要共享的上下文和唯一的负责人。\n\n**为什么两条建议会冲突。** 定价 Agent 看到的是库存高、销售放缓；广告 Agent 看到的是过去几周广告投入回报很高。两者对各自那一块的判断都没错。但它们都不知道对方即将给出什么建议，也没有任何东西在建议到达商家之前，检查针对同一商品的建议是否相互冲突。\n\n**重新设计。**\n\n- 专职 Agent 产出的是提案，而不是消息。每个提案都是结构化的：商品、操作、预期效果、依据、置信度。\n- 由一个协调者按商家收集提案，按商品分组，并在发出任何内容之前，用规则发现冲突（同一商品上价格和出价的方向相反）。\n- 冲突要依据商家声明的目标（清理库存、保住毛利、增加收入）来解决，这个目标保存在所有 Agent 都会读取的共享商家档案中。\n- 商家对每个商品只收到一条合并后的建议，并附上取舍说明，例如“降价 10%，出价保持不变：你说过清理冬季库存比保住毛利更重要”。\n- 当目标未知或取舍难分高下时，把两个选项并列展示，让商家自己选择，而不是让两个 Agent 通过各自的消息“吵架”。\n\n```go\ntype Proposal struct {\n\tAgent      string  // \"pricing\", \"ads\", \"inventory\"\n\tProductID  string\n\tAction     string  // \"price_down\", \"bid_up\", ...\n\tEvidence   string\n\tConfidence float64\n}\n\n// Conflicts lists products where proposals pull in opposite directions.\nfunc Conflicts(ps []Proposal) map[string][]Proposal {\n\tbyProduct := map[string][]Proposal{}\n\tfor _, p := range ps {\n\t\tbyProduct[p.ProductID] = append(byProduct[p.ProductID], p)\n\t}\n\tout := map[string][]Proposal{}\n\tfor id, group := range byProduct {\n\t\tif opposing(group) { // e.g. price_down with bid_up, or restock with clearance\n\t\t\tout[id] = group\n\t\t}\n\t}\n\treturn out\n}\n```\n\n**共享的事实。** 矛盾也可能源于数据不同：日期范围不同、归因窗口不同，或者快照过时。让所有 Agent 使用同一个指标层，并且每次运行使用同一个时间窗口；在每个提案中附上依据，这样协调者就能分辨这是真实的取舍，还是数据不一致。\n\n**取舍。** 协调者会增加延迟，也多了一个需要维护的组件，而且基于规则的冲突检测会漏掉一些微妙的相互影响。但给商家发送相互矛盾的建议，会让商家一下子对所有 Agent 都失去信任，所以每个商家只听到一个声音，值得多加这一层。",
+      "followups": [
+        "How would you learn from which combined recommendations merchants accept?",
+        "Should the coordinator be a model or rules? Where would you draw the line?"
+      ],
+      "followups_zh": [
+        "你会如何从商家接受了哪些合并建议中学习？",
+        "协调者应该由模型来做，还是由规则来做？你会把界线划在哪里？"
+      ],
+      "vocab": [
+        {
+          "en": "competing objectives",
+          "zh": "相互竞争的目标"
+        },
+        {
+          "en": "coordinator",
+          "zh": "协调者"
+        },
+        {
+          "en": "proposal",
+          "zh": "提案"
+        },
+        {
+          "en": "single source of truth",
+          "zh": "唯一可信的数据源"
+        },
+        {
+          "en": "One voice per merchant.",
+          "zh": "每个商家只听到一个声音。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261021-5",
+      "topic": "Context & Memory",
+      "difficulty": "Senior",
+      "title": "Design how the support agent assembles its context on every turn",
+      "title_zh": "设计客服 Agent 在每一轮如何组装上下文",
+      "question": "Your merchant-support agent's context today is whatever accumulated: a long system prompt, all tool definitions, the merchant's full profile, every message and tool result so far, and retrieved help articles appended at random places. Costs are high, cache hit rates are low, and quality drops in long conversations.\n\nDesign the context assembly: what goes in, in what order, within what budget, and how you observe it.",
+      "question_zh": "你们商家客服 Agent 现在的上下文就是一路堆积起来的东西：一段很长的系统提示词、全部工具定义、商家的完整档案、到目前为止的所有消息和工具结果，还有被随意插在各处的检索出来的帮助文章。成本高，缓存命中率低，长对话中的质量也在下降。\n\n请设计上下文的组装方式：放入哪些内容、按什么顺序、在什么预算之内，以及你如何观察它。",
+      "answer": "**The core idea.** Treat the context as a carefully built request, not a log. Each turn, the harness assembles it from parts with a defined order and a token budget per part, so that stable parts are cached, relevant information is present, and noise is left out. This is often called context engineering.\n\n**Order for caching.** Prompt caches match an exact prefix, and the request is rendered as tools, then system, then messages. Put the most stable parts first and the most volatile last:\n\n- Tools: a fixed, deterministically ordered set; rarely used tools loaded on demand rather than always present.\n- System prompt: short, shared by all merchants, versioned; nothing per request (no timestamps, no merchant data).\n- Merchant context: a compact profile (plan, connected platforms, stated preferences) at the start of the conversation, stable for its duration.\n- Conversation: earlier turns, with old bulky tool results cleared or summarized, then the recent turns in full.\n- Per-turn material: retrieved articles and fresh tool results for the current question, placed after the last cache breakpoint.\n\n**Budgets per part.** Give each part a token budget and enforce it in code: the profile is capped and summarized, retrieval returns the top few chunks within its budget, tool results are trimmed to the fields the model needs, and conversation history beyond its budget is compacted. When the total exceeds the budget, the parts with the lowest value per token are cut first, never the current question or the active constraints.\n\n**Keep constraints alive.** Constraints the merchant states (\"don't change prices\") must not be lost when old turns are summarized. Extract them into a small, structured \"active constraints\" section that is carried forward explicitly, rather than trusting a summary to keep them.\n\n```go\ntype ContextPlan struct {\n\tTools       []Tool   // fixed order, cached\n\tSystem      string   // versioned, cached\n\tProfile     string   // <= 800 tokens, stable per conversation\n\tConstraints []string // carried forward verbatim\n\tHistory     []Msg    // compacted beyond the history budget\n\tRetrieved   []Chunk  // <= 3 chunks for this turn, after the last breakpoint\n}\n```\n\n**Observe it.** Log, per turn, the token count of each part, the cache read and write tokens, and the IDs of what was included (which articles, which tool results). When an answer is wrong, you can see whether the needed fact was in the context at all. Track cache hit rate and cost per resolved conversation as the main health signals, and evaluate any change to the assembly on long conversations, not only single questions.\n\n**Trade-offs.** Aggressive trimming saves money but risks dropping something the model needed, which shows up as extra tool calls or wrong answers; tune budgets with evals. Strict ordering for caching sometimes means relevant material sits far from the question, which is usually acceptable when it is clearly labelled.",
+      "answer_zh": "**核心思路。** 把上下文当作一个精心构造的请求，而不是一份日志。每一轮，harness 都按既定的顺序、按每部分的 token 预算，把各个部分组装起来，使稳定的部分能被缓存，相关的信息都在，噪声则被排除在外。这通常被称为上下文工程。\n\n**按缓存需要排列顺序。** prompt 缓存匹配的是精确的前缀，而请求是按工具、系统、消息的顺序渲染的。把最稳定的部分放在最前面，最易变的部分放在最后面：\n\n- 工具：一组固定、顺序确定的工具；很少使用的工具按需加载，而不是一直放着。\n- 系统提示词：简短，所有商家共用，有版本管理；不放任何随请求变化的内容（没有时间戳，没有商家数据）。\n- 商家上下文：在对话开始处放一份精简的档案（套餐、已连接的平台、声明过的偏好），在整个对话期间保持不变。\n- 对话：较早的轮次中，体积大的旧工具结果被清除或摘要化，之后是完整的最近几轮。\n- 当前轮次的材料：针对当前问题检索到的文章和最新的工具结果，放在最后一个缓存断点之后。\n\n**每部分设定预算。** 给每个部分分配一个 token 预算，并在代码中强制执行：商家档案有上限并做摘要，检索只在预算内返回排名最前的几个片段，工具结果被裁剪到模型需要的字段，超出预算的对话历史则被压缩。当总量超过预算时，先删减每个 token 价值最低的部分，绝不删减当前的问题或仍然有效的约束条件。\n\n**让约束条件始终有效。** 商家提出的约束条件（“不要改价格”）在旧轮次被摘要时绝不能丢失。把它们提取到一个小型的、结构化的“当前约束”部分里，并显式地一轮轮带下去，而不是指望摘要能保住它们。\n\n```go\ntype ContextPlan struct {\n\tTools       []Tool   // fixed order, cached\n\tSystem      string   // versioned, cached\n\tProfile     string   // <= 800 tokens, stable per conversation\n\tConstraints []string // carried forward verbatim\n\tHistory     []Msg    // compacted beyond the history budget\n\tRetrieved   []Chunk  // <= 3 chunks for this turn, after the last breakpoint\n}\n```\n\n**观察它。** 每一轮都记录每个部分的 token 数、缓存读取和写入的 token 数，以及放入了哪些内容的 ID（哪些文章、哪些工具结果）。当回答出错时，你就能看到所需的事实到底有没有出现在上下文里。把缓存命中率和每个已解决对话的成本作为主要的健康指标，并且对组装方式的任何改动，都要在长对话上评测，而不只是在单个问题上。\n\n**取舍。** 激进的裁剪能省钱，但有可能删掉模型需要的东西，表现为额外的工具调用或错误的回答；要用评测来调整预算。为了缓存而严格安排顺序，有时意味着相关材料离问题比较远，只要标注清楚，这通常是可以接受的。",
+      "followups": [
+        "How would you decide the budget for each part of the context?",
+        "A merchant's profile changes mid-conversation. What do you do with the cached prefix?",
+        "How would you test that active constraints survive compaction?"
+      ],
+      "followups_zh": [
+        "你会如何决定上下文中每一部分的预算？",
+        "商家的档案在对话中途发生了变化。你会如何处理已缓存的前缀？",
+        "你会如何测试当前约束在压缩之后仍然保留？"
+      ],
+      "vocab": [
+        {
+          "en": "context engineering",
+          "zh": "上下文工程"
+        },
+        {
+          "en": "token budget",
+          "zh": "token 预算"
+        },
+        {
+          "en": "cache breakpoint",
+          "zh": "缓存断点"
+        },
+        {
+          "en": "active constraints",
+          "zh": "当前约束"
+        },
+        {
+          "en": "Treat the context as a request you build, not a log you append to.",
+          "zh": "把上下文当作一个你精心构造的请求，而不是一份不断追加的日志。"
+        }
+      ]
+    }
+  ]
+}

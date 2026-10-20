@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 13 个模块、49 道题。
+共 14 个模块、54 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -173,3 +173,17 @@ Five new agent questions: trimming an overgrown system prompt, making a writer-c
 | 3 | Tools & MCP | Hard | [Renaming one tool parameter broke the agent for a day](modules/daily-2026-10-20.md#q3) | 改了一个工具参数名，Agent 坏了一整天 |
 | 4 | RAG | Hard | [Generated product descriptions claim features the product does not have](modules/daily-2026-10-20.md#q4) | 生成的商品描述宣称商品具备它其实没有的功能 |
 | 5 | Safety & Security | Senior | [Threat-model the agent platform before it launches to merchants](modules/daily-2026-10-20.md#q5) | 在面向商家上线之前，为 Agent 平台做威胁建模 |
+
+## [Daily set · Oct 21 · 每日新题 · 10 月 21 日](modules/daily-2026-10-21.md)
+
+Five new agent questions: when an agent should ask and when it should act, metering and limiting model usage per merchant, evaluating multi-turn conversations with a simulated merchant, reconciling specialist agents that give contradictory advice, and designing how context is assembled on every turn.
+
+> 五道新的 Agent 题：Agent 什么时候该提问、什么时候该行动，按商家计量和限制模型用量，用模拟商家评测多轮对话，协调给出相互矛盾建议的专职 Agent，以及设计每一轮上下文的组装方式。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Agent Loop | Medium | [The agent either interrogates the merchant or guesses wildly](modules/daily-2026-10-21.md#q1) | Agent 要么把商家问个没完，要么胡乱猜测 |
+| 2 | Production | Medium | [One merchant's agent usage costs more than their subscription](modules/daily-2026-10-21.md#q2) | 某个商家使用 Agent 的成本比他的订阅费还高 |
+| 3 | Evals & Observability | Hard | [Your eval only tests single questions, but the failures happen in conversations](modules/daily-2026-10-21.md#q3) | 评测只覆盖单个问题，而故障都发生在多轮对话里 |
+| 4 | Multi-agent | Hard | [The pricing agent says lower prices, the ads agent says raise bids](modules/daily-2026-10-21.md#q4) | 定价 Agent 说要降价，广告 Agent 说要提高出价 |
+| 5 | Context & Memory | Senior | [Design how the support agent assembles its context on every turn](modules/daily-2026-10-21.md#q5) | 设计客服 Agent 在每一轮如何组装上下文 |
