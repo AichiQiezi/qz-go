@@ -1,0 +1,197 @@
+{
+  "date": "2026-10-21",
+  "generatedAt": "2026-10-21T06:44:23+08:00",
+  "questions": [
+    {
+      "id": "20261021-1",
+      "topic": "Go",
+      "difficulty": "Medium",
+      "title": "Two identical timestamps compare as different, and a cache never hits",
+      "title_zh": "两个相同的时间戳比较结果却不相等，缓存也永远命中不了",
+      "question": "A Go service deduplicates ad-platform report requests by their time window. The window start is a `time.Time` used in `==` comparisons and as a map key. Requests that should be duplicates are never detected, and the cache keyed by the window start never hits, although logging shows identical timestamps. The values come from `time.Now()`, from JSON in a queue message, and sometimes from `t.UTC()`.\n\nWhy, and what is the correct way to compare and key times in Go?",
+      "question_zh": "一个 Go 服务按时间窗口对广告平台的报表请求去重。窗口起点是一个 `time.Time`，既用于 `==` 比较，也用作 map 的键。本应被识别为重复的请求从来没被识别出来，以窗口起点为键的缓存也从未命中，尽管日志里打印出的时间戳完全相同。这些值有的来自 `time.Now()`，有的来自队列消息里的 JSON，有时还来自 `t.UTC()`。\n\n为什么会这样？在 Go 中比较时间、以时间作为键的正确方式是什么？",
+      "answer": "**Why `==` fails.** A `time.Time` is a struct holding the wall-clock time, an optional monotonic clock reading, and a pointer to a location. `==` compares all of these fields, not the instant. `time.Now()` includes a monotonic reading; a value decoded from JSON does not, so the two are never `==` even when they represent the same instant. `t.UTC()` represents the same instant with a different location, so it is not `==` either. Map keys use the same comparison, which is why the cache never hits.\n\n```go\nnow := time.Now()\nvar back time.Time\nb, _ := json.Marshal(now)\n_ = json.Unmarshal(b, &back)\nfmt.Println(now == back, now.Equal(back))             // false true\nfmt.Println(now == now.UTC(), now.Equal(now.UTC()))   // false true\n```\n\n**The fix.** Compare instants with `t.Equal(u)`, `Before` and `After`. For map keys, cache keys and deduplication, normalize first: convert to UTC, round or truncate to the precision you care about (a report window is per hour or per day), and use a canonical form such as `t.UTC().Truncate(time.Hour).Unix()` or a formatted string. `t.Round(0)` strips the monotonic reading, but it does not fix differing locations, so normalizing to UTC is still needed.\n\n**Related traps.** Ad platforms report in the account's time zone, so a \"day\" for a merchant in Los Angeles is not a UTC day: store the account's zone and compute windows in it with `time.LoadLocation`, then convert to UTC for storage. Precision also differs between systems: Postgres stores microseconds while Go has nanoseconds, so a value round-tripped through the database is not `Equal` to the original unless you truncate first.\n\n**Prevention.** The compiler happily accepts `==` on `time.Time`, so make it a code-review rule: no `==` on `time.Time` and no `time.Time` as a map key; use a small helper that produces the canonical key, and test it with values from JSON and the database, not only from `time.Now()`.",
+      "answer_zh": "**为什么 `==` 会失败。** `time.Time` 是一个结构体，里面保存着墙上时间、一个可选的单调时钟读数，以及一个指向时区位置的指针。`==` 比较的是所有这些字段，而不是时刻本身。`time.Now()` 带有单调时钟读数；从 JSON 解码出来的值则没有，所以即使两者表示同一时刻，也永远不会 `==`。`t.UTC()` 用不同的时区位置表示同一时刻，所以也不会 `==`。map 的键使用同样的比较方式，这就是缓存从不命中的原因。\n\n```go\nnow := time.Now()\nvar back time.Time\nb, _ := json.Marshal(now)\n_ = json.Unmarshal(b, &back)\nfmt.Println(now == back, now.Equal(back))             // false true\nfmt.Println(now == now.UTC(), now.Equal(now.UTC()))   // false true\n```\n\n**修复。** 用 `t.Equal(u)`、`Before` 和 `After` 比较时刻。用作 map 键、缓存键或做去重时，要先规范化：转换成 UTC，按你关心的精度取整或截断（报表窗口按小时或按天），然后使用一种规范的形式，比如 `t.UTC().Truncate(time.Hour).Unix()` 或格式化后的字符串。`t.Round(0)` 能去掉单调时钟读数，但解决不了时区位置不同的问题，所以仍然需要统一转换成 UTC。\n\n**相关的陷阱。** 广告平台按账户所在时区出报表，所以对洛杉矶的商家来说，“一天”并不是 UTC 的一天：要保存账户的时区，用 `time.LoadLocation` 在该时区内计算时间窗口，再转换成 UTC 存储。不同系统的精度也不同：Postgres 存储到微秒，而 Go 精确到纳秒，所以一个经过数据库往返的值，除非事先截断，否则不会与原值 `Equal`。\n\n**预防。** 编译器会毫无异议地接受对 `time.Time` 使用 `==`，所以要把它定为代码评审规则：不对 `time.Time` 使用 `==`，也不把 `time.Time` 用作 map 的键；改用一个生成规范键的小辅助函数，并用来自 JSON 和数据库的值来测试它，而不只是用 `time.Now()` 的值。",
+      "followups": [
+        "Why does Go keep a monotonic clock reading in time.Now() at all?",
+        "How would you compute \"yesterday\" for a merchant in a time zone with daylight saving time?"
+      ],
+      "followups_zh": [
+        "Go 为什么要在 time.Now() 里保留单调时钟读数？",
+        "对于一个所在时区有夏令时的商家，你会如何计算“昨天”？"
+      ],
+      "vocab": [
+        {
+          "en": "monotonic clock",
+          "zh": "单调时钟"
+        },
+        {
+          "en": "instant",
+          "zh": "时刻"
+        },
+        {
+          "en": "canonical key",
+          "zh": "规范化的键"
+        },
+        {
+          "en": "time zone",
+          "zh": "时区"
+        }
+      ]
+    },
+    {
+      "id": "20261021-2",
+      "topic": "System Design",
+      "difficulty": "Senior",
+      "title": "Sending purchase conversions to Meta and Google from the server, reliably",
+      "title_zh": "从服务端可靠地把购买转化回传给 Meta 和 Google",
+      "question": "Your platform sends merchants' purchase events to ad platforms so their campaigns can optimize: the browser pixel fires on the thank-you page, and you also want a server-side integration (such as Meta's Conversions API or Google's enhanced conversions) because ad blockers and browser privacy features drop many browser events.\n\nDesign the server-side conversion pipeline for thousands of merchants: event flow, deduplication with the pixel, privacy, retries and monitoring.",
+      "question_zh": "你们的平台会把商家的购买事件发送给广告平台，以便它们的广告系列做优化：浏览器端的像素在感谢页触发，而你们还想做一套服务端集成（比如 Meta 的 Conversions API 或 Google 的增强型转化），因为广告拦截器和浏览器的隐私功能会丢掉很多浏览器端事件。\n\n为成千上万的商家设计服务端转化回传流水线：事件流转、与像素事件的去重、隐私、重试和监控。",
+      "answer": "**Event flow.** When an order is paid, the order service writes a conversion event to an outbox in the same transaction, and a relay publishes it to a queue partitioned by merchant. Per-platform sender workers consume it, build the platform's payload, and call its API with the merchant's credentials. Refunds and cancellations produce their own events if the platform supports adjustments.\n\n**Deduplication with the pixel.** The same purchase may arrive from the browser and from the server. Generate one event ID per conversion (for example from the order ID) and send it with both: the browser pixel puts it in the page, and the server sends the same ID with the same event name. Meta, for example, deduplicates browser and server events that share an event ID and event name. Without a shared ID, conversions are double-counted and campaigns over-optimize.\n\n**Privacy and consent.** Send only what the merchant's consent settings and the shopper's choices allow; record consent with the order and check it in the sender. Customer identifiers such as email and phone are normalized (trimmed, lowercased, phone in international format) and hashed with SHA-256 before leaving your system, as the platforms require. Never log raw identifiers, and keep a per-merchant switch to stop sending.\n\n- Retries: retry transient errors with backoff; platforms deduplicate by event ID, so a retry of the same event is safe, which is another reason the ID must be stable.\n- Rate limits and batching: platforms accept batches and enforce limits per account, so batch per merchant and keep a per-platform limiter shared by all workers.\n- Dead letters: invalid payloads (missing currency, bad timestamp) go to a dead-letter queue with the platform's error, not into endless retries.\n- Credentials: expired or revoked tokens pause sending for that merchant and notify them to reconnect, instead of failing every event.\n\n**Monitoring.** Track, per merchant and platform, events sent, accepted, rejected by reason, and delivery delay. Compare server-sent purchases with orders in your database: a gap means lost events, and a ratio above one means duplicates. Many platforms also report match quality for the identifiers you send; surface it to merchants.\n\n**Trade-offs.** Sending in near real time helps optimization but costs more API calls; batching every few minutes is usually a good middle ground. Server-side sending recovers lost events but moves the privacy responsibility onto you, so consent handling and hashing must be correct before you scale it.",
+      "answer_zh": "**事件流转。** 订单付款成功时，订单服务在同一个事务里把一条转化事件写入 outbox，再由一个中继进程把它发布到按商家分区的队列中。每个平台各有发送 worker 消费这些事件，构造该平台要求的数据，并用商家的凭证调用平台 API。如果平台支持调整，退款和取消也会生成各自的事件。\n\n**与像素事件去重。** 同一笔购买可能同时从浏览器端和服务端到达。为每次转化生成一个事件 ID（比如由订单 ID 派生），并让两边都带上它：浏览器端像素把它放在页面里，服务端发送同样的 ID 和同样的事件名称。以 Meta 为例，它会对事件 ID 和事件名称都相同的浏览器端与服务端事件进行去重。没有共享的 ID，转化就会被重复计算，广告系列也会过度优化。\n\n**隐私与同意。** 只发送商家的同意设置和购物者的选择所允许的内容；把同意情况与订单一起记录，并在发送程序中检查。电子邮件、电话等顾客标识在离开你们的系统之前，要先规范化（去掉首尾空格、转小写、电话号码转为国际格式），再按平台要求用 SHA-256 哈希。绝不记录原始标识，并为每个商家提供一个停止发送的开关。\n\n- 重试：对暂时性错误使用退避重试；平台会按事件 ID 去重，所以重发同一个事件是安全的，这也是事件 ID 必须稳定的另一个原因。\n- 限流与批量：平台接受批量发送，并按账户设有限额，所以要按商家批量发送，并让所有 worker 共享一个按平台的限流器。\n- 死信：无效的数据（缺少币种、时间戳有误）连同平台返回的错误一起进入死信队列，而不是无休止地重试。\n- 凭证：token 过期或被撤销时，暂停该商家的发送并通知其重新连接，而不是让每个事件都失败。\n\n**监控。** 按商家和平台跟踪已发送、已接受、按原因分类的被拒绝事件数，以及投递延迟。把服务端发送的购买事件与数据库中的订单进行比对：有缺口说明事件丢失，比例大于一则说明有重复。很多平台还会反馈你所发送标识的匹配质量；把这些信息展示给商家。\n\n**取舍。** 近实时发送有助于优化效果，但会消耗更多的 API 调用；每隔几分钟批量发送一次通常是很好的折中。服务端发送能找回丢失的事件，但也把隐私方面的责任转移到了你们身上，所以在扩大规模之前，同意处理和哈希必须做对。",
+      "followups": [
+        "How would you backfill conversions after a three-hour outage of the sender?",
+        "A merchant says the platform shows more purchases than their shop. How do you investigate?",
+        "What changes if the shopper withdraws consent after the purchase?"
+      ],
+      "followups_zh": [
+        "发送程序停摆三小时之后，你会如何补发这段时间的转化？",
+        "商家说平台显示的购买数比他们店铺里的还多。你会如何排查？",
+        "如果购物者在购买之后撤回了同意，会有什么变化？"
+      ],
+      "vocab": [
+        {
+          "en": "conversion event",
+          "zh": "转化事件"
+        },
+        {
+          "en": "deduplication",
+          "zh": "去重"
+        },
+        {
+          "en": "hashed identifier",
+          "zh": "哈希后的标识"
+        },
+        {
+          "en": "consent",
+          "zh": "同意（用户授权）"
+        },
+        {
+          "en": "dead-letter queue",
+          "zh": "死信队列"
+        }
+      ]
+    },
+    {
+      "id": "20261021-3",
+      "topic": "Database",
+      "difficulty": "Hard",
+      "title": "Duplicate platform connections despite a check before insert",
+      "title_zh": "插入之前做了检查，却还是出现了重复的平台连接",
+      "question": "Merchants connect ad accounts. The code checks whether an active connection exists and inserts one if not:\n\n```sql\nSELECT 1 FROM connections WHERE merchant_id = $1 AND platform = $2 AND deleted_at IS NULL;\n-- if no row:\nINSERT INTO connections (merchant_id, platform, token_ref) VALUES ($1, $2, $3);\n```\n\nSome merchants end up with two active Meta connections, and the sync job then pushes their catalog twice. A unique index on `(merchant_id, platform)` was rejected because disconnected rows are kept with `deleted_at` set. Fix it properly.",
+      "question_zh": "商家会连接广告账户。代码先检查是否已存在有效的连接，没有的话就插入一条：\n\n```sql\nSELECT 1 FROM connections WHERE merchant_id = $1 AND platform = $2 AND deleted_at IS NULL;\n-- if no row:\nINSERT INTO connections (merchant_id, platform, token_ref) VALUES ($1, $2, $3);\n```\n\n有些商家最终有了两个有效的 Meta 连接，之后同步任务就把他们的商品目录推送了两次。之前有人提议在 `(merchant_id, platform)` 上建唯一索引，但被否决了，因为断开的连接会保留下来，只是设置了 `deleted_at`。请把它正确地修好。",
+      "answer": "**Why the check does not work.** Check-then-insert is a race: two requests (a double click, or a retry after a timeout) both run the SELECT, both see no row, and both insert. Running both statements in one transaction does not help under the default isolation level, because neither transaction can see the other's uncommitted row. Only the database can enforce uniqueness across concurrent requests.\n\n**The fix: a partial unique index.** Uniqueness only needs to hold for active rows, and Postgres can index exactly those:\n\n```sql\nCREATE UNIQUE INDEX CONCURRENTLY connections_active_uq\n  ON connections (merchant_id, platform)\n  WHERE deleted_at IS NULL;\n\nINSERT INTO connections (merchant_id, platform, token_ref)\nVALUES ($1, $2, $3)\nON CONFLICT (merchant_id, platform) WHERE deleted_at IS NULL DO NOTHING\nRETURNING id;\n```\n\nDisconnected rows (with `deleted_at` set) are outside the index, so a merchant can disconnect and reconnect, but there can never be two active rows. Build the index with `CONCURRENTLY` on a live table, and clean up existing duplicates first, or the build fails.\n\n- `ON CONFLICT ... DO NOTHING RETURNING id` returns no row when the conflict happens, so the code must then select the existing connection, or use `DO UPDATE` to refresh the token and get the row back.\n- A conflicting insert still consumes a sequence value, so IDs have gaps; that is normal and harmless.\n- The same pattern fixes other rules: case-insensitive email uniqueness is a unique index on `lower(email)`.\n\n**Alternatives and trade-offs.** SERIALIZABLE isolation would detect the conflict too, but it makes the application handle serialization failures and retry, and it affects the whole transaction; an advisory lock per merchant works but is easy to forget in another code path. A unique index is the simplest and the only one that protects every writer, including scripts and future code. The cost is that the application must treat \"already exists\" as a normal outcome, not an error.",
+      "answer_zh": "**为什么检查不起作用。** 先检查再插入是一种竞态：两个请求（双击，或者超时后的重试）都执行 SELECT，都看到没有记录，于是都插入了。在默认隔离级别下，把两条语句放在同一个事务里也无济于事，因为两个事务都看不到对方尚未提交的那一行。只有数据库本身才能在并发请求之间强制保证唯一性。\n\n**修复：部分唯一索引。** 唯一性只需要对有效的行成立，而 Postgres 正好可以只为这些行建立索引：\n\n```sql\nCREATE UNIQUE INDEX CONCURRENTLY connections_active_uq\n  ON connections (merchant_id, platform)\n  WHERE deleted_at IS NULL;\n\nINSERT INTO connections (merchant_id, platform, token_ref)\nVALUES ($1, $2, $3)\nON CONFLICT (merchant_id, platform) WHERE deleted_at IS NULL DO NOTHING\nRETURNING id;\n```\n\n已断开的行（设置了 `deleted_at`）不在这个索引范围内，所以商家可以断开后再重新连接，但永远不可能同时有两条有效的记录。在线上表上要用 `CONCURRENTLY` 建索引，并且要先清理已有的重复数据，否则建索引会失败。\n\n- `ON CONFLICT ... DO NOTHING RETURNING id` 在发生冲突时不会返回任何行，所以代码随后必须查询已有的连接，或者改用 `DO UPDATE` 刷新 token 并拿回这一行。\n- 发生冲突的插入仍然会消耗一个序列值，所以 ID 会出现空洞；这很正常，也没有害处。\n- 同样的模式也能解决其他规则：不区分大小写的邮箱唯一性，就是在 `lower(email)` 上建唯一索引。\n\n**替代方案与取舍。** SERIALIZABLE 隔离级别也能发现冲突，但它要求应用处理序列化失败并重试，而且会影响整个事务；按商家加咨询锁也行，但很容易在另一条代码路径里被遗忘。唯一索引最简单，也是唯一能保护所有写入方（包括脚本和将来的代码）的方案。代价是应用必须把“已存在”当作正常结果，而不是错误。",
+      "followups": [
+        "How would you find and merge the duplicates that already exist?",
+        "What does ON CONFLICT DO UPDATE do under concurrent inserts?"
+      ],
+      "followups_zh": [
+        "你会如何找出并合并已经存在的重复数据？",
+        "在并发插入的情况下，ON CONFLICT DO UPDATE 会怎样运作？"
+      ],
+      "vocab": [
+        {
+          "en": "check-then-act race",
+          "zh": "先检查后执行的竞态"
+        },
+        {
+          "en": "partial unique index",
+          "zh": "部分唯一索引"
+        },
+        {
+          "en": "upsert",
+          "zh": "插入或更新"
+        },
+        {
+          "en": "soft delete",
+          "zh": "软删除"
+        }
+      ]
+    },
+    {
+      "id": "20261021-4",
+      "topic": "Middleware",
+      "difficulty": "Hard",
+      "title": "After moving to Redis Cluster, multi-key commands start failing",
+      "title_zh": "迁移到 Redis Cluster 之后，多键命令开始报错",
+      "question": "Your checkout service used a single Redis instance. It reads a cart and stock reservations together with `MGET cart:42 stock:42`, and reserves stock with a Lua script that touches both keys. After migrating to Redis Cluster for capacity, these calls fail with `CROSSSLOT Keys in request don't hash to the same slot`.\n\nExplain the error and how you would fix the design.",
+      "question_zh": "你们的结算服务原来使用单个 Redis 实例。它用 `MGET cart:42 stock:42` 同时读取购物车和库存预留，并用一个同时操作这两个键的 Lua 脚本来预留库存。为了扩容而迁移到 Redis Cluster 之后，这些调用都报错：`CROSSSLOT Keys in request don't hash to the same slot`。\n\n解释这个错误，以及你会如何修正这个设计。",
+      "answer": "**Why it fails.** Redis Cluster splits the key space into 16,384 hash slots, and each node owns some of them. A key's slot is computed from its name, so `cart:42` and `stock:42` usually land in different slots, often on different nodes. A single command, transaction or Lua script must touch keys in one slot only, because one node has to execute it atomically. Multi-key commands that worked on a single instance therefore fail with CROSSSLOT.\n\n**The fix: hash tags.** If a key contains `{...}`, only the part inside the braces is hashed. Keys that must be used together get the same tag, so they always share a slot:\n\n```text\n> CLUSTER KEYSLOT {m:42}:cart\n(integer) 15728\n> CLUSTER KEYSLOT {m:42}:stock\n(integer) 15728\n> MSET {m:42}:cart a {m:42}:stock b\nOK\n```\n\n- Choose the tag by the unit of atomicity: here everything for one checkout of one merchant's cart. Lua scripts must receive all their keys in KEYS so the cluster can route them.\n- Do not over-tag: putting a whole large merchant under one tag sends all its traffic to one slot and one node, recreating a hot spot. Tag the smallest group that must be atomic.\n- Operations that span many unrelated keys (a dashboard reading thousands of counters) become per-node pipelines in the client, or move to a different store.\n\n**Migration checklist.** Use a cluster-aware client, which follows MOVED and ASK redirections. Audit every multi-key command, transaction and script before the move, and rename keys with hash tags, which usually needs a dual-read period or a data migration. Note that SELECT of numbered databases is not available in cluster mode.\n\n**Trade-offs.** Cluster mode buys capacity and availability at the cost of cross-slot atomicity. If your workload depends heavily on multi-key atomic operations across arbitrary keys, a larger single primary with replicas may be simpler; if it shards naturally by merchant or cart, hash tags make the cluster a good fit.",
+      "answer_zh": "**为什么会失败。** Redis Cluster 把键空间划分为 16384 个哈希槽，每个节点负责其中一部分。键所在的槽由键名计算得出，所以 `cart:42` 和 `stock:42` 通常会落在不同的槽里，往往也在不同的节点上。单条命令、事务或 Lua 脚本只能操作同一个槽里的键，因为它必须由一个节点原子地执行。于是那些在单实例上能正常工作的多键命令，就会报 CROSSSLOT 错误。\n\n**修复：哈希标签。** 如果键名中包含 `{...}`，就只对花括号里的部分做哈希。需要一起使用的键使用相同的标签，这样它们总会落在同一个槽里：\n\n```text\n> CLUSTER KEYSLOT {m:42}:cart\n(integer) 15728\n> CLUSTER KEYSLOT {m:42}:stock\n(integer) 15728\n> MSET {m:42}:cart a {m:42}:stock b\nOK\n```\n\n- 按原子性的单位来选择标签：这里就是某个商家购物车的一次结算所涉及的全部内容。Lua 脚本必须通过 KEYS 接收它用到的所有键，这样集群才能正确路由。\n- 不要过度使用标签：把一个大商家的所有数据都放在同一个标签下，会让它的全部流量都集中到一个槽、一个节点上，重新制造出热点。只给必须原子操作的最小分组打标签。\n- 跨越许多互不相关的键的操作（比如一个读取上千个计数器的看板），要改为在客户端按节点分别做 pipeline，或者迁移到别的存储。\n\n**迁移清单。** 使用支持集群的客户端，它会处理 MOVED 和 ASK 重定向。迁移之前审查每一条多键命令、事务和脚本，并用哈希标签重命名键，这通常需要一段双读期或一次数据迁移。注意，集群模式下不支持用 SELECT 切换编号数据库。\n\n**取舍。** 集群模式换来了容量和可用性，代价是失去跨槽的原子性。如果你的业务严重依赖跨任意键的多键原子操作，那么一个更大的单主节点加副本可能更简单；如果业务天然可以按商家或购物车切分，哈希标签就能让集群很好地适用。",
+      "followups": [
+        "How would you rename millions of keys to add hash tags without downtime?",
+        "What happens to an in-flight command while a slot is being migrated?"
+      ],
+      "followups_zh": [
+        "你会如何在不停机的情况下，为数百万个键重命名并加上哈希标签？",
+        "当一个槽正在迁移时，进行中的命令会怎样？"
+      ],
+      "vocab": [
+        {
+          "en": "hash slot",
+          "zh": "哈希槽"
+        },
+        {
+          "en": "hash tag",
+          "zh": "哈希标签"
+        },
+        {
+          "en": "CROSSSLOT error",
+          "zh": "跨槽错误"
+        },
+        {
+          "en": "redirection",
+          "zh": "重定向"
+        }
+      ]
+    },
+    {
+      "id": "20261021-5",
+      "topic": "Java & CS",
+      "difficulty": "Medium",
+      "title": "Removing items from a list in a loop throws, except when it doesn't",
+      "title_zh": "在循环中删除列表元素会抛异常，但有时又不会",
+      "question": "A Java job removes products that failed validation before exporting a feed:\n\n```java\nfor (Product p : products) {\n    if (!p.isValid()) {\n        products.remove(p);\n    }\n}\n```\n\nUsually it throws `ConcurrentModificationException`. Occasionally it finishes without an error, but then an invalid product is still in the feed. Explain both behaviours and fix the code.",
+      "question_zh": "一个 Java 任务在导出 feed 之前，会删除校验失败的商品：\n\n```java\nfor (Product p : products) {\n    if (!p.isValid()) {\n        products.remove(p);\n    }\n}\n```\n\n它通常会抛出 `ConcurrentModificationException`。偶尔它也能不报错地跑完，但这时 feed 里仍然会留下一个无效商品。解释这两种表现，并修复代码。",
+      "answer": "**Why it throws.** The enhanced for loop uses the list's iterator. `ArrayList` keeps a modification count, and the iterator remembers the count it started with. Removing through the list, not through the iterator, changes the count, so the iterator's next call to `next()` notices and throws `ConcurrentModificationException`. This is a fail-fast check, not thread safety: it happens in a single thread.\n\n**Why it sometimes does not throw.** The loop asks `hasNext()` before calling `next()`, and `hasNext()` only compares the cursor with the current size. If the removed element is the second-to-last one, the list shrinks so that the cursor equals the new size, `hasNext()` returns false, and the loop ends without calling `next()`. No exception, but the last element was never checked, so an invalid product can stay in the feed. That silent case is worse than the exception.\n\n```java\nList<String> l = new ArrayList<>(List.of(\"a\", \"b\", \"c\", \"d\"));\nfor (String s : l) if (s.equals(\"c\")) l.remove(s);   // no exception\nSystem.out.println(l);                               // [a, b, d]: \"d\" was never visited\n```\n\n**The fix.** Use `products.removeIf(p -> !p.isValid());`, which is clear and efficient for `ArrayList`. If you need an explicit loop, remove through the iterator with `it.remove()`. Often the cleanest option is not to mutate at all: build a new list with a stream filter, which also leaves the input unchanged for logging the rejected items.\n\n**With threads.** If several threads share the list, none of these fixes is enough; use a concurrent collection or proper locking. `CopyOnWriteArrayList` iterators never throw because they iterate over a snapshot, which also means they do not see concurrent changes.",
+      "answer_zh": "**为什么会抛异常。** 增强型 for 循环使用的是列表的迭代器。`ArrayList` 会维护一个修改计数，迭代器则记住它开始时的计数。通过列表本身（而不是通过迭代器）删除元素会改变这个计数，于是迭代器下一次调用 `next()` 时就会察觉并抛出 `ConcurrentModificationException`。这是一种快速失败的检查，与线程安全无关：在单线程中也会发生。\n\n**为什么有时又不抛。** 循环在调用 `next()` 之前会先调用 `hasNext()`，而 `hasNext()` 只是比较游标与当前的大小。如果被删除的恰好是倒数第二个元素，列表缩小后游标正好等于新的大小，`hasNext()` 返回 false，循环在没有调用 `next()` 的情况下就结束了。没有异常，但最后一个元素根本没有被检查，所以无效商品可能留在 feed 里。这种悄无声息的情况比抛异常更糟。\n\n```java\nList<String> l = new ArrayList<>(List.of(\"a\", \"b\", \"c\", \"d\"));\nfor (String s : l) if (s.equals(\"c\")) l.remove(s);   // no exception\nSystem.out.println(l);                               // [a, b, d]: \"d\" was never visited\n```\n\n**修复。** 使用 `products.removeIf(p -> !p.isValid());`，它清晰明了，对 `ArrayList` 也很高效。如果需要显式的循环，就通过迭代器用 `it.remove()` 删除。很多时候最干净的做法是根本不修改原列表：用 stream 的 filter 构建一个新列表，这样输入保持不变，还可以用来记录被剔除的条目。\n\n**多线程的情况。** 如果有多个线程共享这个列表，上面这些修复都不够；要使用并发集合或者正确的加锁。`CopyOnWriteArrayList` 的迭代器永远不会抛这个异常，因为它遍历的是一个快照，这也意味着它看不到并发发生的修改。",
+      "followups": [
+        "Why is removeIf more efficient than repeated remove calls on an ArrayList?",
+        "Does the same problem exist with HashMap? How would you remove entries safely?"
+      ],
+      "followups_zh": [
+        "为什么在 ArrayList 上，removeIf 比反复调用 remove 更高效？",
+        "HashMap 也有同样的问题吗？你会如何安全地删除其中的条目？"
+      ],
+      "vocab": [
+        {
+          "en": "fail-fast iterator",
+          "zh": "快速失败的迭代器"
+        },
+        {
+          "en": "modification count",
+          "zh": "修改计数"
+        },
+        {
+          "en": "removeIf",
+          "zh": "removeIf（按条件删除）"
+        },
+        {
+          "en": "snapshot iteration",
+          "zh": "快照迭代"
+        }
+      ]
+    }
+  ]
+}

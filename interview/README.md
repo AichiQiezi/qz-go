@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 9 天、45 道题。
+共 10 天、50 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-10-21](days/2026-10-21.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Medium | [Two identical timestamps compare as different, and a cache never hits](days/2026-10-21.md#q1) | 两个相同的时间戳比较结果却不相等，缓存也永远命中不了 |
+| 2 | System Design | Senior | [Sending purchase conversions to Meta and Google from the server, reliably](days/2026-10-21.md#q2) | 从服务端可靠地把购买转化回传给 Meta 和 Google |
+| 3 | Database | Hard | [Duplicate platform connections despite a check before insert](days/2026-10-21.md#q3) | 插入之前做了检查，却还是出现了重复的平台连接 |
+| 4 | Middleware | Hard | [After moving to Redis Cluster, multi-key commands start failing](days/2026-10-21.md#q4) | 迁移到 Redis Cluster 之后，多键命令开始报错 |
+| 5 | Java & CS | Medium | [Removing items from a list in a loop throws, except when it doesn't](days/2026-10-21.md#q5) | 在循环中删除列表元素会抛异常，但有时又不会 |
 
 ## [2026-10-20](days/2026-10-20.md)
 
