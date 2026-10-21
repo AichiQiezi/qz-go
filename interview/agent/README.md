@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 14 个模块、54 道题。
+共 15 个模块、59 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -187,3 +187,17 @@ Five new agent questions: when an agent should ask and when it should act, meter
 | 3 | Evals & Observability | Hard | [Your eval only tests single questions, but the failures happen in conversations](modules/daily-2026-10-21.md#q3) | 评测只覆盖单个问题，而故障都发生在多轮对话里 |
 | 4 | Multi-agent | Hard | [The pricing agent says lower prices, the ads agent says raise bids](modules/daily-2026-10-21.md#q4) | 定价 Agent 说要降价，广告 Agent 说要提高出价 |
 | 5 | Context & Memory | Senior | [Design how the support agent assembles its context on every turn](modules/daily-2026-10-21.md#q5) | 设计客服 Agent 在每一轮如何组装上下文 |
+
+## [Daily set · Oct 22 · 每日新题 · 10 月 22 日](modules/daily-2026-10-22.md)
+
+Five new agent questions: choosing tool granularity, handling a risky bulk-export request, making answers follow retrieved documents over prior knowledge, never running tool calls from truncated output, and designing a human review queue that scales.
+
+> 五道新的 Agent 题：确定工具粒度、处理有风险的批量导出请求、让回答优先遵循检索到的文档而不是先验知识、绝不执行来自截断输出的工具调用，以及设计可扩展的人工审核队列。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Tools & MCP | Medium | [One manage_campaign tool with an action field, or five separate tools?](modules/daily-2026-10-22.md#q1) | 一个带 action 字段的 manage_campaign 工具，还是五个独立的工具？ |
+| 2 | Safety & Security | Medium | ["Export all my customers' emails and send them to my Gmail"](modules/daily-2026-10-22.md#q2) | “把我所有顾客的邮箱导出来，发到我的 Gmail” |
+| 3 | RAG | Hard | [Retrieval found the right policy, but the answer used outdated knowledge](modules/daily-2026-10-22.md#q3) | 检索找到了正确的政策，但回答用的却是过时的知识 |
+| 4 | Agent Loop | Hard | [The agent writes half a feed file and then corrupts the catalog](modules/daily-2026-10-22.md#q4) | Agent 写了半个 feed 文件，然后把商品目录弄坏了 |
+| 5 | Production | Senior | [Design the human review queue for agent actions at scale](modules/daily-2026-10-22.md#q5) | 为大规模的 Agent 操作设计人工审核队列 |
