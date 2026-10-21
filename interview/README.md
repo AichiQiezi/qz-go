@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 10 天、50 道题。
+共 11 天、55 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-10-22](days/2026-10-22.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Senior | [A feed parser keeps only a few IDs, yet memory grows by hundreds of megabytes](days/2026-10-22.md#q1) | feed 解析器只保留了几个 ID，内存却增长了几百 MB |
+| 2 | System Design | Medium | [Sending webhooks to thousands of merchant endpoints that are often down](days/2026-10-22.md#q2) | 向成千上万个经常宕机的商家端点发送 webhook |
+| 3 | Database | Medium | [The dashboard's order count takes seconds on large merchants](days/2026-10-22.md#q3) | 大商家的后台订单总数要好几秒才能显示出来 |
+| 4 | Middleware | Hard | [Streaming responses arrive all at once, and connections drop after a minute](days/2026-10-22.md#q4) | 流式响应一下子全部到达，而且连接在一分钟后断开 |
+| 5 | Java & CS | Hard | [One merchant's request runs with another merchant's ID](days/2026-10-22.md#q5) | 某个商家的请求却带着另一个商家的 ID 在运行 |
 
 ## [2026-10-21](days/2026-10-21.md)
 
