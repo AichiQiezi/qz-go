@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 11 天、55 道题。
+共 12 天、60 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-10-23](days/2026-10-23.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Medium | [A job that processes 5,000 feed files fails with "too many open files"](days/2026-10-23.md#q1) | 处理 5000 个 feed 文件的任务报错“too many open files” |
+| 2 | System Design | Hard | [Keeping inventory in sync across the shop, Amazon and TikTok Shop without overselling](days/2026-10-23.md#q2) | 在自营店铺、Amazon 和 TikTok Shop 之间同步库存而不超卖 |
+| 3 | Database | Hard | [A merchant saves a product and the page still shows the old price](days/2026-10-23.md#q3) | 商家保存了商品，页面却仍然显示旧价格 |
+| 4 | Middleware | Medium | [Order events sent over Redis Pub/Sub sometimes never arrive](days/2026-10-23.md#q4) | 通过 Redis Pub/Sub 发送的订单事件有时根本收不到 |
+| 5 | Java & CS | Senior | [p99 latency spikes every few minutes in a Java service with a big heap](days/2026-10-23.md#q5) | 一个大堆内存的 Java 服务每隔几分钟 p99 延迟就飙升一次 |
 
 ## [2026-10-22](days/2026-10-22.md)
 

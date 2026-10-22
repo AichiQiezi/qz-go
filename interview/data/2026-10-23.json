@@ -1,0 +1,203 @@
+{
+  "date": "2026-10-23",
+  "generatedAt": "2026-10-23T06:44:32+08:00",
+  "questions": [
+    {
+      "id": "20261023-1",
+      "topic": "Go",
+      "difficulty": "Medium",
+      "title": "A job that processes 5,000 feed files fails with \"too many open files\"",
+      "title_zh": "处理 5000 个 feed 文件的任务报错“too many open files”",
+      "question": "A nightly Go job validates every merchant's exported feed file. It worked when there were a few hundred merchants; now it fails partway through with `open ...: too many open files`. The code:\n\n```go\nfunc validateAll(paths []string) error {\n\tfor _, p := range paths {\n\t\tf, err := os.Open(p)\n\t\tif err != nil {\n\t\t\treturn err\n\t\t}\n\t\tdefer f.Close()\n\t\tif err := validate(f); err != nil {\n\t\t\tlog.Printf(\"%s: %v\", p, err)\n\t\t}\n\t}\n\treturn nil\n}\n```\n\nExplain the bug and fix it.",
+      "question_zh": "一个 Go 夜间任务会校验每个商家导出的 feed 文件。商家只有几百个时它运行正常；现在它会在中途报错 `open ...: too many open files`。代码如下：\n\n```go\nfunc validateAll(paths []string) error {\n\tfor _, p := range paths {\n\t\tf, err := os.Open(p)\n\t\tif err != nil {\n\t\t\treturn err\n\t\t}\n\t\tdefer f.Close()\n\t\tif err := validate(f); err != nil {\n\t\t\tlog.Printf(\"%s: %v\", p, err)\n\t\t}\n\t}\n\treturn nil\n}\n```\n\n解释这个 bug 并修复它。",
+      "answer": "**The bug.** `defer` runs when the surrounding function returns, not at the end of a loop iteration. Every file opened in the loop stays open until `validateAll` returns, so after enough iterations the process hits its open-file limit (the per-process descriptor limit, often 1,024 by default on Linux) and `os.Open` fails. With a few hundred merchants the job stayed under the limit; growth pushed it over.\n\n**The fix.** Give each file its own function scope, so the deferred close runs after each file:\n\n```go\nfunc validateAll(paths []string) error {\n\tfor _, p := range paths {\n\t\tif err := validateFile(p); err != nil {\n\t\t\tlog.Printf(\"%s: %v\", p, err)\n\t\t}\n\t}\n\treturn nil\n}\n\nfunc validateFile(p string) error {\n\tf, err := os.Open(p)\n\tif err != nil {\n\t\treturn err\n\t}\n\tdefer f.Close()\n\treturn validate(f)\n}\n```\n\n- Calling `f.Close()` explicitly at the end of the loop body also works, but is easy to skip on an early `continue` or error path; the helper function is safer.\n- For files you write, check the error from `Close`: it can report a failed write that `Write` did not.\n- The same pattern applies to other resources deferred in loops: HTTP response bodies, database rows, locks.\n\n**If you parallelize later.** Running validation with a worker pool multiplies open files by the number of workers, so bound the concurrency explicitly. Raising the open-file limit treats the symptom; it is fine to set sensible limits for the service, but the code must not depend on the limit being high.\n\n**How to catch it.** `go vet` does not flag defer in loops, but linters such as staticcheck and gocritic have checks for it; enable them in CI. In production, a metric for open file descriptors per process shows this kind of leak long before it fails.",
+      "answer_zh": "**这个 bug。** `defer` 是在外层函数返回时执行，而不是在每次循环迭代结束时执行。循环中打开的每个文件都会一直保持打开状态，直到 `validateAll` 返回，所以迭代到一定次数后，进程就会触及打开文件数的上限（每个进程的文件描述符上限，在 Linux 上默认往往是 1024），`os.Open` 随之失败。商家只有几百个时，任务一直在上限之内；业务增长之后就超过了。\n\n**修复。** 给每个文件一个独立的函数作用域，这样延迟执行的关闭操作会在处理完每个文件后运行：\n\n```go\nfunc validateAll(paths []string) error {\n\tfor _, p := range paths {\n\t\tif err := validateFile(p); err != nil {\n\t\t\tlog.Printf(\"%s: %v\", p, err)\n\t\t}\n\t}\n\treturn nil\n}\n\nfunc validateFile(p string) error {\n\tf, err := os.Open(p)\n\tif err != nil {\n\t\treturn err\n\t}\n\tdefer f.Close()\n\treturn validate(f)\n}\n```\n\n- 在循环体末尾显式调用 `f.Close()` 也行，但遇到提前 `continue` 或出错返回时很容易被跳过；用辅助函数更安全。\n- 对于写入的文件，要检查 `Close` 返回的错误：它可能会报告 `Write` 没有报告出来的写入失败。\n- 同样的模式也适用于其他在循环中被 defer 的资源：HTTP 响应体、数据库查询结果、锁。\n\n**如果以后要并行。** 用 worker 池并行校验，会让打开的文件数乘以 worker 的数量，所以要显式限制并发度。调高打开文件数的上限只是治标；为服务设置合理的上限没有问题，但代码不能依赖这个上限足够高。\n\n**如何发现它。** `go vet` 不会标记循环中的 defer，但 staticcheck、gocritic 等 linter 有相应的检查；在 CI 中启用它们。在线上，给每个进程打开的文件描述符数量做一个监控指标，就能在出故障之前很久发现这类泄漏。",
+      "followups": [
+        "Why does Go run deferred calls at function exit rather than at block exit?",
+        "How would you limit concurrency if you validated files with goroutines?"
+      ],
+      "followups_zh": [
+        "为什么 Go 在函数退出时、而不是在代码块退出时执行延迟调用？",
+        "如果用 goroutine 来校验文件，你会如何限制并发度？"
+      ],
+      "vocab": [
+        {
+          "en": "defer",
+          "zh": "defer（延迟执行）"
+        },
+        {
+          "en": "file descriptor",
+          "zh": "文件描述符"
+        },
+        {
+          "en": "resource leak",
+          "zh": "资源泄漏"
+        },
+        {
+          "en": "function scope",
+          "zh": "函数作用域"
+        }
+      ]
+    },
+    {
+      "id": "20261023-2",
+      "topic": "System Design",
+      "difficulty": "Hard",
+      "title": "Keeping inventory in sync across the shop, Amazon and TikTok Shop without overselling",
+      "title_zh": "在自营店铺、Amazon 和 TikTok Shop 之间同步库存而不超卖",
+      "question": "Merchants on your platform sell the same products in their own shop and on marketplaces such as Amazon and TikTok Shop. Your platform holds the stock count and pushes it to each channel. During a promotion, one merchant sold 40 units of a product that had 25 in stock: orders arrived on several channels before the updated counts reached them.\n\nDesign inventory sync that avoids overselling as much as possible and handles it when it happens anyway.",
+      "question_zh": "你们平台上的商家会在自营店铺和 Amazon、TikTok Shop 等平台上同时销售相同的商品。你们平台掌握着库存数量，并把它推送到各个渠道。在一次促销中，某个商家一款库存只有 25 件的商品卖出了 40 件：在更新后的库存数量到达各个渠道之前，订单就已经从好几个渠道涌进来了。\n\n设计一套库存同步方案，尽可能避免超卖，并在超卖仍然发生时妥善处理。",
+      "answer": "**The core problem.** Each channel sells from its own copy of the stock number, and updating those copies takes time (API calls, rate limits, the channel's own processing). Between a sale and the next update, every other channel still shows the old number. You cannot make this delay zero, so the design must limit how much can be sold during it and recover when it is exceeded.\n\n**One source of truth with reservations.** Your platform owns stock per SKU and location. Every order from any channel, pulled via webhooks or polling, decrements available stock atomically (a conditional update that refuses to go below zero, or a reservation row). The result is the authoritative available quantity.\n\n**Publish less than you have.** Instead of pushing the full number to every channel, push an allocation with a buffer: for example, hold back a safety buffer for fast-selling items and, when stock is low, publish smaller quantities or allocate the remaining units to specific channels. When available stock reaches a threshold, mark the item out of stock everywhere at once rather than waiting to hit zero.\n\n- Push quickly where it matters: changes for low-stock items jump the queue; changes for well-stocked items can be batched. Channel rate limits make this prioritization necessary.\n- Make updates idempotent and ordered per SKU: send absolute quantities, not deltas, with a version, so a retried or late update cannot set an old number.\n- Reconcile continuously: periodically read each channel's listed quantity and correct drift, because channels and merchants change stock outside your system.\n\n**When overselling happens anyway.** Detect it immediately (available stock below zero after an order), decide by policy which orders to fulfil (first come, or channel priority because marketplaces penalize cancellations differently), and notify the merchant with suggested actions: backorder, cancel with a message, or source from another location. Track the oversell rate per merchant as a key metric.\n\n**Trade-offs.** Buffers prevent overselling but leave stock unsold, so make them configurable per merchant and per product velocity. Polling channels for orders adds latency compared with webhooks; use webhooks where available and polling as a backup.",
+      "answer_zh": "**核心问题。** 每个渠道都根据自己那份库存数字在卖货，而更新这些副本需要时间（API 调用、限流、渠道自身的处理）。在一笔销售发生、到下一次更新之间，其他所有渠道显示的仍是旧数字。你无法把这段延迟变成零，所以设计必须限制这段时间内能卖出的数量，并在超出时能够补救。\n\n**唯一可信源，加上预留。** 由你们的平台按 SKU 和仓库位置掌握库存。来自任何渠道的每一笔订单（通过 webhook 或轮询获取），都以原子方式扣减可用库存（用一条拒绝减到零以下的条件更新语句，或者一条预留记录）。结果就是权威的可用数量。\n\n**发布的数量要少于实际拥有的数量。** 不要把全部数量推送给每个渠道，而是推送一个带缓冲的分配量：比如为热销商品预留安全缓冲；库存较低时，发布更小的数量，或者把剩余的件数分配给特定渠道。当可用库存降到某个阈值时，就在所有渠道同时标记为缺货，而不是等到真正为零。\n\n- 在关键的地方尽快推送：低库存商品的变动插队优先处理；库存充足商品的变动可以批量处理。渠道的限流让这种优先级排序成为必需。\n- 让更新幂等并按 SKU 保持顺序：发送绝对数量而不是增减量，并附上版本号，这样重试或迟到的更新就不会写回一个旧数字。\n- 持续对账：定期读取每个渠道上架的数量并纠正偏差，因为渠道和商家会在你们的系统之外修改库存。\n\n**超卖仍然发生时。** 立即发现它（某笔订单之后可用库存低于零），按策略决定履约哪些订单（先到先得，或者按渠道优先级，因为不同平台对取消订单的处罚不同），并通知商家，附上建议的处理方式：预售、附上说明后取消，或者从另一个仓库调货。把每个商家的超卖率作为一项关键指标来跟踪。\n\n**取舍。** 缓冲能防止超卖，但也会让一部分库存卖不出去，所以要让缓冲量可以按商家、按商品的销售速度配置。与 webhook 相比，轮询渠道订单会增加延迟；有 webhook 的地方就用 webhook，轮询作为后备。",
+      "followups": [
+        "How would you choose the size of the safety buffer for a product?",
+        "A channel's API is down for two hours during a sale. What happens to its listed stock?",
+        "How do you handle bundles that consume stock from several SKUs?"
+      ],
+      "followups_zh": [
+        "你会如何为一个商品确定安全缓冲的大小？",
+        "促销期间某个渠道的 API 宕机了两小时。它上架的库存会怎样？",
+        "对于会消耗多个 SKU 库存的组合商品，你会如何处理？"
+      ],
+      "vocab": [
+        {
+          "en": "source of truth",
+          "zh": "唯一可信源"
+        },
+        {
+          "en": "safety buffer",
+          "zh": "安全缓冲"
+        },
+        {
+          "en": "oversell",
+          "zh": "超卖"
+        },
+        {
+          "en": "reconciliation",
+          "zh": "对账"
+        },
+        {
+          "en": "absolute quantity",
+          "zh": "绝对数量"
+        }
+      ]
+    },
+    {
+      "id": "20261023-3",
+      "topic": "Database",
+      "difficulty": "Hard",
+      "title": "A merchant saves a product and the page still shows the old price",
+      "title_zh": "商家保存了商品，页面却仍然显示旧价格",
+      "question": "To reduce load, your admin API sends reads to Postgres read replicas and writes to the primary. Merchants now report that after saving a product, the page that reloads right afterwards sometimes shows the old price, and some click save again, creating duplicate edits. Replication lag is usually well under a second but spikes to several seconds during bulk imports.\n\nExplain the problem and how you would give merchants read-your-writes consistency without sending all reads to the primary.",
+      "question_zh": "为了降低负载，你们后台的 API 把读请求发往 Postgres 只读副本，写请求发往主库。现在商家反馈：保存商品之后，紧接着重新加载的页面有时会显示旧价格，有些商家于是又点了一次保存，造成了重复的修改。复制延迟通常远低于一秒，但在批量导入期间会飙升到好几秒。\n\n解释这个问题，以及你会如何在不把所有读请求都发往主库的前提下，为商家提供“读己之写”的一致性。",
+      "answer": "**The problem.** Streaming replication is asynchronous: a replica applies changes after the primary commits them. A read that lands on a replica within the lag window sees the state from before the write. For most pages that is harmless, but users expect to see their own changes immediately; this guarantee is called read-your-writes.\n\n**Option 1: stick to the primary after a write.** After a merchant writes, route that merchant's reads to the primary for a short window (a few seconds, or longer than your typical lag), using a flag in the session or a short-lived cache entry. Simple and effective, but the window is a guess: during a lag spike it may be too short.\n\n**Option 2: track the write position (LSN).** After the write commits, read the primary's WAL position with `pg_current_wal_lsn()` and store it with the session. Before reading from a replica, check its `pg_last_wal_replay_lsn()`; if the replica has replayed at least that far, it is safe to read there, otherwise use another replica or the primary. This adapts to real lag instead of guessing.\n\n```sql\n-- on the primary, right after the write commits\nSELECT pg_current_wal_lsn();                       -- e.g. 0/301FFA8, stored in the session\n\n-- on a replica, before serving that merchant's read\nSELECT pg_last_wal_replay_lsn() >= '0/301FFA8'::pg_lsn AS caught_up;\n\n-- monitoring on the primary: bytes each replica is behind\nSELECT application_name, pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn) FROM pg_stat_replication;\n```\n\n- Option 3: return the saved object in the write response and render the page from it, so the client does not need an immediate re-read at all.\n- Fix the UX too: disable the save button while saving and make saves idempotent with a version check, so double clicks cannot create duplicate edits.\n- Reduce the lag spikes themselves: throttle bulk imports, and monitor replica lag with alerts and automatic removal of lagging replicas from the read pool.\n\n**Trade-offs.** Synchronous replication would remove the lag for committed data but adds write latency and couples availability to the replica, which is usually the wrong price for an admin panel. Session stickiness is cheap; LSN tracking is precise but needs support in your data-access layer.",
+      "answer_zh": "**问题所在。** 流复制是异步的：只读副本在主库提交之后才应用这些变更。落在延迟窗口内的读请求，会落到某个副本上，看到写入之前的状态。对大多数页面来说这无关紧要，但用户期望立即看到自己所做的修改；这种保证叫做“读己之写”。\n\n**方案一：写入之后一段时间内固定读主库。** 商家写入之后，在一个短时间窗口内（几秒钟，或者比通常的延迟更长）把该商家的读请求路由到主库，具体可以通过会话中的标记或一条短时有效的缓存记录实现。简单有效，但这个时间窗口只是估计：在延迟飙升期间可能不够长。\n\n**方案二：跟踪写入位置（LSN）。** 写入提交之后，用 `pg_current_wal_lsn()` 读取主库的 WAL 位置，并保存在会话中。从副本读取之前，检查它的 `pg_last_wal_replay_lsn()`；如果副本回放的位置至少已经到了那里，就可以安全地在它上面读，否则就改用另一个副本或主库。这种方式能适应真实的延迟，而不是靠猜。\n\n```sql\n-- on the primary, right after the write commits\nSELECT pg_current_wal_lsn();                       -- e.g. 0/301FFA8, stored in the session\n\n-- on a replica, before serving that merchant's read\nSELECT pg_last_wal_replay_lsn() >= '0/301FFA8'::pg_lsn AS caught_up;\n\n-- monitoring on the primary: bytes each replica is behind\nSELECT application_name, pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn) FROM pg_stat_replication;\n```\n\n- 方案三：在写操作的响应中返回保存后的对象，并用它来渲染页面，这样客户端根本不需要立即重新读取。\n- 同时修正用户体验：保存期间禁用保存按钮，并通过版本校验让保存操作幂等，这样双击也不会造成重复修改。\n- 从根源上减少延迟飙升：对批量导入限流，监控副本延迟并设置告警，自动把延迟过大的副本移出读请求池。\n\n**取舍。** 同步复制能消除已提交数据的延迟，但会增加写入延迟，并把可用性与副本绑定在一起，对后台管理系统来说这个代价通常并不值得。会话粘滞成本低；LSN 跟踪更精确，但需要数据访问层的支持。",
+      "followups": [
+        "Which pages can safely read from a lagging replica, and which cannot?",
+        "How would you implement LSN tracking across several API instances?"
+      ],
+      "followups_zh": [
+        "哪些页面可以安全地从有延迟的副本读取，哪些不行？",
+        "你会如何在多个 API 实例之间实现 LSN 跟踪？"
+      ],
+      "vocab": [
+        {
+          "en": "replication lag",
+          "zh": "复制延迟"
+        },
+        {
+          "en": "read-your-writes",
+          "zh": "读己之写"
+        },
+        {
+          "en": "log sequence number (LSN)",
+          "zh": "日志序列号"
+        },
+        {
+          "en": "session stickiness",
+          "zh": "会话粘滞"
+        }
+      ]
+    },
+    {
+      "id": "20261023-4",
+      "topic": "Middleware",
+      "difficulty": "Medium",
+      "title": "Order events sent over Redis Pub/Sub sometimes never arrive",
+      "title_zh": "通过 Redis Pub/Sub 发送的订单事件有时根本收不到",
+      "question": "Your order service publishes `order.paid` events with Redis `PUBLISH`, and a fulfilment service subscribes to the channel. Most of the time it works, but after every fulfilment deploy and during network blips, some orders are never picked up for shipping. There are no errors in either service.\n\nWhy, and what would you use instead?",
+      "question_zh": "你们的订单服务用 Redis 的 `PUBLISH` 发布 `order.paid` 事件，履约服务订阅了这个频道。大多数时候一切正常，但每次履约服务发布上线之后，以及网络抖动期间，总有一些订单从未被拿去发货。两个服务里都没有任何报错。\n\n为什么？你会改用什么？",
+      "answer": "**Why messages disappear.** Redis Pub/Sub is fire-and-forget: a message is delivered only to subscribers connected at the moment it is published, and nothing is stored. While the fulfilment service restarts or its connection drops, published events go nowhere. `PUBLISH` even tells you: it returns the number of subscribers that received the message, which is 0 during a restart, but the order service ignores it.\n\n**Use something durable: Redis Streams with consumer groups.** A stream stores entries until you trim it. A consumer group tracks which entries each consumer has read, and every entry stays pending until the consumer acknowledges it with `XACK`. A restarted consumer picks up where the group left off, and entries that a crashed consumer read but never acknowledged can be claimed by another consumer.\n\n```text\nXADD orders * order_id 1001 event paid        # producer\nXGROUP CREATE orders fulfilment $ MKSTREAM    # once: the group starts at new entries\nXREADGROUP GROUP fulfilment worker-1 COUNT 10 BLOCK 5000 STREAMS orders >\nXACK orders fulfilment <entry-id>             # after the order is handled\nXPENDING orders fulfilment                    # entries read but not yet acknowledged\n```\n\n- Handle entries idempotently: after a crash, an entry can be delivered again, so key the fulfilment work by order ID.\n- Trim the stream by length or age (`MAXLEN` or `MINID`), and make sure Redis persistence and replication match how much you can afford to lose.\n- Better still for business events: write them to an outbox table in the same transaction as the order, then publish from the outbox, so a Redis outage cannot lose an order event.\n\n**When Pub/Sub is fine.** Use it for messages that are only useful right now and safe to miss: cache invalidation hints, live dashboard updates, presence. For anything that must be processed, such as paid orders, use a durable queue or log (Redis Streams, Kafka, RabbitMQ with persistence).",
+      "answer_zh": "**消息为什么会消失。** Redis Pub/Sub 是“发出去就不管了”：消息只会投递给发布那一刻正在连接的订阅者，而且不做任何存储。在履约服务重启或者连接断开期间，发布的事件就无处可去了。`PUBLISH` 其实会告诉你这一点：它返回收到这条消息的订阅者数量，重启期间这个数是 0，但订单服务忽略了它。\n\n**改用持久化的方式：带消费者组的 Redis Streams。** stream 会一直保存条目，直到你修剪它。消费者组会记录每个消费者读到了哪些条目，每个条目在被消费者用 `XACK` 确认之前都处于待处理状态。重启后的消费者会从消费者组上次的位置继续，而某个已崩溃的消费者读过但从未确认的条目，可以被另一个消费者认领。\n\n```text\nXADD orders * order_id 1001 event paid        # producer\nXGROUP CREATE orders fulfilment $ MKSTREAM    # once: the group starts at new entries\nXREADGROUP GROUP fulfilment worker-1 COUNT 10 BLOCK 5000 STREAMS orders >\nXACK orders fulfilment <entry-id>             # after the order is handled\nXPENDING orders fulfilment                    # entries read but not yet acknowledged\n```\n\n- 幂等地处理条目：崩溃之后，同一个条目可能会被再次投递，所以要以订单 ID 作为履约处理的键。\n- 按长度或时间修剪 stream（`MAXLEN` 或 `MINID`），并确保 Redis 的持久化和复制配置与你能承受的丢失程度相匹配。\n- 对业务事件来说，更好的做法是：在与订单相同的事务里把它们写入一张 outbox 表，再从 outbox 发布出去，这样即使 Redis 故障也不会丢失订单事件。\n\n**什么时候用 Pub/Sub 没问题。** 用于只在当下有用、错过也无妨的消息：缓存失效提示、实时看板更新、在线状态。凡是必须被处理的消息，比如已付款的订单，都要使用持久化的队列或日志（Redis Streams、Kafka、开启持久化的 RabbitMQ）。",
+      "followups": [
+        "How would you reprocess the orders that were lost while the bug existed?",
+        "When would you choose Kafka over Redis Streams for this?"
+      ],
+      "followups_zh": [
+        "你会如何重新处理这个 bug 存在期间丢失的订单？",
+        "在这个场景下，什么时候你会选择 Kafka 而不是 Redis Streams？"
+      ],
+      "vocab": [
+        {
+          "en": "fire-and-forget",
+          "zh": "发出即不管"
+        },
+        {
+          "en": "consumer group",
+          "zh": "消费者组"
+        },
+        {
+          "en": "acknowledgement",
+          "zh": "确认（ack）"
+        },
+        {
+          "en": "pending entry",
+          "zh": "待处理条目"
+        }
+      ]
+    },
+    {
+      "id": "20261023-5",
+      "topic": "Java & CS",
+      "difficulty": "Senior",
+      "title": "p99 latency spikes every few minutes in a Java service with a big heap",
+      "title_zh": "一个大堆内存的 Java 服务每隔几分钟 p99 延迟就飙升一次",
+      "question": "A Java catalog service with a 24 GB heap serves product lookups for storefronts. Average latency is fine, but p99 latency jumps from about 40 ms to over a second every few minutes, and timeouts appear in callers at the same moments. CPU is moderate. The service caches many product objects in memory.\n\nHow would you investigate, and what would you change?",
+      "question_zh": "一个堆内存为 24 GB 的 Java 商品目录服务，为店铺前台提供商品查询。平均延迟没有问题，但 p99 延迟每隔几分钟就会从大约 40 毫秒跳到一秒以上，调用方也会在同一时刻出现超时。CPU 使用率适中。这个服务在内存里缓存了大量商品对象。\n\n你会如何排查？又会做哪些改动？",
+      "answer": "**First, prove it is garbage collection.** Periodic latency spikes across all requests in a JVM often come from GC pauses, but confirm before tuning. Enable GC logging (`-Xlog:gc*` with a file and rotation), then line up pause times with the latency spikes. Also check for other stop-the-world causes and for throttling: in containers, CPU throttling against a CPU limit produces similar spikes.\n\n**Understand why the pauses happen.** The default collector in current JDKs is G1, which collects young regions frequently and old regions incrementally. Long pauses usually come from one of these:\n\n- A high allocation rate: building large temporary objects per request (JSON trees, copies of product lists) fills young regions quickly, and copying many surviving objects makes young pauses long.\n- A large, constantly changing old generation: an in-heap cache with millions of entries and frequent replacement creates lots of old-generation garbage and work for the collector.\n- Full GCs: if concurrent collection cannot keep up, the JVM falls back to a full, stop-the-world collection, which on a 24 GB heap takes a long time. The GC log shows these explicitly.\n\n**Fixes, in order of impact.** Reduce allocation first: stream responses instead of building large intermediate structures, reuse immutable cached objects instead of copying them, and profile allocation with JDK Flight Recorder to find the hot spots. Rethink the cache: bound its size, use an eviction policy, keep compact representations, or move it out of the heap (a shared cache service or off-heap storage) so the GC has less live data to manage. Then tune: give G1 a realistic pause-time goal and enough headroom, or evaluate a low-pause collector such as ZGC, which keeps pauses very short largely independent of heap size, at the cost of more CPU and memory overhead.\n\n```text\n-Xlog:gc*:file=/var/log/app/gc.log:time,uptime,level,tags:filecount=5,filesize=20m\n-XX:MaxGCPauseMillis=100        # a G1 goal, not a guarantee\n# or evaluate: -XX:+UseZGC\n```\n\n**Verify in production-like conditions.** Load-test with realistic traffic and cache sizes, compare p99 and p999 latency, CPU and memory for each configuration, and roll out with a canary. Measure the callers too: timeouts and retries in callers can turn a 300 ms pause into a retry storm, so their timeouts and retry budgets matter as much as the GC settings.\n\n**Trade-offs.** A bigger heap delays collections but can make each one more expensive; low-pause collectors cost throughput and memory; moving the cache out of the heap adds a network hop or serialization. Choose based on measured latency and cost, not on folklore.",
+      "answer_zh": "**首先，证明这是垃圾回收导致的。** JVM 中所有请求同时出现的周期性延迟飙升，往往来自 GC 停顿，但调优之前要先确认。开启 GC 日志（`-Xlog:gc*`，写入文件并设置轮转），然后把停顿时间与延迟飙升对齐比较。同时还要排查其他导致全局停顿的原因，以及限流：在容器里，触及 CPU 上限而被限流也会产生类似的飙升。\n\n**弄清楚停顿为什么会发生。** 当前 JDK 默认的垃圾回收器是 G1，它会频繁回收年轻代区域，并增量式地回收老年代区域。长时间停顿通常来自以下几种情况之一：\n\n- 分配速率高：每个请求都构建大的临时对象（JSON 树、商品列表的副本），会很快填满年轻代区域，而复制大量存活对象会让年轻代停顿变长。\n- 庞大且不断变化的老年代：一个有数百万条目、频繁替换的堆内缓存，会制造大量老年代垃圾，也给回收器带来大量工作。\n- Full GC：如果并发回收跟不上，JVM 会退回到一次完整的、全局停顿的回收，在 24 GB 的堆上这会耗费很长时间。GC 日志会明确记录这些事件。\n\n**修复方法，按影响大小排列。** 首先减少内存分配：用流式输出响应，而不是构建大的中间结构；复用不可变的缓存对象，而不是复制它们；用 JDK Flight Recorder 分析分配情况，找出热点。然后重新考虑缓存：限制它的大小，使用淘汰策略，采用紧凑的数据表示，或者把它移出堆（共享缓存服务或堆外存储），让 GC 需要管理的存活数据更少。最后再调优：给 G1 设一个现实的停顿时间目标和足够的余量，或者评估 ZGC 这样的低停顿回收器，它能让停顿时间保持得很短，而且在很大程度上与堆的大小无关，代价是更多的 CPU 和内存开销。\n\n```text\n-Xlog:gc*:file=/var/log/app/gc.log:time,uptime,level,tags:filecount=5,filesize=20m\n-XX:MaxGCPauseMillis=100        # a G1 goal, not a guarantee\n# or evaluate: -XX:+UseZGC\n```\n\n**在接近生产的条件下验证。** 用真实的流量和缓存规模做压测，对比每种配置下的 p99 和 p999 延迟、CPU 和内存，并通过金丝雀发布上线。也要衡量调用方：调用方的超时和重试可能会把一次 300 毫秒的停顿变成一场重试风暴，所以它们的超时和重试预算与 GC 设置同样重要。\n\n**取舍。** 更大的堆能推迟回收，但可能让每一次回收的代价更高；低停顿回收器会牺牲吞吐量和内存；把缓存移出堆则会多一次网络往返或序列化。要根据实测的延迟和成本来选择，而不是凭道听途说。",
+      "followups": [
+        "How do you tell GC pauses from CPU throttling in a container?",
+        "When would you move a cache out of the JVM heap?",
+        "What does an allocation profile tell you that a heap dump does not?"
+      ],
+      "followups_zh": [
+        "在容器里，你如何区分 GC 停顿和 CPU 被限流？",
+        "什么时候你会把缓存移出 JVM 堆？",
+        "分配 profile 能告诉你哪些堆转储告诉不了你的东西？"
+      ],
+      "vocab": [
+        {
+          "en": "stop-the-world pause",
+          "zh": "全局停顿"
+        },
+        {
+          "en": "allocation rate",
+          "zh": "分配速率"
+        },
+        {
+          "en": "old generation",
+          "zh": "老年代"
+        },
+        {
+          "en": "GC log",
+          "zh": "GC 日志"
+        },
+        {
+          "en": "tail latency",
+          "zh": "尾延迟"
+        }
+      ]
+    }
+  ]
+}
