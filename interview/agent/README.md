@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 15 个模块、59 道题。
+共 16 个模块、64 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -201,3 +201,17 @@ Five new agent questions: choosing tool granularity, handling a risky bulk-expor
 | 3 | RAG | Hard | [Retrieval found the right policy, but the answer used outdated knowledge](modules/daily-2026-10-22.md#q3) | 检索找到了正确的政策，但回答用的却是过时的知识 |
 | 4 | Agent Loop | Hard | [The agent writes half a feed file and then corrupts the catalog](modules/daily-2026-10-22.md#q4) | Agent 写了半个 feed 文件，然后把商品目录弄坏了 |
 | 5 | Production | Senior | [Design the human review queue for agent actions at scale](modules/daily-2026-10-22.md#q5) | 为大规模的 Agent 操作设计人工审核队列 |
+
+## [Daily set · Oct 23 · 每日新题 · 10 月 23 日](modules/daily-2026-10-23.md)
+
+Five new agent questions: keeping eval sets trustworthy when facts change, getting the benefits of context editing without repeated work, closing the rendering channel for data exfiltration, running long agent work as background tasks, and guarding agent-to-agent negotiation with suppliers.
+
+> 五道新的 Agent 题：在事实不断变化时保持评测集可信、享受上下文编辑的好处而不重复劳动、堵住渲染环节的数据外泄通道、把长时间的 Agent 工作作为后台任务运行，以及为与供应商之间的 Agent 对 Agent 谈判加上护栏。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Evals & Observability | Medium | [The eval suite turned red overnight, and the agent was right](modules/daily-2026-10-23.md#q1) | 评测套件一夜之间全红了，而 Agent 其实是对的 |
+| 2 | Context & Memory | Medium | [After turning on context editing, the agent fetches the same report again and again](modules/daily-2026-10-23.md#q2) | 开启上下文编辑之后，Agent 一遍又一遍地拉取同一份报表 |
+| 3 | Safety & Security | Hard | [The assistant's answer, rendered in the admin, leaked data through an image link](modules/daily-2026-10-23.md#q3) | 助手的回答渲染在后台里，却通过一个图片链接泄露了数据 |
+| 4 | Production | Hard | [The merchant closes the tab, and a 20-minute catalog fix dies with it](modules/daily-2026-10-23.md#q4) | 商家关掉了标签页，一个要跑 20 分钟的商品目录修复也随之中断 |
+| 5 | Multi-agent | Senior | [The merchant's agent negotiates restocks with a supplier's agent](modules/daily-2026-10-23.md#q5) | 商家的 Agent 与供应商的 Agent 协商补货 |
