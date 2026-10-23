@@ -1,0 +1,197 @@
+{
+  "date": "2026-10-24",
+  "generatedAt": "2026-10-24T06:45:56+08:00",
+  "questions": [
+    {
+      "id": "20261024-1",
+      "topic": "Go",
+      "difficulty": "Hard",
+      "title": "A service crashes with \"fatal error: concurrent map writes\", and recover does not help",
+      "title_zh": "服务因“fatal error: concurrent map writes”崩溃，而且 recover 也救不了",
+      "question": "A Go API keeps a package-level `map[string]Token` as an in-memory cache of merchants' ad-platform tokens. Handlers read from it, and a refresh path writes new tokens into it. Under load the whole process occasionally dies with `fatal error: concurrent map writes`. A teammate wraps the handlers in a `defer recover()` middleware, but the process still dies.\n\nExplain why, how to find such bugs, and how to fix this one.",
+      "question_zh": "一个 Go API 用一个包级别的 `map[string]Token` 作为商家广告平台 token 的内存缓存。处理函数从中读取，刷新逻辑则往里写入新的 token。在高负载下，整个进程偶尔会因 `fatal error: concurrent map writes` 而退出。一位同事给处理函数套了一层带 `defer recover()` 的中间件，但进程还是会退出。\n\n解释原因、如何发现这类 bug，以及如何修复这一个。",
+      "answer": "**Why it crashes.** Go maps are not safe for concurrent use when at least one goroutine writes. The runtime detects some concurrent accesses and stops the program with a fatal error on purpose, because a map corrupted by a race could silently return wrong data. A fatal error is not a panic: `recover` cannot catch it, so the middleware does nothing. Note also that the detection is best-effort; many races do not crash at all and just produce wrong results.\n\n**How to find races.** Run tests and a load test with the race detector (`go test -race`, or a `-race` build in staging). It reports the two conflicting accesses with stack traces, even when nothing crashes. Make `-race` part of CI for packages with shared state.\n\n**The fix.** Protect the map with a `sync.RWMutex` so many readers can proceed together and writers get exclusive access, and keep the critical sections short:\n\n```go\ntype TokenCache struct {\n\tmu     sync.RWMutex\n\ttokens map[string]Token\n}\n\nfunc (c *TokenCache) Get(merchant string) (Token, bool) {\n\tc.mu.RLock()\n\tdefer c.mu.RUnlock()\n\tt, ok := c.tokens[merchant]\n\treturn t, ok\n}\n\nfunc (c *TokenCache) Set(merchant string, t Token) {\n\tc.mu.Lock()\n\tc.tokens[merchant] = t\n\tc.mu.Unlock()\n}\n```\n\n- Never do slow work while holding the lock, such as calling the ad platform to refresh a token; fetch first, then lock and store.\n- Avoid many goroutines refreshing the same expired token at once: `golang.org/x/sync/singleflight` lets one refresh run while the others wait for its result.\n- `sync.Map` fits specific patterns (keys written once and read many times, or disjoint keys per goroutine); for a general cache a mutex-protected map is simpler and often as fast.\n\n**Trade-offs.** A single mutex can become a contention point under very high concurrency; shard the map by key hash if profiles show lock contention. Do not reach for lock-free structures before measuring; correctness comes first, and the race detector is how you keep it.",
+      "answer_zh": "**为什么会崩溃。** 只要有至少一个 goroutine 在写，Go 的 map 就不能被并发使用。运行时会检测到部分并发访问，并有意以致命错误终止程序，因为被竞态破坏的 map 可能会悄无声息地返回错误的数据。致命错误不是 panic：`recover` 捕获不了它，所以那个中间件毫无作用。还要注意，这种检测只是尽力而为；很多竞态根本不会导致崩溃，只会产生错误的结果。\n\n**如何发现竞态。** 用竞态检测器运行测试和压测（`go test -race`，或者在预发环境中使用 `-race` 构建）。即使没有发生崩溃，它也会报告两个相互冲突的访问，并附上调用栈。对于有共享状态的包，把 `-race` 纳入 CI。\n\n**修复。** 用 `sync.RWMutex` 保护这个 map，让多个读者可以同时进行，写者则获得独占访问，并让临界区尽量短：\n\n```go\ntype TokenCache struct {\n\tmu     sync.RWMutex\n\ttokens map[string]Token\n}\n\nfunc (c *TokenCache) Get(merchant string) (Token, bool) {\n\tc.mu.RLock()\n\tdefer c.mu.RUnlock()\n\tt, ok := c.tokens[merchant]\n\treturn t, ok\n}\n\nfunc (c *TokenCache) Set(merchant string, t Token) {\n\tc.mu.Lock()\n\tc.tokens[merchant] = t\n\tc.mu.Unlock()\n}\n```\n\n- 持有锁的时候绝不做耗时的工作，比如调用广告平台刷新 token；先获取，再加锁存入。\n- 避免多个 goroutine 同时刷新同一个过期的 token：`golang.org/x/sync/singleflight` 可以只让一次刷新执行，其他调用等待它的结果。\n- `sync.Map` 适用于特定的模式（键写一次、读很多次，或者每个 goroutine 操作互不相交的键）；对于一般的缓存，用互斥锁保护的 map 更简单，速度也往往差不多。\n\n**取舍。** 在并发极高的情况下，单个互斥锁可能成为争用点；如果 profile 显示存在锁争用，可以按键的哈希对 map 分片。在测量之前不要急着使用无锁结构；正确性优先，而竞态检测器正是保持正确性的手段。",
+      "followups": [
+        "Why does Go make concurrent map writes a fatal error instead of a panic?",
+        "How would you shard the cache if one mutex became a bottleneck?"
+      ],
+      "followups_zh": [
+        "为什么 Go 把并发写 map 设计成致命错误，而不是 panic？",
+        "如果单个互斥锁成了瓶颈，你会如何对缓存分片？"
+      ],
+      "vocab": [
+        {
+          "en": "data race",
+          "zh": "数据竞争"
+        },
+        {
+          "en": "race detector",
+          "zh": "竞态检测器"
+        },
+        {
+          "en": "critical section",
+          "zh": "临界区"
+        },
+        {
+          "en": "fatal error",
+          "zh": "致命错误（无法被 recover 捕获）"
+        }
+      ]
+    },
+    {
+      "id": "20261024-2",
+      "topic": "System Design",
+      "difficulty": "Senior",
+      "title": "Shared tables, schema per tenant, or database per tenant for an enterprise tier?",
+      "title_zh": "企业版：共享表、每租户一个 schema，还是每租户一个数据库？",
+      "question": "Your SaaS stores all merchants in shared tables with a `merchant_id` column. Sales now wants an enterprise tier: large brands ask for stronger isolation, guaranteed performance, data residency in their region, and the ability to get a full export or deletion of their data. Engineering must choose a data isolation model for the next few years.\n\nCompare the options and propose a design.",
+      "question_zh": "你们的 SaaS 把所有商家都存放在带 `merchant_id` 列的共享表中。现在销售团队想推出一个企业版：大品牌要求更强的隔离、有保障的性能、数据驻留在他们所在的地区，以及能够完整导出或删除他们的数据。工程团队必须为接下来几年选定一种数据隔离模型。\n\n比较这些选项，并提出一个设计方案。",
+      "answer": "**The three models.**\n\n- Shared tables (pooled): every tenant in the same tables, filtered by tenant ID. Cheapest and simplest to operate at scale, one schema to migrate; isolation depends on every query being correct, and one heavy tenant affects everyone.\n- Schema per tenant: one database, a schema per tenant. Stronger logical separation and easy per-tenant export, but thousands of schemas make migrations, connection handling and monitoring hard.\n- Database per tenant (siloed): strongest isolation, independent performance, per-tenant backups and region placement; but the highest cost and operational load, and every migration must run across many databases.\n\n**A hybrid is usually right.** Keep the long tail of merchants pooled, and place enterprise tenants in dedicated databases (or dedicated clusters per region). The application does not care where a tenant lives: a tenant directory maps each merchant to its data location, and a routing layer picks the connection per request. Moving a tenant between pool and silo becomes an operational procedure rather than a code change.\n\n```go\ntype TenantPlacement struct {\n\tMerchantID string\n\tTier       string // \"pooled\" | \"dedicated\"\n\tRegion     string // \"eu\", \"us\", ...\n\tDSN        string // resolved from a secret store, never stored in plain text\n}\n\nfunc (r *Router) DB(ctx context.Context) (*sql.DB, error) {\n\tp, err := r.directory.Lookup(ctx, auth.MerchantID(ctx))\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\treturn r.pools.Get(p) // one connection pool per placement\n}\n```\n\n**What has to be true everywhere.** Tenant context comes from authentication and is enforced in one data-access layer, with row-level security in pooled databases as a second wall. Schema migrations are applied by a migration orchestrator that runs per database, tracks versions per tenant and can roll out gradually. Cross-tenant features (global analytics, admin search) read from a separate warehouse fed by change data capture, never by querying every tenant database live.\n\n**Enterprise requirements map naturally to the silo.** Performance guarantees come from dedicated resources; residency from placing the database in the required region (and keeping its backups, logs and caches there too); export and deletion from dumping or dropping one database plus cleaning derived copies elsewhere.\n\n**Trade-offs.** Silos multiply operational work, so automate provisioning, migrations and monitoring before selling the tier, and price it accordingly. Pooled tenants remain efficient but need noisy-neighbour controls: per-tenant query limits, workload isolation for heavy jobs, and the option to move a growing tenant out.",
+      "answer_zh": "**三种模型。**\n\n- 共享表（池化）：所有租户在同一组表里，按租户 ID 过滤。在大规模下成本最低、运维最简单，只需要迁移一套 schema；隔离依赖于每一条查询都写对，而且一个负载很重的租户会影响所有人。\n- 每租户一个 schema：一个数据库，每个租户一个 schema。逻辑隔离更强，按租户导出也很容易，但成千上万个 schema 会让迁移、连接管理和监控变得困难。\n- 每租户一个数据库（孤岛式）：隔离最强，性能互不影响，可以按租户备份并选择所在地区；但成本和运维负担最高，而且每次迁移都必须在许多数据库上执行。\n\n**混合方案通常是对的。** 让长尾的大量商家继续使用池化模式，把企业版租户放到专属的数据库中（或者按地区放到专属的集群中）。应用并不关心租户的数据放在哪里：由一个租户目录把每个商家映射到它的数据位置，再由路由层为每个请求选择对应的连接。这样，把一个租户在池化和孤岛之间迁移，就成了一项运维操作，而不是一次代码改动。\n\n```go\ntype TenantPlacement struct {\n\tMerchantID string\n\tTier       string // \"pooled\" | \"dedicated\"\n\tRegion     string // \"eu\", \"us\", ...\n\tDSN        string // resolved from a secret store, never stored in plain text\n}\n\nfunc (r *Router) DB(ctx context.Context) (*sql.DB, error) {\n\tp, err := r.directory.Lookup(ctx, auth.MerchantID(ctx))\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\treturn r.pools.Get(p) // one connection pool per placement\n}\n```\n\n**哪些前提必须处处成立。** 租户上下文来自身份认证，并在统一的数据访问层中强制执行；在池化的数据库里再加一道行级安全作为第二道墙。schema 迁移由一个迁移编排器来执行，它逐个数据库运行，按租户记录版本，并且可以逐步推广。跨租户的功能（全局分析、后台搜索）从一个由变更数据捕获供数的独立数据仓库中读取，绝不实时查询每一个租户的数据库。\n\n**企业版的需求天然对应孤岛模式。** 性能保障来自专属资源；数据驻留来自把数据库放在指定地区（并确保它的备份、日志和缓存也在那里）；导出和删除则是转储或删除一个数据库，再清理其他地方的派生副本。\n\n**取舍。** 孤岛模式会成倍增加运维工作量，所以在开卖这个版本之前，先把资源开通、迁移和监控自动化，并据此定价。池化的租户依然高效，但需要针对“吵闹邻居”的控制：按租户的查询限制、为繁重任务做工作负载隔离，以及能把规模不断增长的租户迁出去。",
+      "followups": [
+        "How would you migrate one large merchant from the pool to a dedicated database with no downtime?",
+        "How do you run a schema migration safely across 300 tenant databases?",
+        "Which parts of the system besides the database must respect data residency?"
+      ],
+      "followups_zh": [
+        "你会如何在不停机的情况下，把一个大商家从池中迁移到专属数据库？",
+        "你会如何在 300 个租户数据库上安全地执行一次 schema 迁移？",
+        "除了数据库之外，系统中还有哪些部分必须遵守数据驻留要求？"
+      ],
+      "vocab": [
+        {
+          "en": "pooled tenancy",
+          "zh": "池化多租户"
+        },
+        {
+          "en": "siloed tenancy",
+          "zh": "孤岛式多租户"
+        },
+        {
+          "en": "tenant directory",
+          "zh": "租户目录"
+        },
+        {
+          "en": "data residency",
+          "zh": "数据驻留"
+        },
+        {
+          "en": "noisy neighbour",
+          "zh": "吵闹邻居"
+        }
+      ]
+    },
+    {
+      "id": "20261024-3",
+      "topic": "Database",
+      "difficulty": "Medium",
+      "title": "Product search with LIKE '%wool%' is slow even though title is indexed",
+      "title_zh": "用 LIKE '%wool%' 搜索商品很慢，尽管 title 已经建了索引",
+      "question": "The admin's product search runs `SELECT ... FROM products WHERE merchant_id = $1 AND title ILIKE '%' || $2 || '%'`. There is a B-tree index on `title`, but the query scans the whole table and takes seconds for large catalogs.\n\nWhy is the index not used, and how would you make this search fast?",
+      "question_zh": "后台的商品搜索执行的是 `SELECT ... FROM products WHERE merchant_id = $1 AND title ILIKE '%' || $2 || '%'`。`title` 上有一个 B-tree 索引，但这条查询会扫描整张表，对大型商品目录要花好几秒。\n\n为什么没有用上索引？你会如何让这个搜索变快？",
+      "answer": "**Why the index does not help.** A B-tree index orders values from the first character, so it can serve `title LIKE 'wool%'` (a known prefix) but not a pattern that starts with a wildcard: there is no place in the sorted order where \"contains wool\" begins. `ILIKE` adds case-insensitivity, which a plain B-tree cannot handle either. So Postgres scans every row and tests the pattern.\n\n**Fix for substring search: trigram indexes.** The `pg_trgm` extension splits text into three-character pieces and can index them with GIN. Postgres can then use the index for `LIKE` and `ILIKE` with leading wildcards, and for similarity searches that tolerate typos:\n\n```sql\nCREATE EXTENSION IF NOT EXISTS pg_trgm;\nCREATE INDEX CONCURRENTLY products_title_trgm ON products USING gin (title gin_trgm_ops);\n\nEXPLAIN SELECT id FROM products WHERE title ILIKE '%wool swe%';\n--  Bitmap Heap Scan on products\n--    ->  Bitmap Index Scan on products_title_trgm\n```\n\n- Very common terms may still get a sequential scan: if a term matches a large share of rows, reading the table is cheaper than using the index, and the planner chooses that. Test with realistic terms.\n- Very short search terms (one or two characters) produce few or no trigrams and cannot use the index well; require a minimum length.\n- Trigram indexes are large and make writes slower, so index only the columns people actually search.\n\n**When to use something else.** If merchants need word-based search with stemming and ranking (\"sweaters\" matching \"sweater\"), Postgres full-text search (`tsvector` with a GIN index) fits better. For storefront search across languages with relevance tuning, facets and synonyms, a dedicated search engine such as Elasticsearch or OpenSearch is the usual answer, fed from the database by change events.\n\n**Trade-offs.** Trigram indexes are the cheapest way to make admin substring search fast without new infrastructure; they do not give relevance ranking or language awareness. Pick by what users search for and how they expect results to be ordered.",
+      "answer_zh": "**为什么索引帮不上忙。** B-tree 索引按值从第一个字符开始排序，所以它能支持 `title LIKE 'wool%'`（已知前缀），却支持不了以通配符开头的模式：在排序后的顺序中，根本没有一个“包含 wool”开始的位置。`ILIKE` 还增加了不区分大小写的要求，普通的 B-tree 同样处理不了。于是 Postgres 只能扫描每一行并逐一测试这个模式。\n\n**子串搜索的修复：三元组索引。** `pg_trgm` 扩展会把文本拆成三个字符一组的片段，并能用 GIN 为它们建立索引。这样 Postgres 就能在带前导通配符的 `LIKE` 和 `ILIKE` 中使用索引，还能用于容忍拼写错误的相似度搜索：\n\n```sql\nCREATE EXTENSION IF NOT EXISTS pg_trgm;\nCREATE INDEX CONCURRENTLY products_title_trgm ON products USING gin (title gin_trgm_ops);\n\nEXPLAIN SELECT id FROM products WHERE title ILIKE '%wool swe%';\n--  Bitmap Heap Scan on products\n--    ->  Bitmap Index Scan on products_title_trgm\n```\n\n- 非常常见的词仍然可能走顺序扫描：如果一个词匹配了很大比例的行，直接读表比用索引更便宜，优化器就会这样选。要用真实的搜索词来测试。\n- 非常短的搜索词（一两个字符）产生的三元组很少甚至没有，无法很好地利用索引；要设定最小长度。\n- 三元组索引体积很大，还会让写入变慢，所以只给用户真正会搜索的列建索引。\n\n**什么时候用别的方案。** 如果商家需要按单词搜索，并带词干提取和排序（“sweaters”能匹配“sweater”），Postgres 的全文搜索（`tsvector` 加 GIN 索引）更合适。如果是店铺前台的多语言搜索，需要相关性调优、分面和同义词，通常的答案是使用 Elasticsearch 或 OpenSearch 这样的专用搜索引擎，由数据库通过变更事件为它供数。\n\n**取舍。** 三元组索引是在不引入新基础设施的前提下，让后台子串搜索变快的最便宜方式；但它不提供相关性排序，也不理解语言。要根据用户搜索什么、以及他们期望结果如何排序来选择。",
+      "followups": [
+        "How would you combine the merchant_id filter with the trigram index efficiently?",
+        "When would full-text search return worse results than LIKE?"
+      ],
+      "followups_zh": [
+        "你会如何把 merchant_id 过滤条件与三元组索引高效地结合起来？",
+        "什么时候全文搜索返回的结果会比 LIKE 更差？"
+      ],
+      "vocab": [
+        {
+          "en": "leading wildcard",
+          "zh": "前导通配符"
+        },
+        {
+          "en": "trigram index",
+          "zh": "三元组索引"
+        },
+        {
+          "en": "full-text search",
+          "zh": "全文搜索"
+        },
+        {
+          "en": "sequential scan",
+          "zh": "顺序扫描"
+        }
+      ]
+    },
+    {
+      "id": "20261024-4",
+      "topic": "Middleware",
+      "difficulty": "Hard",
+      "title": "Redis ran out of memory: first writes failed, then the job queue vanished",
+      "title_zh": "Redis 内存用尽：先是写入失败，后来任务队列消失了",
+      "question": "One Redis instance holds both a product-page cache and a job queue (a list of catalog-sync jobs). During a traffic spike, Redis reached `maxmemory` and every write started failing with `OOM command not allowed when used memory > 'maxmemory'`, including pushes to the job queue. An engineer changed the eviction policy to `allkeys-lru` to stop the errors. The next day, thousands of queued sync jobs were gone.\n\nExplain both incidents and how you would set this up properly.",
+      "question_zh": "一个 Redis 实例同时存放着商品页面缓存和一个任务队列（一个保存商品目录同步任务的列表）。在一次流量高峰中，Redis 达到了 `maxmemory`，所有写入都开始失败，报错 `OOM command not allowed when used memory > 'maxmemory'`，其中也包括向任务队列推送任务。一位工程师把淘汰策略改成了 `allkeys-lru`，让错误停止了。第二天，成千上万个排队中的同步任务都不见了。\n\n解释这两起事故，以及你会如何正确地配置。",
+      "answer": "**Incident 1: `noeviction`.** With the `noeviction` policy, Redis never deletes data to make room; once memory is full it rejects commands that would use more memory. Reads keep working, but every write fails, so the cache cannot be refreshed and the queue cannot accept jobs. That is the right behaviour for data you must not lose, but a full instance stops the whole application.\n\n**Incident 2: `allkeys-lru`.** This policy evicts the least recently used keys from the whole keyspace, regardless of what they hold. A queue list that is not read for a while looks cold, so Redis evicts it to make room for hot cache pages. Every pending job inside that one key disappears at once, with no error.\n\n**The root cause: two kinds of data with opposite needs share one instance.** Cache data is disposable and should be evicted under pressure; queue data must never be evicted. No single eviction policy fits both.\n\n- Separate them: a cache instance with `allkeys-lru` (or `allkeys-lfu`) and TTLs on everything, and a separate instance for queues with `noeviction`, persistence enabled and alerts well before memory fills.\n- If they must share one instance for now, use `volatile-lru`, which evicts only keys with a TTL: give every cache key a TTL and never give queue keys one. This is fragile, because a cache key written without a TTL becomes unevictable.\n- Consider whether Redis is the right home for the queue at all: jobs that must not be lost belong in a durable queue (or a database table) with acknowledgements.\n\n```text\n# cache instance\nmaxmemory 8gb\nmaxmemory-policy allkeys-lru\n\n# queue instance\nmaxmemory 4gb\nmaxmemory-policy noeviction\nappendonly yes\n```\n\n**Prevent the spike from filling memory.** Monitor used memory, evicted keys and rejected commands, alert at a safe threshold, and find out what grew: often a missing TTL, a cache key per URL with query strings, or very large values. Use `redis-cli --bigkeys` or `MEMORY USAGE` on samples to find them.",
+      "answer_zh": "**事故一：`noeviction`。** 在 `noeviction` 策略下，Redis 永远不会为了腾出空间而删除数据；一旦内存用满，它就会拒绝那些需要占用更多内存的命令。读操作照常工作，但所有写入都会失败，于是缓存无法刷新，队列也无法接收任务。对于绝不能丢的数据来说这是正确的行为，但实例一旦满了，整个应用就停摆了。\n\n**事故二：`allkeys-lru`。** 这个策略会在整个键空间中淘汰最近最少使用的键，不管它们存的是什么。一个有一阵子没被读取的队列列表看起来是“冷”的，于是 Redis 把它淘汰掉，给热门的缓存页面腾地方。这一个键里的所有待处理任务瞬间全部消失，而且不会有任何报错。\n\n**根本原因：需求截然相反的两类数据共用了一个实例。** 缓存数据是可丢弃的，在内存压力下应该被淘汰；队列数据则绝不能被淘汰。没有任何一种淘汰策略能同时满足两者。\n\n- 把它们分开：缓存实例使用 `allkeys-lru`（或 `allkeys-lfu`），所有键都设置 TTL；队列使用单独的实例，配置 `noeviction`、开启持久化，并在内存用满之前很早就发出告警。\n- 如果暂时必须共用一个实例，就用 `volatile-lru`，它只淘汰设置了 TTL 的键：给每个缓存键都设置 TTL，队列键则永远不设。这种做法很脆弱，因为一个忘了设置 TTL 的缓存键就会变得无法被淘汰。\n- 考虑一下 Redis 到底是不是存放这个队列的合适地方：绝不能丢失的任务，应该放在带确认机制的持久化队列（或数据库表）里。\n\n```text\n# cache instance\nmaxmemory 8gb\nmaxmemory-policy allkeys-lru\n\n# queue instance\nmaxmemory 4gb\nmaxmemory-policy noeviction\nappendonly yes\n```\n\n**防止流量高峰把内存塞满。** 监控已用内存、被淘汰的键数和被拒绝的命令数，在安全阈值处告警，并查明是什么在增长：常见的原因是缺少 TTL、按带查询参数的 URL 为每个页面生成一个缓存键，或者值非常大。用 `redis-cli --bigkeys` 或者对样本使用 `MEMORY USAGE` 来找出它们。",
+      "followups": [
+        "How would you recover the lost sync jobs?",
+        "What is the difference between LRU and LFU eviction, and when does it matter?"
+      ],
+      "followups_zh": [
+        "你会如何找回丢失的同步任务？",
+        "LRU 和 LFU 淘汰有什么区别？什么时候这种区别很重要？"
+      ],
+      "vocab": [
+        {
+          "en": "eviction policy",
+          "zh": "淘汰策略"
+        },
+        {
+          "en": "maxmemory",
+          "zh": "最大内存"
+        },
+        {
+          "en": "time to live (TTL)",
+          "zh": "过期时间"
+        },
+        {
+          "en": "durable queue",
+          "zh": "持久化队列"
+        }
+      ]
+    },
+    {
+      "id": "20261024-5",
+      "topic": "Java & CS",
+      "difficulty": "Medium",
+      "title": "A HashSet of SKUs contains the same SKU twice",
+      "title_zh": "一个 SKU 的 HashSet 里出现了两个相同的 SKU",
+      "question": "A Java service deduplicates SKUs before pushing them to an ad platform. A teammate added an `equals` method to the `Sku` class that compares the SKU code, and added SKUs to a `HashSet<Sku>`. Duplicates still get pushed, and `set.contains(new Sku(\"A-1\"))` returns false right after adding an equal SKU.\n\nExplain and fix it.",
+      "question_zh": "一个 Java 服务在把 SKU 推送到广告平台之前会先去重。一位同事给 `Sku` 类加了一个比较 SKU 编码的 `equals` 方法，然后把 SKU 放进了一个 `HashSet<Sku>`。但重复的 SKU 仍然被推送了出去，而且在刚刚加入一个相等的 SKU 之后，`set.contains(new Sku(\"A-1\"))` 返回的却是 false。\n\n解释原因并修复。",
+      "answer": "**Why.** Hash-based collections first use `hashCode` to choose a bucket, then use `equals` only among the entries in that bucket. The contract says equal objects must have equal hash codes. Without an overridden `hashCode`, two equal SKUs get different identity-based hash codes, land in different buckets, and the set never compares them with `equals`, so both are kept and `contains` looks in the wrong bucket.\n\n```java\nSet<Sku> s = new HashSet<>();\ns.add(new Sku(\"A-1\"));\ns.add(new Sku(\"A-1\"));\ns.size();                      // 2 with equals only\ns.contains(new Sku(\"A-1\"));    // false\n```\n\n**The fix.** Override `hashCode` consistently with `equals`, using the same fields, for example `Objects.hash(code)`. Simpler still, model value types as records: `record Sku(String code) {}` generates `equals`, `hashCode` and `toString` from the components, so they cannot drift apart.\n\n- Fields used in `equals` and `hashCode` must not change while the object is in a hash set or used as a map key; mutate it and the entry becomes unreachable. Value types should be immutable.\n- Decide what equality means for the business: are \"a-1\" and \"A-1\" the same SKU? Normalize in the constructor rather than in every comparison.\n- Static analysis flags classes that override `equals` without `hashCode`; make that rule an error in CI.\n\n**Trade-offs.** Records are the cleanest choice for immutable value types; for entities with an identity (a database ID) and changing fields, base equality on the stable identity, or avoid putting them in hash-based collections keyed by mutable fields.",
+      "answer_zh": "**原因。** 基于哈希的集合会先用 `hashCode` 选出一个桶，然后只在这个桶里的条目之间使用 `equals`。契约规定：相等的对象必须有相同的哈希码。如果没有重写 `hashCode`，两个相等的 SKU 会得到基于对象身份的不同哈希码，落进不同的桶，集合根本不会用 `equals` 去比较它们，于是两个都被保留下来，`contains` 也去错了桶里查找。\n\n```java\nSet<Sku> s = new HashSet<>();\ns.add(new Sku(\"A-1\"));\ns.add(new Sku(\"A-1\"));\ns.size();                      // 2 with equals only\ns.contains(new Sku(\"A-1\"));    // false\n```\n\n**修复。** 用与 `equals` 相同的字段，一致地重写 `hashCode`，比如 `Objects.hash(code)`。更简单的做法是把值类型建模成 record：`record Sku(String code) {}` 会根据组成字段自动生成 `equals`、`hashCode` 和 `toString`，它们就不可能变得不一致。\n\n- 当对象在哈希集合中、或被用作 map 的键时，参与 `equals` 和 `hashCode` 的字段绝不能改变；一旦修改，这个条目就再也找不到了。值类型应该是不可变的。\n- 确定在业务上相等意味着什么：“a-1”和“A-1”是同一个 SKU 吗？要在构造函数里做规范化，而不是在每次比较时处理。\n- 静态分析工具会标记只重写了 `equals` 而没有重写 `hashCode` 的类；在 CI 中把这条规则设为报错。\n\n**取舍。** 对于不可变的值类型，record 是最干净的选择；对于有身份标识（数据库 ID）且字段会变化的实体，要基于稳定的身份标识来判断相等，或者避免把它们放进以可变字段为键的哈希集合里。",
+      "followups": [
+        "What happens if hashCode is consistent but equals is broken?",
+        "Why is mutating a key inside a HashMap dangerous?"
+      ],
+      "followups_zh": [
+        "如果 hashCode 是一致的，但 equals 写错了，会发生什么？",
+        "为什么修改 HashMap 中某个键的内容是危险的？"
+      ],
+      "vocab": [
+        {
+          "en": "hashCode contract",
+          "zh": "hashCode 契约"
+        },
+        {
+          "en": "hash bucket",
+          "zh": "哈希桶"
+        },
+        {
+          "en": "value object",
+          "zh": "值对象"
+        },
+        {
+          "en": "record",
+          "zh": "record（记录类）"
+        }
+      ]
+    }
+  ]
+}

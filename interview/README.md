@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 12 天、60 道题。
+共 13 天、65 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-10-24](days/2026-10-24.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Hard | [A service crashes with "fatal error: concurrent map writes", and recover does not help](days/2026-10-24.md#q1) | 服务因“fatal error: concurrent map writes”崩溃，而且 recover 也救不了 |
+| 2 | System Design | Senior | [Shared tables, schema per tenant, or database per tenant for an enterprise tier?](days/2026-10-24.md#q2) | 企业版：共享表、每租户一个 schema，还是每租户一个数据库？ |
+| 3 | Database | Medium | [Product search with LIKE '%wool%' is slow even though title is indexed](days/2026-10-24.md#q3) | 用 LIKE '%wool%' 搜索商品很慢，尽管 title 已经建了索引 |
+| 4 | Middleware | Hard | [Redis ran out of memory: first writes failed, then the job queue vanished](days/2026-10-24.md#q4) | Redis 内存用尽：先是写入失败，后来任务队列消失了 |
+| 5 | Java & CS | Medium | [A HashSet of SKUs contains the same SKU twice](days/2026-10-24.md#q5) | 一个 SKU 的 HashSet 里出现了两个相同的 SKU |
 
 ## [2026-10-23](days/2026-10-23.md)
 
