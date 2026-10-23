@@ -1,0 +1,219 @@
+{
+  "id": "daily-2026-10-24",
+  "order": 20261024,
+  "kind": "daily",
+  "title": "Daily set · Oct 24",
+  "title_zh": "每日新题 · 10 月 24 日",
+  "summary": "Five new agent questions: moving an MCP server from local stdio to a shared remote service, choosing effort per request type, retrieving from tables such as rate cards, making an LLM judge consistent, and authorizing agents that act on behalf of staff.",
+  "summary_zh": "五道新的 Agent 题：把 MCP server 从本地 stdio 迁移为共享的远程服务、按请求类型选择 effort、从运费表这类表格中检索、让 LLM 评审保持一致，以及为代表员工行事的 Agent 设计授权。",
+  "generatedAt": "2026-10-24T06:54:32+08:00",
+  "questions": [
+    {
+      "id": "agent-daily-20261024-1",
+      "topic": "Tools & MCP",
+      "difficulty": "Medium",
+      "title": "The MCP server works on a laptop over stdio, then breaks as a remote service",
+      "title_zh": "MCP server 在笔记本上通过 stdio 运行正常，变成远程服务后就出问题了",
+      "question": "Your team built an MCP server exposing catalog tools. Engineers run it locally: their AI client starts it as a subprocess over stdio, and it reads a personal API token from an environment variable. Now you want to host one remote server for the whole company. In the first test, calls fail without credentials, one user's client sees another user's data, and long catalog exports time out.\n\nWhat changes when an MCP server moves from local stdio to a remote service, and how do you design for it?",
+      "question_zh": "你们团队做了一个提供商品目录工具的 MCP server。工程师们在本地运行它：AI 客户端以子进程的方式通过 stdio 启动它，它从环境变量里读取一个个人 API token。现在你们想为全公司托管一个远程 server。第一次测试中，调用因为没有凭证而失败，一个用户的客户端看到了另一个用户的数据，长时间的商品目录导出也超时了。\n\n当一个 MCP server 从本地 stdio 变成远程服务时，有什么变化？你会如何为此做设计？",
+      "answer": "**The core idea.** Over stdio, the server is a private process owned by one user on one machine: identity, credentials and lifetime come for free from that setup. A remote server over Streamable HTTP is a shared, multi-user network service, so you must add what the local setup gave you implicitly: authentication per user, per-user authorization, and handling of long-running work over a network.\n\n**Authentication and identity.** Remote MCP servers use OAuth-based authorization: the user signs in, the client obtains a token for that user, and every request carries it. Do not keep a single service token in the server's environment; that is why one user saw another's data. The server derives the user (and their merchant scope) from each request's token and calls your backend APIs with that user's permissions, never with a shared superuser credential.\n\n```go\nfunc (s *Server) handleToolCall(ctx context.Context, req ToolCall) (Result, error) {\n\tuser, err := s.auth.UserFromBearer(ctx, req.BearerToken) // validated on every request\n\tif err != nil {\n\t\treturn Result{}, ErrUnauthorized\n\t}\n\tctx = auth.WithUser(ctx, user) // backend calls use this user's permissions\n\treturn s.tools.Run(ctx, req.Name, req.Args)\n}\n```\n\n**Long-running tools.** A catalog export that takes minutes should not hold one HTTP request open. Return quickly with a job ID and offer a status tool (or stream progress if the transport and client support it), and keep tool timeouts explicit. Clients and proxies on the path have their own timeouts that you do not control.\n\n- Operations: the server is now a service like any other: health checks, rate limits per user, logs with the user and tool for every call, and versioned deploys.\n- Tool outputs are read by models: return compact, structured results and mark third-party text as untrusted, because every client's model will act on what you return.\n- Keep the local mode for development, but test against the remote deployment, because auth, network timeouts and concurrency only appear there.\n\n**Trade-offs.** A shared remote server gives one place to secure, monitor and update the tools, at the cost of building real auth and operating a service. For tools that touch only a developer's own machine (local files, a local database), stdio remains simpler and safer.",
+      "answer_zh": "**核心思路。** 通过 stdio 运行时，server 是某台机器上某个用户私有的进程：身份、凭证和生命周期都由这种部署方式自然提供。而通过 Streamable HTTP 运行的远程 server，是一个由多个用户共享的网络服务，所以你必须把本地部署方式隐式提供的那些东西补上：按用户认证、按用户授权，以及在网络上处理长时间运行的工作。\n\n**认证与身份。** 远程 MCP server 使用基于 OAuth 的授权：用户登录，客户端为这个用户获取一个 token，之后每个请求都带上它。不要在 server 的环境变量里只放一个服务 token；一个用户之所以能看到另一个用户的数据，原因就在这里。server 要从每个请求的 token 中推导出用户（以及他能访问的商家范围），并以该用户的权限调用你们的后端 API，绝不使用共享的超级用户凭证。\n\n```go\nfunc (s *Server) handleToolCall(ctx context.Context, req ToolCall) (Result, error) {\n\tuser, err := s.auth.UserFromBearer(ctx, req.BearerToken) // validated on every request\n\tif err != nil {\n\t\treturn Result{}, ErrUnauthorized\n\t}\n\tctx = auth.WithUser(ctx, user) // backend calls use this user's permissions\n\treturn s.tools.Run(ctx, req.Name, req.Args)\n}\n```\n\n**长时间运行的工具。** 一个要花好几分钟的商品目录导出，不应该一直占着一个 HTTP 请求。应该快速返回一个任务 ID，并提供一个查询状态的工具（如果传输方式和客户端支持，也可以流式推送进度），同时把工具超时设置得明确清楚。链路上的客户端和代理都有它们自己的超时设置，而这些是你无法控制的。\n\n- 运维：这个 server 现在和其他任何服务一样：健康检查、按用户限流、每次调用都记录用户和工具的日志，以及带版本管理的发布。\n- 工具输出会被模型读取：返回紧凑、结构化的结果，并把第三方文本标记为不可信，因为每个客户端的模型都会根据你返回的内容采取行动。\n- 开发时保留本地模式，但要针对远程部署进行测试，因为认证、网络超时和并发这些问题只会在那里出现。\n\n**取舍。** 一个共享的远程 server 让你可以在一个地方统一做安全、监控和更新工具，代价是要实现真正的认证并运维一个服务。对于只接触开发者自己机器的工具（本地文件、本地数据库），stdio 仍然更简单、更安全。",
+      "followups": [
+        "How would you let a user revoke one AI client's access to the server?",
+        "Which tools would you keep local-only, and why?"
+      ],
+      "followups_zh": [
+        "你会如何让用户撤销某个 AI 客户端对 server 的访问权限？",
+        "哪些工具你会只保留在本地运行？为什么？"
+      ],
+      "vocab": [
+        {
+          "en": "stdio transport",
+          "zh": "stdio 传输"
+        },
+        {
+          "en": "Streamable HTTP",
+          "zh": "Streamable HTTP 传输"
+        },
+        {
+          "en": "per-user authorization",
+          "zh": "按用户授权"
+        },
+        {
+          "en": "job ID",
+          "zh": "任务 ID"
+        },
+        {
+          "en": "A remote server must add what the local setup gave you for free.",
+          "zh": "远程 server 必须补上本地部署方式免费提供的那些东西。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261024-2",
+      "topic": "Agent Loop",
+      "difficulty": "Medium",
+      "title": "Slow on simple questions, careless on hard ones: tuning effort per request type",
+      "title_zh": "简单问题答得慢，难题却答得粗心：按请求类型调整 effort",
+      "question": "Your merchant assistant uses one configuration for everything. Merchants complain that \"what is my order count today?\" takes 15 seconds, while complex questions such as \"why did my Meta ROAS drop after the catalog change?\" sometimes get shallow answers that miss the cause. The model supports an effort setting that trades thoroughness for speed and tokens.\n\nHow would you configure the assistant so each kind of request gets the right amount of work?",
+      "question_zh": "你们的商家助手对所有请求都用同一套配置。商家抱怨“我今天有多少订单？”要等 15 秒，而像“为什么我改了商品目录之后，Meta 的 ROAS 就下降了？”这样复杂的问题，有时得到的回答却很肤浅，没找到原因。模型支持一个 effort 设置，可以在周全程度与速度和 token 消耗之间做取舍。\n\n你会如何配置这个助手，让每类请求都得到恰当的投入？",
+      "answer": "**The core idea.** Different requests need different amounts of reasoning. Lookups need a fast tool call and a short answer; diagnostic questions need the model to plan, call several tools and weigh evidence. One global setting is always wrong for one of them, so route requests and choose the effort per route, based on measurements.\n\n**How effort works.** In the Claude API, effort (`low` to `max`, set in `output_config`) controls how thorough the model is: how much it thinks, how many tool calls it makes, and how long its answers are. Lower effort means fewer, more consolidated tool calls and terser replies; higher effort means more careful work and more tokens. Thinking is adaptive on current models, so the model decides when to think, and effort steers how much. Defaults differ by model, so set it explicitly rather than relying on one.\n\n**A practical setup.**\n\n- Classify the request first with a cheap, fast call or rules: lookup, how-to, diagnosis, bulk action.\n- Lookups and how-to questions: low effort, a small tool set, and a short answer format.\n- Diagnosis: high effort, the analysis tools, and an instruction to state the evidence for each conclusion.\n- Bulk actions: plan at higher effort, execute each step at lower effort, with code checks in between.\n\n```go\nvar effortByRoute = map[Route]string{\n\tRouteLookup:    \"low\",\n\tRouteHowTo:     \"low\",\n\tRouteDiagnosis: \"high\",\n\tRouteBulkPlan:  \"high\",\n}\n\nfunc paramsFor(r Route) RequestOptions {\n\treturn RequestOptions{Effort: effortByRoute[r], Tools: toolsFor(r), MaxTokens: maxTokensFor(r)}\n}\n```\n\n**Measure, do not guess.** Build an eval set per route from real requests and sweep effort levels, measuring success rate, latency and cost per completed task. Often the lowest level that keeps quality is lower than expected for simple routes, and diagnosis benefits clearly from more effort. Track misroutes: a hard question classified as a lookup gets a fast, wrong answer, so let the agent or the merchant escalate (\"look deeper\") to the higher-effort route.\n\n**Trade-offs.** Routing adds a step and can misclassify; keep the classifier cheap and the escalation path easy. Changing effort in the middle of a conversation can affect prompt caching on some setups, so prefer choosing it per conversation or per task, or use the provider's supported way to change it mid-conversation.",
+      "answer_zh": "**核心思路。** 不同的请求需要不同程度的推理。查询类的请求只需要一次快速的工具调用和一个简短的回答；诊断类的问题则需要模型做计划、调用多个工具并权衡证据。一个全局的设置总会对其中一类不合适，所以要对请求做分流，并根据实测数据为每条路线选择 effort。\n\n**effort 如何起作用。** 在 Claude API 中，effort（从 `low` 到 `max`，在 `output_config` 中设置）控制模型的周全程度：它思考多少、发起多少次工具调用、回答有多长。effort 越低，工具调用越少、越集中，回复也越简洁；effort 越高，工作越仔细，token 也越多。在当前的模型上，思考是自适应的，由模型决定何时思考，而 effort 引导思考的程度。不同模型的默认值不同，所以要显式设置，而不是依赖某个默认值。\n\n**一套实用的配置。**\n\n- 先用一次低成本、快速的调用或者规则对请求分类：查询、操作指导、诊断、批量操作。\n- 查询和操作指导类问题：低 effort、较小的工具集，以及简短的回答格式。\n- 诊断类问题：高 effort、分析类工具，并要求对每个结论都说明依据。\n- 批量操作：用较高的 effort 做计划，用较低的 effort 执行每一步，中间穿插代码检查。\n\n```go\nvar effortByRoute = map[Route]string{\n\tRouteLookup:    \"low\",\n\tRouteHowTo:     \"low\",\n\tRouteDiagnosis: \"high\",\n\tRouteBulkPlan:  \"high\",\n}\n\nfunc paramsFor(r Route) RequestOptions {\n\treturn RequestOptions{Effort: effortByRoute[r], Tools: toolsFor(r), MaxTokens: maxTokensFor(r)}\n}\n```\n\n**要实测，不要猜。** 用真实请求为每条路线构建评测集，并对不同的 effort 级别做一轮扫描，衡量成功率、延迟以及每个完成任务的成本。对于简单的路线，能保持质量的最低级别往往比预想的还要低；而诊断类问题则明显受益于更高的 effort。要跟踪分流错误：一个被误分为查询的难题，会得到一个又快又错的回答，所以要允许 Agent 或商家升级（“再深入看看”）到更高 effort 的路线。\n\n**取舍。** 分流多了一个步骤，而且可能分错；要让分类器保持低成本，并让升级路径简单易用。在某些配置下，在对话中途更改 effort 会影响 prompt 缓存，所以最好按对话或按任务来选择它，或者使用服务商支持的在对话中途修改的方式。",
+      "followups": [
+        "How would you detect that a route's effort level is too low?",
+        "Should the merchant ever choose the effort level? Why or why not?"
+      ],
+      "followups_zh": [
+        "你会如何发现某条路线的 effort 级别设得太低了？",
+        "应该让商家自己选择 effort 级别吗？为什么？"
+      ],
+      "vocab": [
+        {
+          "en": "effort level",
+          "zh": "effort 级别（推理投入程度）"
+        },
+        {
+          "en": "adaptive thinking",
+          "zh": "自适应思考"
+        },
+        {
+          "en": "request routing",
+          "zh": "请求分流"
+        },
+        {
+          "en": "misroute",
+          "zh": "分流错误"
+        },
+        {
+          "en": "One global setting is always wrong for someone.",
+          "zh": "一个全局设置总会对某一类请求不合适。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261024-3",
+      "topic": "RAG",
+      "difficulty": "Hard",
+      "title": "Shipping questions fail because the rate tables are chopped into pieces",
+      "title_zh": "运费问题总是答错，因为运费表被切得七零八落",
+      "question": "Your support assistant answers logistics questions from carrier rate cards and shipping policy PDFs. Questions such as \"How much is a 2 kg parcel from Shenzhen to Germany with express?\" are often answered wrong: the assistant quotes the price for a different weight band, mixes up columns, or says the information is not available. The PDFs are mostly tables, and the pipeline splits extracted text into fixed-size chunks.\n\nWhy does retrieval fail on tables, and how would you fix the pipeline?",
+      "question_zh": "你们的客服助手根据物流商的运费表和运输政策 PDF 回答物流问题。像“从深圳寄一个 2 公斤的包裹到德国，走快递要多少钱？”这样的问题经常答错：助手报的是另一个重量区间的价格，把列搞混了，或者干脆说没有这方面的信息。这些 PDF 大部分是表格，而流水线是把提取出来的文本按固定大小切成文本块的。\n\n为什么检索在表格上会失败？你会如何修复这条流水线？",
+      "answer": "**Why tables break.** Extracting text from a table flattens it into a stream of numbers, and fixed-size chunking then cuts it at arbitrary points. A chunk may contain the rows for 1.5 to 2.5 kg but not the header that says which column is express and which currency applies, or the header may be in another chunk entirely. Embeddings of mostly numeric text are weak, so the right chunk does not rank well, and when it does, the model has to guess what each number means.\n\n**Fix 1: extract tables as tables.** Use a table-aware extractor (or a vision-capable model on the page image) to turn each table into rows with named columns. Validate the result in code: the number of columns per row, numeric ranges, and that weight bands do not overlap.\n\n**Fix 2: store facts as records, query them with tools.** Rate tables are structured data. Load them into a table and give the agent a tool such as `get_shipping_rate(origin, destination, service, weight_kg)` that returns the exact row with its currency, validity dates and source page. The model no longer reads numbers out of text; code looks them up.\n\n```json\n{\n  \"carrier\": \"ExampleExpress\",\n  \"origin\": \"CN-SZ\",\n  \"destination\": \"DE\",\n  \"service\": \"express\",\n  \"weight_from_kg\": 1.5,\n  \"weight_to_kg\": 2.5,\n  \"price\": {\"amount\": \"38.50\", \"currency\": \"USD\"},\n  \"valid_from\": \"2026-10-01\",\n  \"source\": {\"file\": \"rates-2026Q4.pdf\", \"page\": 7}\n}\n```\n\n- For tables you keep as text, chunk by row groups and repeat the table title and column headers in every chunk, so each chunk is self-contained.\n- Keep prose policies (prohibited items, customs rules) in the normal document index; route numeric questions to the structured tool and policy questions to retrieval.\n- Version rate cards by validity date and answer with the version in force on the shipping date.\n\n**Evaluate with exact answers.** Build a test set of rate questions with known correct prices (including band edges such as exactly 2.5 kg, and currencies) and check them in code. Separately test policy questions with the usual retrieval metrics.\n\n**Trade-offs.** Structured extraction takes engineering work per document type and must be re-run when carriers change their layout; validation catches most breakages. For a handful of small tables, keeping headers in every chunk may be enough; for anything that drives prices, structured data is worth it.",
+      "answer_zh": "**为什么表格会出问题。** 从表格中提取文本会把它压平成一串数字，而固定大小的分块又会在任意位置把它切断。某个文本块里可能有 1.5 到 2.5 公斤的那几行，却没有表头，不知道哪一列是快递、用的是哪种币种；表头也可能完全在另一个文本块里。以数字为主的文本，其 embedding 效果很差，所以正确的文本块排名并不靠前；就算排上来了，模型也只能去猜每个数字代表什么。\n\n**修复一：把表格当作表格来提取。** 使用能识别表格的提取工具（或者让一个具备视觉能力的模型读取页面图像），把每张表转换成带列名的行。在代码中校验结果：每行的列数、数值范围，以及重量区间之间没有重叠。\n\n**修复二：把事实存为记录，通过工具查询。** 运费表是结构化数据。把它们导入一张数据表，再给 Agent 一个像 `get_shipping_rate(origin, destination, service, weight_kg)` 这样的工具，返回精确的那一行，并带上币种、有效期和来源页码。模型不再需要从文本中读数字；由代码去查找。\n\n```json\n{\n  \"carrier\": \"ExampleExpress\",\n  \"origin\": \"CN-SZ\",\n  \"destination\": \"DE\",\n  \"service\": \"express\",\n  \"weight_from_kg\": 1.5,\n  \"weight_to_kg\": 2.5,\n  \"price\": {\"amount\": \"38.50\", \"currency\": \"USD\"},\n  \"valid_from\": \"2026-10-01\",\n  \"source\": {\"file\": \"rates-2026Q4.pdf\", \"page\": 7}\n}\n```\n\n- 对于仍然以文本形式保存的表格，要按若干行为一组来分块，并在每个文本块中重复表格标题和列名，让每个文本块都能独立成立。\n- 把文字类的政策（禁运物品、海关规定）保留在常规的文档索引里；数字类问题交给结构化工具，政策类问题交给检索。\n- 按有效期给运费表做版本管理，并用发货日当天有效的版本来回答。\n\n**用精确答案来评测。** 构建一个运费问题的测试集，带有已知的正确价格（包括像正好 2.5 公斤这样的区间边界，以及币种），并用代码检查。政策类问题则用常规的检索指标单独测试。\n\n**取舍。** 结构化提取需要针对每种文档类型投入工程开发，而且物流商一改版式就要重新运行；校验能发现大部分问题。如果只有少量小表格，在每个文本块中保留表头可能就够了；但凡是会影响价格的内容，结构化数据都是值得的。",
+      "followups": [
+        "A rate card is a scanned image. How would you extract it reliably?",
+        "How do you handle a question that needs both a rate and a customs rule?"
+      ],
+      "followups_zh": [
+        "某份运费表是扫描图片。你会如何可靠地提取它？",
+        "对于一个既需要运费、又需要海关规定的问题，你会如何处理？"
+      ],
+      "vocab": [
+        {
+          "en": "table extraction",
+          "zh": "表格提取"
+        },
+        {
+          "en": "weight band",
+          "zh": "重量区间"
+        },
+        {
+          "en": "self-contained chunk",
+          "zh": "可独立成立的文本块"
+        },
+        {
+          "en": "structured lookup",
+          "zh": "结构化查询"
+        },
+        {
+          "en": "Numbers belong in tables queried by code, not in text read by a model.",
+          "zh": "数字应该放在由代码查询的表里，而不是放在由模型阅读的文本里。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261024-4",
+      "topic": "Evals & Observability",
+      "difficulty": "Hard",
+      "title": "The LLM judge gives a different score every time you run it",
+      "title_zh": "LLM 评审每运行一次给出的分数都不一样",
+      "question": "Your eval uses an LLM judge that scores each support reply from 1 to 10 for \"quality\". Running the same eval twice on the same outputs gives averages of 7.4 and 7.9, and individual replies move by two or three points. A prompt change that \"improved\" the score by 0.3 cannot be trusted. A teammate wants to set the judge's temperature to zero, but the model you use does not accept sampling parameters.\n\nHow do you make the judge reliable enough to make decisions with?",
+      "question_zh": "你们的评测使用一个 LLM 评审，按“质量”给每条客服回复打 1 到 10 分。对同一批输出把评测跑两遍，平均分分别是 7.4 和 7.9，单条回复的分数会波动两三分。一次让分数“提升”了 0.3 的提示词改动根本不可信。一位同事想把评审的 temperature 设为零，但你们用的模型不接受采样参数。\n\n你如何让这个评审可靠到足以据此做决策？",
+      "answer": "**The core idea.** The noise comes mostly from the question, not the sampling. \"Rate quality from 1 to 10\" asks for a vague, holistic judgment on a fine scale, so the judge picks slightly different numbers each time. Make each judgment small, concrete and binary, then aggregate; and measure the judge's own consistency like any other instrument.\n\n**Rewrite the rubric as yes/no checks.** Replace the 1-10 score with criteria a careful person could answer consistently: does the reply answer the merchant's actual question; does every factual claim match the provided documents; does it avoid promising refunds; is it in the merchant's language; does it ask for information the merchant already gave. Judge one criterion per call, ask for a short quote as evidence before the verdict, and return structured output.\n\n```json\n{\n  \"criterion\": \"claims_match_documents\",\n  \"evidence\": \"Reply says 'returns within 30 days'; document says 'within 30 days of delivery'.\",\n  \"verdict\": \"pass\"\n}\n```\n\n- Use code instead of the judge wherever possible: language detection, banned phrases, required tool calls.\n- Give the judge the facts it needs (documents, tool results, the end state), so it checks rather than guesses.\n- For pairwise comparisons, judge both orders to cancel position bias.\n- Pin the judge's model and prompt, and treat any change to them as a new instrument that must be re-validated.\n\n**Measure the judge.** Run it several times on the same outputs and compute how often verdicts agree with each other (self-consistency) and with human labels on a sample (accuracy). For criteria that are still noisy, take the majority of several judgments. Then estimate how large a difference your eval can detect: with the measured noise and your number of cases, a 0.3 change may be well inside the noise.\n\n**About temperature.** Even where it is available, temperature zero does not remove disagreement caused by an ambiguous question, and some newer models do not accept sampling parameters at all. Clear criteria and aggregation work on every model.\n\n**Trade-offs.** One call per criterion and repeated judgments multiply judge cost; run judges in batch at a discount and sample where volume is high. The payoff is that a pass rate per criterion tells you what changed, which a single 1-10 average never does.",
+      "answer_zh": "**核心思路。** 噪声主要来自问题本身，而不是采样。“给质量打 1 到 10 分”要求的是在一个精细的刻度上做一个模糊的整体判断，于是评审每次都会选一个略有不同的数字。要让每个判断都小而具体、只有是或否，然后再汇总；并且像对待其他任何测量仪器一样，衡量评审自身的一致性。\n\n**把评分细则改写成是/否检查。** 用一个认真的人能够一致回答的标准来代替 1 到 10 分：回复是否回答了商家实际提出的问题；每条事实陈述是否与提供的文档一致；是否避免了承诺退款；是否使用了商家的语言；是否索要了商家已经提供过的信息。每次调用只评判一个标准，在给出结论之前先要求它引用一小段文字作为证据，并返回结构化输出。\n\n```json\n{\n  \"criterion\": \"claims_match_documents\",\n  \"evidence\": \"Reply says 'returns within 30 days'; document says 'within 30 days of delivery'.\",\n  \"verdict\": \"pass\"\n}\n```\n\n- 凡是能用代码的地方就别用评审：语言检测、禁用短语、必需的工具调用。\n- 把评审需要的事实（文档、工具结果、最终状态）都提供给它，让它去核对，而不是去猜。\n- 做两两对比时，正反两种顺序都评一次，以抵消位置偏好。\n- 锁定评审的模型和提示词，任何对它们的改动都要当作一个新的测量仪器，必须重新验证。\n\n**衡量评审本身。** 在同一批输出上运行它多次，计算各次判定之间相互一致的比例（自洽性），以及在一批样本上与人工标注一致的比例（准确性）。对于仍然有噪声的标准，取多次判断中的多数结果。然后估算你的评测能发现多大的差异：根据实测的噪声和案例数量，0.3 的变化很可能完全落在噪声范围之内。\n\n**关于 temperature。** 即使在可以设置的地方，temperature 设为零也消除不了由问题含糊所造成的分歧，而且一些较新的模型根本不接受采样参数。清晰的标准加上结果汇总，在任何模型上都有效。\n\n**取舍。** 每个标准一次调用、再加上重复评判，会让评审成本成倍增加；可以用打折的批处理方式运行评审，在量大的地方采用抽样。回报是：按标准统计的通过率能告诉你到底是什么变了，而一个 1 到 10 分的平均分永远做不到这一点。",
+      "followups": [
+        "How many repeated judgments would you take per item, and how would you decide?",
+        "How do you check that the judge agrees with your domain experts?"
+      ],
+      "followups_zh": [
+        "每个条目你会重复评判多少次？你会如何决定这个次数？",
+        "你如何确认评审与你们的业务专家意见一致？"
+      ],
+      "vocab": [
+        {
+          "en": "judge variance",
+          "zh": "评审方差"
+        },
+        {
+          "en": "binary criterion",
+          "zh": "是/否标准"
+        },
+        {
+          "en": "self-consistency",
+          "zh": "自洽性"
+        },
+        {
+          "en": "majority vote",
+          "zh": "多数投票"
+        },
+        {
+          "en": "The noise comes mostly from the question, not the sampling.",
+          "zh": "噪声主要来自问题本身，而不是采样。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261024-5",
+      "topic": "Safety & Security",
+      "difficulty": "Senior",
+      "title": "Whose permissions does the agent use when it acts for a staff member?",
+      "title_zh": "Agent 代表某位员工行事时，用的是谁的权限？",
+      "question": "Merchants have staff accounts with roles: owners, marketing staff who can edit campaigns, warehouse staff who can only see orders. Your agent currently calls backend APIs with one internal service account that can do everything, and relies on the prompt to respect the user's role. A warehouse employee asked the agent to \"raise the Meta budget to $500 a day\", and it did.\n\nDesign how the agent should be authorized and audited.",
+      "question_zh": "商家的员工账号带有角色：店主、可以编辑广告系列的市场人员、只能查看订单的仓库人员。你们的 Agent 目前用一个无所不能的内部服务账号调用后端 API，并依靠提示词来遵守用户的角色。一位仓库员工让 Agent“把 Meta 的预算提高到每天 500 美元”，它就照做了。\n\n请设计 Agent 应该如何被授权和审计。",
+      "answer": "**The core idea.** An agent acting for a person must never have more power than that person, and usually should have less. The authority comes from the user, is narrowed to the task, and is enforced by the same backend checks that protect the normal UI, not by instructions in a prompt.\n\n**Act on behalf of the user.** When a staff member talks to the agent, the agent's tool calls carry that user's identity, and the backend authorizes each call against the user's role exactly as if they had clicked the button themselves. The warehouse employee's budget change is then rejected by the API, the tool returns a permission error, and the agent explains that this needs someone with marketing rights. The shared superuser service account goes away for user-initiated work.\n\n**Narrow it further for the agent.** Delegated tokens should be short-lived and scoped to what the conversation needs. Some actions can be allowed for people but not for the agent (deleting a store, changing payout details), and some require the user's explicit confirmation in the UI even if their role allows them. Token exchange (issuing a scoped, short-lived token for the agent derived from the user's session) is the usual mechanism.\n\n```go\ntype Delegation struct {\n\tUserID     string    // the human the agent acts for\n\tMerchantID string\n\tScopes     []string  // e.g. \"orders:read\", \"campaigns:write\"\n\tAgentRun   string    // which agent run holds this token\n\tExpiresAt  time.Time // minutes, not days\n}\n\n// Backend authorization is the same check the UI uses, plus agent-specific limits.\nfunc (a *Authz) Allow(d Delegation, action Action) error {\n\tif !a.roles.UserCan(d.UserID, d.MerchantID, action) {\n\t\treturn ErrForbidden // the user could not do this either\n\t}\n\tif !contains(d.Scopes, action.Scope) || a.policy.AgentForbidden(action) {\n\t\treturn ErrForbiddenForAgent\n\t}\n\treturn nil\n}\n```\n\n- Background agents (nightly jobs) that act without a user present get their own service identity with a minimal, explicit set of permissions, and their actions are attributed to the merchant setting that enabled them.\n- Audit every action with both identities: which user it was for and which agent run did it, plus the request that led to it. Show this in the merchant's activity log so owners can see what the agent did on whose behalf.\n- Untrusted content in the context (emails, product data) must never expand permissions; at most it can make the agent attempt something the user is allowed to do, which the confirmation rules still gate.\n\n**Migration.** Moving from a superuser to delegated tokens touches every tool, so start with the highest-risk write tools, add authorization tests that call each tool as each role, and run in a logging mode that reports would-be denials before enforcing.\n\n**Trade-offs.** Per-user tokens and checks add plumbing and make some cross-cutting agent features harder, such as summarizing data the user cannot see. That limitation is correct: if the user cannot see it, the agent working for them should not either.",
+      "answer_zh": "**核心思路。** 一个代表某人行事的 Agent，所拥有的权力绝不能超过这个人，而且通常应该更少。它的权限来自用户，被缩小到任务所需的范围，并由保护普通界面的同一套后端检查来强制执行，而不是靠提示词里的指令。\n\n**代表用户行事。** 当一位员工与 Agent 对话时，Agent 的工具调用要带上这个用户的身份，后端按照该用户的角色来授权每一次调用，就像是他亲自点了那个按钮一样。这样，仓库员工的预算修改就会被 API 拒绝，工具返回一个权限错误，Agent 再解释说这需要有市场权限的人来操作。对于由用户发起的工作，那个共享的超级用户服务账号就不再使用了。\n\n**为 Agent 进一步缩小权限。** 委托出去的 token 应该是短期有效的，并且只限于本次对话所需的范围。有些操作可以允许人来做，但不允许 Agent 做（删除店铺、修改收款信息）；还有些操作，即使用户的角色允许，也需要用户在界面上明确确认。常用的机制是 token 交换：根据用户的会话，为 Agent 签发一个范围受限、短期有效的 token。\n\n```go\ntype Delegation struct {\n\tUserID     string    // the human the agent acts for\n\tMerchantID string\n\tScopes     []string  // e.g. \"orders:read\", \"campaigns:write\"\n\tAgentRun   string    // which agent run holds this token\n\tExpiresAt  time.Time // minutes, not days\n}\n\n// Backend authorization is the same check the UI uses, plus agent-specific limits.\nfunc (a *Authz) Allow(d Delegation, action Action) error {\n\tif !a.roles.UserCan(d.UserID, d.MerchantID, action) {\n\t\treturn ErrForbidden // the user could not do this either\n\t}\n\tif !contains(d.Scopes, action.Scope) || a.policy.AgentForbidden(action) {\n\t\treturn ErrForbiddenForAgent\n\t}\n\treturn nil\n}\n```\n\n- 在没有用户在场的情况下运行的后台 Agent（夜间任务）有自己的服务身份，只拥有一组最小化、明确列出的权限，它们的操作归属于启用它们的那项商家设置。\n- 对每个操作都记录两个身份：它是为哪个用户做的、由哪次 Agent 运行完成的，以及引发它的那个请求。把这些展示在商家的操作日志中，让店主能看到 Agent 代表谁做了什么。\n- 上下文中的不可信内容（邮件、商品数据）绝不能扩大权限；它最多只能让 Agent 去尝试做用户本来就有权做的事，而这些事仍然受到确认规则的把关。\n\n**迁移。** 从超级用户切换到委托 token 会影响每一个工具，所以要从风险最高的写操作工具开始，加上以每种角色调用每个工具的授权测试，并先以日志模式运行，在真正强制执行之前，先报告哪些调用会被拒绝。\n\n**取舍。** 按用户签发的 token 和检查会增加不少底层工作，也会让一些跨领域的 Agent 功能更难实现，比如汇总用户自己看不到的数据。但这个限制是对的：如果用户看不到，那么为他工作的 Agent 也不应该看到。",
+      "followups": [
+        "How would you handle an owner who wants the agent to do things on their behalf while they are offline?",
+        "How do you test that every tool enforces the user's role?",
+        "What should the agent say when it is not allowed to do what the user asked?"
+      ],
+      "followups_zh": [
+        "店主希望自己离线时 Agent 也能代表他做事，你会如何处理？",
+        "你如何测试每个工具都强制执行了用户的角色？",
+        "当 Agent 不被允许去做用户要求的事情时，它应该怎么说？"
+      ],
+      "vocab": [
+        {
+          "en": "delegated authority",
+          "zh": "委托授权"
+        },
+        {
+          "en": "on behalf of",
+          "zh": "代表（某人）"
+        },
+        {
+          "en": "token exchange",
+          "zh": "token 交换"
+        },
+        {
+          "en": "service identity",
+          "zh": "服务身份"
+        },
+        {
+          "en": "An agent must never have more power than the person it acts for.",
+          "zh": "Agent 拥有的权力绝不能超过它所代表的那个人。"
+        }
+      ]
+    }
+  ]
+}

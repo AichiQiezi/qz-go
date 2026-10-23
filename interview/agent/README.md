@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 16 个模块、64 道题。
+共 17 个模块、69 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -215,3 +215,17 @@ Five new agent questions: keeping eval sets trustworthy when facts change, getti
 | 3 | Safety & Security | Hard | [The assistant's answer, rendered in the admin, leaked data through an image link](modules/daily-2026-10-23.md#q3) | 助手的回答渲染在后台里，却通过一个图片链接泄露了数据 |
 | 4 | Production | Hard | [The merchant closes the tab, and a 20-minute catalog fix dies with it](modules/daily-2026-10-23.md#q4) | 商家关掉了标签页，一个要跑 20 分钟的商品目录修复也随之中断 |
 | 5 | Multi-agent | Senior | [The merchant's agent negotiates restocks with a supplier's agent](modules/daily-2026-10-23.md#q5) | 商家的 Agent 与供应商的 Agent 协商补货 |
+
+## [Daily set · Oct 24 · 每日新题 · 10 月 24 日](modules/daily-2026-10-24.md)
+
+Five new agent questions: moving an MCP server from local stdio to a shared remote service, choosing effort per request type, retrieving from tables such as rate cards, making an LLM judge consistent, and authorizing agents that act on behalf of staff.
+
+> 五道新的 Agent 题：把 MCP server 从本地 stdio 迁移为共享的远程服务、按请求类型选择 effort、从运费表这类表格中检索、让 LLM 评审保持一致，以及为代表员工行事的 Agent 设计授权。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Tools & MCP | Medium | [The MCP server works on a laptop over stdio, then breaks as a remote service](modules/daily-2026-10-24.md#q1) | MCP server 在笔记本上通过 stdio 运行正常，变成远程服务后就出问题了 |
+| 2 | Agent Loop | Medium | [Slow on simple questions, careless on hard ones: tuning effort per request type](modules/daily-2026-10-24.md#q2) | 简单问题答得慢，难题却答得粗心：按请求类型调整 effort |
+| 3 | RAG | Hard | [Shipping questions fail because the rate tables are chopped into pieces](modules/daily-2026-10-24.md#q3) | 运费问题总是答错，因为运费表被切得七零八落 |
+| 4 | Evals & Observability | Hard | [The LLM judge gives a different score every time you run it](modules/daily-2026-10-24.md#q4) | LLM 评审每运行一次给出的分数都不一样 |
+| 5 | Safety & Security | Senior | [Whose permissions does the agent use when it acts for a staff member?](modules/daily-2026-10-24.md#q5) | Agent 代表某位员工行事时，用的是谁的权限？ |
