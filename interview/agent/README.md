@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 17 个模块、69 道题。
+共 18 个模块、74 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -229,3 +229,17 @@ Five new agent questions: moving an MCP server from local stdio to a shared remo
 | 3 | RAG | Hard | [Shipping questions fail because the rate tables are chopped into pieces](modules/daily-2026-10-24.md#q3) | 运费问题总是答错，因为运费表被切得七零八落 |
 | 4 | Evals & Observability | Hard | [The LLM judge gives a different score every time you run it](modules/daily-2026-10-24.md#q4) | LLM 评审每运行一次给出的分数都不一样 |
 | 5 | Safety & Security | Senior | [Whose permissions does the agent use when it acts for a staff member?](modules/daily-2026-10-24.md#q5) | Agent 代表某位员工行事时，用的是谁的权限？ |
+
+## [Daily set · Oct 25 · 每日新题 · 10 月 25 日](modules/daily-2026-10-25.md)
+
+Five new agent questions: keeping bulk tool results out of the context with programmatic tool calling, changing the tool set mid-conversation without losing the cache, choosing between an advisor, a router and a stronger model, task budgets versus max_tokens, and keeping agent memory from becoming a persistent injection channel.
+
+> 五道新的 Agent 题：用程序化工具调用让大量工具结果不进入上下文、在对话中途修改工具集而不丢失缓存、在顾问模式、路由和更强模型之间做选择、任务预算与 max_tokens 的区别，以及防止 Agent 记忆变成持久化的注入通道。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Agent Loop | Hard | [Finding the 20 worst ads out of 4,000 floods the context with tool results](modules/daily-2026-10-25.md#q1) | 从 4,000 条广告里找出最差的 20 条，工具结果把上下文淹没了 |
+| 2 | Tools & MCP | Medium | [A merchant connects TikTok mid-chat, and every later turn misses the cache](modules/daily-2026-10-25.md#q2) | 商家在对话中途连接了 TikTok，之后每一轮都无法命中缓存 |
+| 3 | Multi-agent | Senior | [The strongest model is too expensive, and a cheaper one makes planning mistakes: is an advisor the answer?](modules/daily-2026-10-25.md#q3) | 最强的模型太贵，便宜的模型又会犯规划错误：顾问模式是答案吗？ |
+| 4 | Production | Medium | [The nightly catalog fixer stops halfway on some merchants and burns millions of tokens on others](modules/daily-2026-10-25.md#q4) | 夜间商品目录修复任务在一些商家上半途停止，在另一些商家上消耗数百万 token |
+| 5 | Safety & Security | Hard | [A customer's message gets saved into the agent's long-term memory as a merchant rule](modules/daily-2026-10-25.md#q5) | 一条顾客消息被当作商家规则存进了 Agent 的长期记忆 |
