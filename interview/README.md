@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 13 天、65 道题。
+共 14 天、70 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-10-25](days/2026-10-25.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Hard | [Ad IDs from Meta come back slightly wrong after passing through a Go service](days/2026-10-25.md#q1) | Meta 的广告 ID 经过一个 Go 服务之后，回来时变得“差了一点” |
+| 2 | System Design | Medium | [Feature flags and gradual rollouts for a multi-tenant SaaS](days/2026-10-25.md#q2) | 多租户 SaaS 中的功能开关与灰度发布 |
+| 3 | Database | Senior | [Two admins remove each other at the same time, and a store is left with no owner](days/2026-10-25.md#q3) | 两个管理员同时把对方移除，结果店铺一个所有者都没有了 |
+| 4 | Middleware | Medium | [A Redis rate limiter blocks some merchants forever](days/2026-10-25.md#q4) | 一个 Redis 限流器把部分商家永久挡在了门外 |
+| 5 | Java & CS | Hard | [Parallel calls with CompletableFuture make the whole service slow, and errors arrive wrapped twice](days/2026-10-25.md#q5) | 用 CompletableFuture 并行调用后整个服务都变慢了，异常还被包了两层 |
 
 ## [2026-10-24](days/2026-10-24.md)
 
