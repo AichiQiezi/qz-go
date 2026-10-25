@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 18 个模块、74 道题。
+共 19 个模块、79 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -243,3 +243,17 @@ Five new agent questions: keeping bulk tool results out of the context with prog
 | 3 | Multi-agent | Senior | [The strongest model is too expensive, and a cheaper one makes planning mistakes: is an advisor the answer?](modules/daily-2026-10-25.md#q3) | 最强的模型太贵，便宜的模型又会犯规划错误：顾问模式是答案吗？ |
 | 4 | Production | Medium | [The nightly catalog fixer stops halfway on some merchants and burns millions of tokens on others](modules/daily-2026-10-25.md#q4) | 夜间商品目录修复任务在一些商家上半途停止，在另一些商家上消耗数百万 token |
 | 5 | Safety & Security | Hard | [A customer's message gets saved into the agent's long-term memory as a merchant rule](modules/daily-2026-10-25.md#q5) | 一条顾客消息被当作商家规则存进了 Agent 的长期记忆 |
+
+## [Daily set · Oct 26 · 每日新题 · 10 月 26 日](modules/daily-2026-10-26.md)
+
+Five new agent questions: treating web search as unreliable retrieval, keeping a hand-built history append-only so thinking blocks stay valid, finding why the prompt cache broke after a release, using an independent grader to bring reports up to a quality bar, and choosing between the MCP connector and your own MCP client.
+
+> 五道新的 Agent 题：把网页搜索当作不可靠的检索来对待、让自建的对话历史只追加以保持思考块有效、找出发布后提示缓存失效的原因、用独立的评审者让报告达到质量标准，以及在 MCP 连接器和自建 MCP 客户端之间做选择。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | RAG | Hard | [The competitor price agent says "no competitors found" when the web search actually failed](modules/daily-2026-10-26.md#q1) | 竞品价格 Agent 说“没有找到竞品”，其实是网页搜索失败了 |
+| 2 | Context & Memory | Hard | [After a model upgrade, long support chats fail with "bound to a different conversation"](modules/daily-2026-10-26.md#q2) | 模型升级后，长时间的客服对话报错“bound to a different conversation” |
+| 3 | Evals & Observability | Medium | [The cache hit rate fell from 80% to 10% after a release, and nobody knows which change did it](modules/daily-2026-10-26.md#q3) | 一次发布后缓存命中率从 80% 跌到 10%，没人知道是哪个改动造成的 |
+| 4 | Multi-agent | Senior | [Monthly ad reports for 3,000 merchants: who decides a report is good enough to send?](modules/daily-2026-10-26.md#q4) | 为 3,000 家商家生成月度广告报告：由谁来判断一份报告足够好、可以发出？ |
+| 5 | Tools & MCP | Medium | [Call your MCP server through the Messages API connector, or run your own MCP client?](modules/daily-2026-10-26.md#q5) | 通过 Messages API 的连接器调用你的 MCP server，还是自己运行 MCP 客户端？ |

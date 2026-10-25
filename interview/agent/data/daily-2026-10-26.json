@@ -1,0 +1,213 @@
+{
+  "id": "daily-2026-10-26",
+  "order": 20261026,
+  "kind": "daily",
+  "title": "Daily set · Oct 26",
+  "title_zh": "每日新题 · 10 月 26 日",
+  "summary": "Five new agent questions: treating web search as unreliable retrieval, keeping a hand-built history append-only so thinking blocks stay valid, finding why the prompt cache broke after a release, using an independent grader to bring reports up to a quality bar, and choosing between the MCP connector and your own MCP client.",
+  "summary_zh": "五道新的 Agent 题：把网页搜索当作不可靠的检索来对待、让自建的对话历史只追加以保持思考块有效、找出发布后提示缓存失效的原因、用独立的评审者让报告达到质量标准，以及在 MCP 连接器和自建 MCP 客户端之间做选择。",
+  "generatedAt": "2026-10-26T06:57:06+08:00",
+  "questions": [
+    {
+      "id": "agent-daily-20261026-1",
+      "topic": "RAG",
+      "difficulty": "Hard",
+      "title": "The competitor price agent says \"no competitors found\" when the web search actually failed",
+      "title_zh": "竞品价格 Agent 说“没有找到竞品”，其实是网页搜索失败了",
+      "question": "A pricing assistant uses the server-side web search and web fetch tools to find competitor prices for a merchant's top products. Merchants complain about two things: some reports say \"no competitors found\" for very common products, and some prices in the report come from outdated pages or pages that have nothing to do with the product. Your code only reads the final text answer.\n\nWhat is going wrong, and how would you make web retrieval reliable?",
+      "question_zh": "一个定价助手使用服务端的网页搜索和网页抓取工具，为商家的热销商品查找竞品价格。商家抱怨两件事：有些报告对非常常见的商品也说“没有找到竞品”；报告中有些价格来自过时的页面，或者来自与这个商品毫不相干的页面。你的代码只读取最终的文本答案。\n\n问题出在哪里？你会如何让网页检索变得可靠？",
+      "answer": "**The core idea.** Web search is retrieval from a source you do not control: results can be missing, stale, irrelevant or even hostile. Treat it like any other retrieval pipeline. Check whether retrieval actually succeeded, constrain where results come from, extract facts into a structure you can verify, and keep the evidence for every number you show a merchant.\n\n**Bug 1: failures look like empty results.** Server tools do not raise errors. A failed search still returns HTTP 200 with a `web_search_tool_result` block, but its `content` is a single error object (for example with `error_code` `max_uses_exceeded`) instead of a list of results. The model may then write \"nothing found\". Inspect the blocks, not only the final text, and branch on the shape:\n\n```go\n// content of a web_search_tool_result block:\n// a list means results, an object means the search failed.\nfunc searchOutcome(content json.RawMessage) ([]SearchHit, error) {\n\ttrimmed := bytes.TrimSpace(content)\n\tif len(trimmed) > 0 && trimmed[0] == '[' {\n\t\tvar hits []SearchHit\n\t\treturn hits, json.Unmarshal(trimmed, &hits)\n\t}\n\tvar e struct {\n\t\tErrorCode string `json:\"error_code\"`\n\t}\n\tif err := json.Unmarshal(trimmed, &e); err != nil {\n\t\treturn nil, err\n\t}\n\treturn nil, fmt.Errorf(\"web search failed: %s\", e.ErrorCode)\n}\n```\n\nA report built on a failed search should say \"search unavailable, retry later\", never \"no competitors\".\n\n**Bug 2: unfinished turns.** Server tools run in a server-side loop. If that loop reaches its iteration limit, the response ends with `stop_reason: \"pause_turn\"`. Your code must send the conversation back, including the assistant's content, to let it continue; do not add a \"Continue\" user message. If you treat `pause_turn` as the end, you publish half-finished research.\n\n**Bug 3: unconstrained sources.** Restrict the search to sources you trust for prices, using `allowed_domains` or `blocked_domains` (one or the other), and set `max_uses` so a single product cannot burn the whole budget. Web fetch only fetches URLs that already appear in the conversation, which limits where the agent can go, but fetched pages are still untrusted text that may contain instructions; never let page content trigger write actions.\n\n- **Extract, then verify.** Ask for a structured record per competitor: URL, product name, price, currency, date seen. Reject records whose product does not match the merchant's product on key attributes (brand, size, model number), and normalize currency in code, not in the model.\n- **Keep evidence.** Store the URL and the quoted text for each price, so a merchant can click through and you can audit wrong numbers.\n- **Cache and refresh.** Prices change daily, not per request; cache results per product with a timestamp and show the age in the report.\n\n**Trade-offs.** Tight domain lists improve precision but miss new competitors; a periodic broader discovery run can propose new domains for a human to approve. The newer search versions filter results with code before they reach the context, which saves tokens, but you still need your own checks on the final records.",
+      "answer_zh": "**核心思路。** 网页搜索是从一个你无法控制的来源进行检索：结果可能缺失、过时、不相关，甚至带有恶意。要像对待任何其他检索管道一样对待它。检查检索是否真的成功，限制结果的来源，把事实提取成可以校验的结构，并为你展示给商家的每一个数字保留证据。\n\n**Bug 1：失败看起来像空结果。** 服务端工具不会抛出错误。一次失败的搜索仍然返回 HTTP 200 和一个 `web_search_tool_result` 块，但它的 `content` 是单个错误对象（例如带有 `error_code` `max_uses_exceeded`），而不是结果列表。模型可能接着就写出“什么都没找到”。要检查各个内容块，而不只是最终文本，并根据结构分支处理：\n\n```go\n// content of a web_search_tool_result block:\n// a list means results, an object means the search failed.\nfunc searchOutcome(content json.RawMessage) ([]SearchHit, error) {\n\ttrimmed := bytes.TrimSpace(content)\n\tif len(trimmed) > 0 && trimmed[0] == '[' {\n\t\tvar hits []SearchHit\n\t\treturn hits, json.Unmarshal(trimmed, &hits)\n\t}\n\tvar e struct {\n\t\tErrorCode string `json:\"error_code\"`\n\t}\n\tif err := json.Unmarshal(trimmed, &e); err != nil {\n\t\treturn nil, err\n\t}\n\treturn nil, fmt.Errorf(\"web search failed: %s\", e.ErrorCode)\n}\n```\n\n基于一次失败搜索生成的报告应该写“搜索暂不可用，请稍后重试”，绝不能写“没有竞品”。\n\n**Bug 2：没有完成的轮次。** 服务端工具在服务端的循环中运行。如果这个循环达到了迭代上限，响应会以 `stop_reason: \"pause_turn\"` 结束。你的代码必须把对话（包括 assistant 的内容）发回去，让它继续；不要额外加一条“继续”的用户消息。如果把 `pause_turn` 当作结束，你发布出去的就是做了一半的调研。\n\n**Bug 3：来源不受限制。** 用 `allowed_domains` 或 `blocked_domains`（二选一）把搜索限制在你信任的价格来源上，并设置 `max_uses`，避免单个商品耗尽全部预算。网页抓取只会抓取对话中已经出现过的 URL，这限制了 Agent 能去的地方，但抓取到的页面仍然是不可信的文本，其中可能包含指令；绝不要让页面内容触发写操作。\n\n- **先提取，再校验。** 要求为每个竞品输出一条结构化记录：URL、商品名、价格、币种、看到的日期。对于在关键属性（品牌、尺寸、型号）上与商家商品不匹配的记录予以拒绝，并在代码里而不是在模型里做币种换算。\n- **保留证据。** 为每个价格保存 URL 和引用的原文，让商家可以点进去查看，你也能审查出错的数字。\n- **缓存与刷新。** 价格是按天变化的，而不是按请求变化；按商品缓存结果并带上时间戳，在报告中显示数据的新旧程度。\n\n**取舍。** 严格的域名名单能提高准确率，但会漏掉新的竞争对手；可以定期做一次范围更广的发现性搜索，提出新的域名交给人来批准。较新的搜索工具版本会在结果进入上下文之前用代码进行过滤，这能节省 token，但你仍然需要对最终记录做自己的检查。",
+      "followups": [
+        "How would you test this agent without paying for live web searches on every CI run?",
+        "A competitor page contains hidden text telling the agent to report a lower price. What stops it?",
+        "When would you use a price data provider API instead of web search?"
+      ],
+      "followups_zh": [
+        "你会如何测试这个 Agent，而不必在每次 CI 运行时都花钱做真实的网页搜索？",
+        "某个竞品页面里藏着一段文字，要求 Agent 报告一个更低的价格。什么能阻止它？",
+        "什么时候你会使用价格数据供应商的 API，而不是网页搜索？"
+      ],
+      "vocab": [
+        {
+          "en": "server tool",
+          "zh": "服务端工具"
+        },
+        {
+          "en": "pause_turn",
+          "zh": "pause_turn（服务端循环达到上限后暂停）"
+        },
+        {
+          "en": "domain allowlist",
+          "zh": "域名白名单"
+        },
+        {
+          "en": "evidence",
+          "zh": "证据"
+        },
+        {
+          "en": "A failed search is not an empty result.",
+          "zh": "搜索失败不等于结果为空。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261026-2",
+      "topic": "Context & Memory",
+      "difficulty": "Hard",
+      "title": "After a model upgrade, long support chats fail with \"bound to a different conversation\"",
+      "title_zh": "模型升级后，长时间的客服对话报错“bound to a different conversation”",
+      "question": "Your support agent builds the `messages` array itself. On every request it rewrites the system prompt with the current time, injects a reminder (\"refund limit is $200\") into the latest user turn and removes the old one, and deletes tool results older than ten turns to save tokens. After moving to a newer model on a new account, multi-turn chats start failing with a 400: \"Invalid `signature` in `thinking` block. The block is bound to a different conversation.\"\n\nExplain the error and how to restructure the harness.",
+      "question_zh": "你们的客服 Agent 自己构建 `messages` 数组。每次请求时，它都会用当前时间改写 system prompt，往最新的用户轮次里注入一条提醒（“退款上限为 200 美元”）并删掉旧的那条，还会删除十轮之前的工具结果来节省 token。在一个新账户上换用更新的模型后，多轮对话开始以 400 报错：“Invalid `signature` in `thinking` block. The block is bound to a different conversation.”\n\n解释这个错误，以及如何重构这个执行框架。",
+      "answer": "**The core idea.** On the newest models, a thinking block is tied to the exact conversation that produced it: the system prompt, the tools, and every earlier message. If you change any of that history and then send the old thinking block back, the API treats it as reasoning about a different conversation. The fix is to make the history append-only: never rewrite what was already sent, only add to it.\n\n**Mechanism.** The block's signature records the prefix that produced it, and the API checks on replay that the prefix is unchanged. Accounts created on or after August 31, 2026 are enforced by default, so a replayed block after an edit is a 400; older accounts can opt in. All three habits in this harness edit the prefix: rebuilding `system`, deleting an injected reminder, and deleting old tool results from the middle of the history. They also destroy prompt caching for the same reason.\n\n**Replace each edit with its append-only form.**\n\n- Freeze the system prompt at session start. Put changing facts such as the time or a mode switch in an appended `role: \"system\"` message at the point where they become true.\n- For a per-turn reminder, append it after the tool results and leave earlier copies in place; with the turn-scoped beta (`clear_at: \"next_user_message\"`), it shows for one turn and then stays in the transcript cleared, costing no input tokens.\n- To trim old tool results, use server-side context editing or compaction. They do not count as edits, because the check compares the conversation as you sent it.\n- If you compact on the client, use simple compaction: replace the whole history with one summary and replay no earlier thinking. Keeping the last turns verbatim with their thinking blocks after a summary breaks the check.\n\n**Find the edits before users do.** Capture consecutive request bodies and check that each new request starts with the previous one, byte for byte. A small test helper is enough:\n\n```go\n// sameHistory reports whether every message sent last time is still sent,\n// byte for byte, at the start of the new request.\nfunc sameHistory(prev, next []json.RawMessage) (int, bool) {\n\tif len(next) < len(prev) {\n\t\treturn len(next), false\n\t}\n\tfor i := range prev {\n\t\tif !bytes.Equal(prev[i], next[i]) {\n\t\t\treturn i, false\n\t\t}\n\t}\n\treturn -1, true\n}\n```\n\nThen run sessions with the `thinking-binding-controls-2026-08-01` beta and `prefix_mismatch_behavior: \"drop_block\"`, and log `input_transformations`: an empty array means the history is intact, and a `prefix_binding_mismatch` entry points at the block whose prefix changed. In CI, use `\"error\"` so an edit fails the build.\n\n**Trade-offs.** Stripping all thinking blocks and retrying makes the error go away, but the model loses its earlier reasoning and the cache restarts on every request, so cost per task rises; use it only as a one-time recovery. `drop_block` in production degrades instead of failing, which is safer for users, but monitor the drops, because each one is lost reasoning.",
+      "answer_zh": "**核心思路。** 在最新的模型上，一个思考块与产生它的那段对话精确绑定：system prompt、工具，以及之前的每一条消息。如果你修改了其中任何一部分历史，然后把旧的思考块发回去，API 就会认为它是针对另一段对话的推理。修复方法是让历史只追加：已经发送过的内容绝不改写，只往后添加。\n\n**机制。** 思考块的签名记录了产生它的前缀，回放时 API 会检查这个前缀是否没有改变。2026 年 8 月 31 日及之后创建的账户默认强制执行这个检查，所以编辑历史后再回放思考块会得到 400；更早的账户可以选择开启。这个执行框架的三个习惯都会修改前缀：重建 `system`、删除注入的提醒，以及从历史中间删除旧的工具结果。出于同样的原因，它们也会破坏提示缓存。\n\n**把每一种编辑替换成只追加的形式。**\n\n- 在会话开始时冻结 system prompt。把时间或模式切换这类会变化的信息，放到一条追加的 `role: \"system\"` 消息里，放在它们变为真的那个位置。\n- 对于每轮都要的提醒，把它追加在工具结果之后，并保留更早的副本；使用按轮生效的 beta（`clear_at: \"next_user_message\"`）时，它只在一轮中显示，之后以已清除的状态留在记录里，不消耗输入 token。\n- 要裁剪旧的工具结果，使用服务端的上下文编辑或压缩。它们不算作编辑，因为检查比较的是你发送的对话本身。\n- 如果在客户端做压缩，就使用简单压缩：用一份摘要替换整段历史，不回放任何更早的思考。在摘要之后原样保留最后几轮及其思考块，会导致检查失败。\n\n**赶在用户之前找到这些编辑。** 捕获连续的请求体，检查每个新请求是否逐字节地以前一个请求开头。一个小的测试辅助函数就够了：\n\n```go\n// sameHistory reports whether every message sent last time is still sent,\n// byte for byte, at the start of the new request.\nfunc sameHistory(prev, next []json.RawMessage) (int, bool) {\n\tif len(next) < len(prev) {\n\t\treturn len(next), false\n\t}\n\tfor i := range prev {\n\t\tif !bytes.Equal(prev[i], next[i]) {\n\t\t\treturn i, false\n\t\t}\n\t}\n\treturn -1, true\n}\n```\n\n然后在启用 `thinking-binding-controls-2026-08-01` beta 并设置 `prefix_mismatch_behavior: \"drop_block\"` 的情况下运行会话，并记录 `input_transformations`：空数组表示历史完好无损，`prefix_binding_mismatch` 条目则指向前缀发生变化的那个思考块。在 CI 中使用 `\"error\"`，让任何编辑都导致构建失败。\n\n**取舍。** 删除所有思考块再重试能让错误消失，但模型会失去之前的推理，缓存也会在每次请求时重新开始，单个任务的成本因此上升；只把它当作一次性的恢复手段。在生产环境中使用 `drop_block` 是降级而不是失败，对用户更安全，但要监控被丢弃的情况，因为每一次丢弃都是损失掉的推理。",
+      "followups": [
+        "Why does deleting old tool results from the middle of the history also hurt prompt caching?",
+        "How would you migrate a running conversation from the old harness to the new one?"
+      ],
+      "followups_zh": [
+        "为什么从历史中间删除旧的工具结果也会损害提示缓存？",
+        "你会如何把一个进行中的对话从旧的执行框架迁移到新的框架？"
+      ],
+      "vocab": [
+        {
+          "en": "append-only history",
+          "zh": "只追加的历史"
+        },
+        {
+          "en": "thinking block",
+          "zh": "思考块"
+        },
+        {
+          "en": "conversation prefix",
+          "zh": "对话前缀"
+        },
+        {
+          "en": "compaction",
+          "zh": "压缩"
+        },
+        {
+          "en": "Never rewrite what was already sent.",
+          "zh": "已经发送过的内容绝不改写。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261026-3",
+      "topic": "Evals & Observability",
+      "difficulty": "Medium",
+      "title": "The cache hit rate fell from 80% to 10% after a release, and nobody knows which change did it",
+      "title_zh": "一次发布后缓存命中率从 80% 跌到 10%，没人知道是哪个改动造成的",
+      "question": "Your agent platform's dashboard shows that cached input tokens dropped sharply right after Tuesday's release, and the API bill for the support agent went up by half. The release contained 40 commits across the prompt templates, the tool registry and an SDK upgrade.\n\nHow do you find the cause quickly, and how do you catch this before the next release?",
+      "question_zh": "你们 Agent 平台的看板显示，周二发布之后，缓存的输入 token 骤降，客服 Agent 的 API 账单上涨了一半。这次发布包含 40 个提交，涉及提示模板、工具注册表和一次 SDK 升级。\n\n你如何快速找到原因？又如何在下一次发布之前就发现这类问题？",
+      "answer": "**The core idea.** Prompt caching works on an exact prefix: tools, then system, then messages. Any byte that changes in that prefix between requests invalidates everything after it. So the question is not \"which commit\" but \"where do two consecutive requests of the same conversation first differ\". Find that point, and the commit is usually obvious.\n\n**Step 1: confirm with usage fields.** Compare `cache_read_input_tokens` and `cache_creation_input_tokens` per route before and after the release. Reads collapsing while writes stay near the full prompt size on every request means the prefix is being rewritten each time.\n\n**Step 2: locate the divergence.** Two ways:\n\n- Log several consecutive request bodies of one conversation, strip `cache_control` markers, and diff adjacent pairs. The first difference inside the overlapping part is the invalidation point.\n- On the Claude API, enable cache diagnostics (beta `cache-diagnosis-2026-04-07`) on every request and pass the previous response's ID as `diagnostics.previous_message_id`; the response's `diagnostics` names where the two requests diverged: model, system, tools or message history. It must be on for every request, because fingerprints are stored only for requests that carried the header.\n\n**Usual suspects after a release like this.** A timestamp or request ID added to the system prompt; tool definitions serialized in a different order after the SDK or registry change; a tool added or removed per request; a model or effort setting that now differs between turns. Fix by freezing the system prompt, sorting tools deterministically, and moving per-request data after the last cache breakpoint.\n\n**Catch it before release.** Add a test that builds two consecutive requests for a scripted conversation and asserts that the second starts with the first byte for byte, excluding cache markers. Track cache read share per route as a release metric, with an alert when it drops, next to latency and cost per completed task.\n\n**Rule out what a diff cannot show.** Not every drop is a content change. Reads can only land where an earlier request wrote a breakpoint, so moving or removing `cache_control` markers changes what can be read; a prefix shorter than the model's minimum cacheable length silently does not cache; and a single turn that appends many blocks can push the previous cache entry out of the lookback window. If adjacent payloads are identical and reads still collapse, check breakpoint placement and turn shape next.\n\n**Trade-offs.** Logging full request bodies is the most general tool but stores sensitive data, so sample it and redact it; cache diagnostics avoids payload logging but is a beta on one platform. Either way, cache health is a cost and latency property worth monitoring like any other.",
+      "answer_zh": "**核心思路。** 提示缓存基于精确的前缀生效：先是工具，然后是 system，然后是消息。前缀中只要有一个字节在两次请求之间发生变化，它之后的所有内容都会失效。所以问题不是“哪个提交”，而是“同一段对话的两个相邻请求从哪里开始出现差异”。找到这个位置，通常就能一眼看出是哪个提交。\n\n**第一步：用 usage 字段确认。** 按路由比较发布前后的 `cache_read_input_tokens` 和 `cache_creation_input_tokens`。如果读取量骤降，而写入量在每次请求中都接近整个提示的大小，说明前缀每次都被重写了。\n\n**第二步：定位差异点。** 有两种方法：\n\n- 记录同一段对话的几个相邻请求体，去掉 `cache_control` 标记，然后对相邻的两个请求做差异比较。重叠部分中的第一处差异，就是缓存失效的位置。\n- 在 Claude API 上，对每个请求启用缓存诊断（beta `cache-diagnosis-2026-04-07`），并把上一个响应的 ID 作为 `diagnostics.previous_message_id` 传入；响应中的 `diagnostics` 会指出两个请求在哪里出现了分歧：模型、system、工具还是消息历史。它必须对每个请求都开启，因为只有带了这个 header 的请求才会存储指纹。\n\n**这类发布之后的常见元凶。** 在 system prompt 里加入了时间戳或请求 ID；SDK 或工具注册表改动后，工具定义的序列化顺序变了；每次请求都在增删工具；模型或 effort 设置在不同轮次之间不一致了。修复方法是冻结 system prompt、确定性地对工具排序，并把每个请求特有的数据移到最后一个缓存断点之后。\n\n**在发布前发现问题。** 加一个测试：为一段脚本化的对话构造两个相邻请求，断言第二个请求逐字节地以第一个请求开头（不计缓存标记）。把每个路由的缓存读取占比作为发布指标，与延迟和每个完成任务的成本放在一起跟踪，并在它下降时告警。\n\n**排除差异比较看不出的情况。** 并不是每一次下降都是内容变了。读取只能命中之前某个请求写入断点的位置，所以移动或删除 `cache_control` 标记会改变能读到的内容；短于模型最小可缓存长度的前缀会悄无声息地不被缓存；而一个追加了很多块的轮次，可能把上一个缓存条目挤出回溯窗口。如果相邻的请求体完全相同、读取量仍然骤降，下一步就检查断点位置和轮次的结构。\n\n**取舍。** 记录完整的请求体是最通用的手段，但会存储敏感数据，所以要抽样并脱敏；缓存诊断不需要记录请求内容，但它只是某一个平台上的 beta 功能。无论哪种方式，缓存的健康状况都是一项与成本和延迟相关的属性，值得像其他指标一样监控。",
+      "followups": [
+        "Why can a JSON library upgrade break caching without any visible change to the prompt?",
+        "Where should per-request data such as the merchant's local time go instead?"
+      ],
+      "followups_zh": [
+        "为什么一次 JSON 库升级可能在提示没有任何可见变化的情况下破坏缓存？",
+        "像商家本地时间这样每个请求都不同的数据，应该放到哪里？"
+      ],
+      "vocab": [
+        {
+          "en": "cache hit rate",
+          "zh": "缓存命中率"
+        },
+        {
+          "en": "invalidation point",
+          "zh": "失效点"
+        },
+        {
+          "en": "deterministic serialization",
+          "zh": "确定性序列化"
+        },
+        {
+          "en": "cache breakpoint",
+          "zh": "缓存断点"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261026-4",
+      "topic": "Multi-agent",
+      "difficulty": "Senior",
+      "title": "Monthly ad reports for 3,000 merchants: who decides a report is good enough to send?",
+      "title_zh": "为 3,000 家商家生成月度广告报告：由谁来判断一份报告足够好、可以发出？",
+      "question": "Each month an agent writes a performance report per merchant: spend and ROAS by platform, the biggest changes, and three recommendations. Today one model writes it in one pass. About 15% of reports have problems: numbers that do not match the data, missing platforms, or generic recommendations. A human checks a sample, but most reports go out unchecked.\n\nDesign a system that reliably reaches a quality bar, and explain its costs and limits.",
+      "question_zh": "每个月，一个 Agent 为每家商家写一份效果报告：按平台列出花费和 ROAS、最大的变化，以及三条建议。现在由一个模型一次性写完。大约 15% 的报告有问题：数字与数据对不上、漏掉了平台，或者建议空泛。人工会抽查一部分，但大多数报告未经检查就发出去了。\n\n设计一个能可靠达到质量标准的系统，并说明它的成本和局限。",
+      "answer": "**The core idea.** A report is one deliverable with a checkable definition of done, so separate doing from judging. One agent writes; an independent grader, with its own context, scores the draft against explicit criteria and sends back specific gaps; the writer revises. Cheap deterministic checks run first, the model grader judges what code cannot, and humans review what is still uncertain.\n\n**Layer 1: deterministic checks in code.** Every number in the report must come from a tool result: render numbers from a structured data object instead of letting the model type them, then verify that each platform the merchant uses appears and that totals add up. These checks are free, exact and catch the most damaging errors.\n\n**Layer 2: an independent grader with a rubric.** The rubric lists independently gradeable criteria, for example: every recommendation names a specific campaign and a number from this month's data; the largest ROAS change is explained; no recommendation contradicts the merchant's stated goal. Vague criteria such as \"insightful\" make the loop noisy. On Managed Agents, this is what outcomes provide: you send a `user.define_outcome` event with a description and a rubric, and the harness runs iterate, grade, revise until the grader reports `satisfied`, `max_iterations` is reached (default 3, up to 20), or the run fails.\n\n- Keep the grader separate from the writer's context, so it judges the artifact rather than the writer's reasoning.\n- Treat `max_iterations_reached` and `failed` as signals: route those reports to a human instead of sending them.\n- Log the grader's per-criterion results, so you can see which criteria fail most and fix the prompt, the data tools or the rubric.\n\n**Layer 3: humans where they add the most.** Review every report that failed the loop, plus a random sample of passed ones, and compare human verdicts with the grader's. If they disagree often, fix the rubric before trusting it at scale.\n\n**Rolling it out.** Run the new pipeline in shadow mode for one month's reports first: generate both versions, have reviewers compare a sample blind, and measure the first-pass rate, the average number of iterations, cost per sent report and the share routed to humans. Switch merchants over in batches, and keep the old single-pass path as a fallback if the grader or the platform is unavailable on report day.\n\n**Costs and limits.** Each iteration adds a grading pass and often a rewrite, so the cost per report grows with the iteration count; measure the average number of iterations and the share that pass on the first try. A grader can share the writer's blind spots, which is why the deterministic layer and human sampling stay. And this pattern fits deliverables; for a support agent answering a stream of questions, a grader loop per answer is usually too slow and costly.",
+      "answer_zh": "**核心思路。** 一份报告是一个交付物，“完成”的定义可以被检查，所以要把“做”和“评”分开。一个 Agent 负责写；一个拥有独立上下文的评审者对照明确的标准给初稿打分，并反馈具体的差距；写作者再修改。先运行便宜的确定性检查，模型评审只判断代码判断不了的部分，仍然不确定的交给人来审核。\n\n**第一层：在代码中做确定性检查。** 报告中的每个数字都必须来自工具结果：用结构化数据对象来渲染数字，而不是让模型自己打出来，然后校验商家使用的每个平台都出现了、各项合计也对得上。这些检查不花钱、结果精确，而且能抓住危害最大的错误。\n\n**第二层：一个带评分标准的独立评审者。** 评分标准列出可以逐条独立评分的标准，例如：每条建议都指明一个具体的广告活动和本月数据中的一个数字；对 ROAS 变化最大的那一项给出解释；没有任何建议与商家声明的目标相矛盾。“有洞察力”之类模糊的标准会让循环变得嘈杂。在 Managed Agents 上，这正是 outcomes 提供的能力：你发送一个包含描述和评分标准的 `user.define_outcome` 事件，执行框架就会循环执行“迭代、评分、修改”，直到评审者报告 `satisfied`、达到 `max_iterations`（默认 3，最多 20），或者运行失败。\n\n- 让评审者与写作者的上下文分开，这样它评判的是产出物本身，而不是写作者的推理过程。\n- 把 `max_iterations_reached` 和 `failed` 当作信号：把这些报告转给人工处理，而不是直接发出去。\n- 记录评审者对每条标准的评分结果，这样你能看出哪些标准最常不通过，从而修正提示、数据工具或评分标准本身。\n\n**第三层：把人放在最能发挥价值的地方。** 审核每一份未通过循环的报告，再随机抽查一部分通过的报告，并比较人工结论与评审者的结论。如果两者经常不一致，就要先修正评分标准，然后再大规模信任它。\n\n**推进上线。** 先让新流程以影子模式跑一个月的报告：两种版本都生成，让审核人员对抽样进行盲评比较，并测量首次通过率、平均迭代次数、每份已发送报告的成本，以及转给人工的比例。分批把商家切换过去，并保留旧的一次生成流程作为兜底，以防在出报告当天评审者或平台不可用。\n\n**成本与局限。** 每一次迭代都会增加一轮评审，往往还会增加一次重写，所以每份报告的成本随迭代次数增长；要测量平均迭代次数和首次就通过的比例。评审者可能和写作者有同样的盲点，这就是确定性检查层和人工抽查要保留的原因。此外，这种模式适合交付物；对于回答连续问题的客服 Agent，为每个回答都跑一轮评审循环通常太慢、太贵。",
+      "followups": [
+        "How would you write a rubric criterion for \"recommendations are specific\" that two graders would score the same way?",
+        "How do you stop the writer from learning to satisfy the grader rather than the merchant?",
+        "Which parts of this design change if reports must go out within a two-hour window?"
+      ],
+      "followups_zh": [
+        "你会如何把“建议要具体”写成一条两个评审者会给出相同评分的标准？",
+        "你如何防止写作者学会讨好评审者，而不是满足商家？",
+        "如果报告必须在两小时的时间窗口内发出，这个设计的哪些部分需要改变？"
+      ],
+      "vocab": [
+        {
+          "en": "deliverable",
+          "zh": "交付物"
+        },
+        {
+          "en": "rubric",
+          "zh": "评分标准"
+        },
+        {
+          "en": "grader",
+          "zh": "评审者"
+        },
+        {
+          "en": "iteration",
+          "zh": "迭代"
+        },
+        {
+          "en": "Separate doing from judging.",
+          "zh": "把“做”和“评”分开。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261026-5",
+      "topic": "Tools & MCP",
+      "difficulty": "Medium",
+      "title": "Call your MCP server through the Messages API connector, or run your own MCP client?",
+      "title_zh": "通过 Messages API 的连接器调用你的 MCP server，还是自己运行 MCP 客户端？",
+      "question": "Your company runs a remote MCP server with catalog and order tools. A team wants their agent to use it with as little code as possible and adds the server to `mcp_servers` in their Messages API request. The request is rejected as a validation error. Another engineer asks whether the team should run its own MCP client instead.\n\nExplain the error and compare the two approaches.",
+      "question_zh": "你们公司运行着一个提供商品目录和订单工具的远程 MCP server。一个团队希望他们的 Agent 用尽可能少的代码来使用它，于是在 Messages API 请求的 `mcp_servers` 中加入了这个 server。请求因校验错误被拒绝。另一位工程师问，团队是否应该改为自己运行 MCP 客户端。\n\n解释这个错误，并比较这两种做法。",
+      "answer": "**The core idea.** There are two places an MCP connection can live. With the MCP connector, Anthropic connects to your server and runs the tool calls server-side, so you write almost no code. With your own MCP client, your application connects to the server, turns its tools into ordinary tool definitions, and executes each call itself, so you keep full control of every call.\n\n**The validation error.** The connector (beta `mcp-client-2025-11-20`) needs two parameters together: `mcp_servers` with the URL, a name and an optional authorization token, and an `mcp_toolset` entry in `tools` that references the server by the same name. Every server must be referenced by exactly one toolset; listing a server without a toolset is rejected.\n\n```json\n{\n  \"mcp_servers\": [{\"type\": \"url\", \"url\": \"https://mcp.example.com/mcp\",\n                   \"name\": \"catalog\", \"authorization_token\": \"<per-merchant token>\"}],\n  \"tools\": [{\"type\": \"mcp_toolset\", \"mcp_server_name\": \"catalog\",\n             \"default_config\": {\"enabled\": false},\n             \"configs\": {\"search_products\": {\"enabled\": true},\n                         \"get_order\": {\"enabled\": true}}}]\n}\n```\n\nUse the toolset's `default_config` and `configs` as an allowlist: disable everything by default and enable only the tools this agent needs, so a new write tool on the server does not silently become available.\n\n- **Connector strengths.** Little code, no MCP client to maintain, and tool calls do not need a round trip through your application.\n- **Connector limits.** The server must be reachable from Anthropic over the internet; you pass a token per request, so you must mint narrowly scoped, per-merchant tokens; and you cannot intercept an individual call to ask for approval before it runs. MCP tools also cannot be called from programmatic tool calling.\n- **Own client strengths.** The server can stay on your private network, every call passes through your code for approval gates, logging, rate limits and argument checks, and you can mix MCP tools with local tools freely.\n\n**How to choose.** For read-only tools on a server that is already public and authenticated per user, the connector is a good default. For tools that change orders, refunds or ad budgets, or for servers that must stay private, run your own client so each write passes through your approval and audit path. Many teams use both: the connector for read-only knowledge servers, their own client for anything with side effects.\n\n**Trade-offs.** Your own client means more code, an extra hop and connection management you must operate. The connector means trusting the server's tool descriptions and the token's scope completely, because nothing of yours sits between the model and the call. Either way, the MCP server itself must enforce authorization on every call.",
+      "answer_zh": "**核心思路。** MCP 连接可以放在两个地方。使用 MCP 连接器时，由 Anthropic 连接你的 server，并在服务端执行工具调用，你几乎不用写代码。使用你自己的 MCP 客户端时，由你的应用连接 server，把它的工具转换成普通的工具定义，并自己执行每一次调用，这样你能完全掌控每一次调用。\n\n**校验错误。** 连接器（beta `mcp-client-2025-11-20`）需要两个参数一起提供：包含 URL、名称和可选授权 token 的 `mcp_servers`，以及在 `tools` 中按同一个名称引用该 server 的 `mcp_toolset` 条目。每个 server 都必须被恰好一个 toolset 引用；只列出 server 而没有 toolset 会被拒绝。\n\n```json\n{\n  \"mcp_servers\": [{\"type\": \"url\", \"url\": \"https://mcp.example.com/mcp\",\n                   \"name\": \"catalog\", \"authorization_token\": \"<per-merchant token>\"}],\n  \"tools\": [{\"type\": \"mcp_toolset\", \"mcp_server_name\": \"catalog\",\n             \"default_config\": {\"enabled\": false},\n             \"configs\": {\"search_products\": {\"enabled\": true},\n                         \"get_order\": {\"enabled\": true}}}]\n}\n```\n\n把 toolset 的 `default_config` 和 `configs` 当作白名单使用：默认禁用所有工具，只启用这个 Agent 需要的那些，这样 server 上新增的写操作工具就不会悄无声息地变得可用。\n\n- **连接器的优点。** 代码少，不用维护 MCP 客户端，工具调用也不需要经过你的应用来回一趟。\n- **连接器的局限。** server 必须能从互联网上被 Anthropic 访问；每个请求都要传入 token，所以你必须签发范围很窄、按商家划分的 token；而且你无法在某次调用执行之前拦截它、请求审批。MCP 工具也不能通过程序化工具调用来调用。\n- **自建客户端的优点。** server 可以留在你的私有网络中，每一次调用都经过你的代码，可以做审批关卡、日志、限流和参数检查，而且你可以把 MCP 工具和本地工具自由组合。\n\n**如何选择。** 对于部署在已公开、且按用户认证的 server 上的只读工具，连接器是一个不错的默认选择。对于会修改订单、退款或广告预算的工具，或者必须保持私有的 server，就自己运行客户端，让每一次写操作都经过你的审批和审计流程。很多团队两者并用：只读的知识类 server 用连接器，任何有副作用的操作用自己的客户端。\n\n**取舍。** 自建客户端意味着更多代码、多一跳网络，以及需要你自己运维的连接管理。连接器则意味着你要完全信任 server 的工具描述和 token 的权限范围，因为在模型和调用之间没有任何属于你的东西。无论哪种方式，MCP server 本身都必须在每次调用时做授权检查。",
+      "followups": [
+        "How would you scope the authorization token so a leaked token causes minimal damage?",
+        "What should happen when the MCP server adds a new tool that your agent was not designed for?"
+      ],
+      "followups_zh": [
+        "你会如何设定授权 token 的权限范围，让 token 泄露时造成的损失最小？",
+        "当 MCP server 新增了一个你的 Agent 原本没有为之设计的工具时，应该怎么处理？"
+      ],
+      "vocab": [
+        {
+          "en": "MCP connector",
+          "zh": "MCP 连接器"
+        },
+        {
+          "en": "toolset",
+          "zh": "工具集"
+        },
+        {
+          "en": "allowlist",
+          "zh": "白名单"
+        },
+        {
+          "en": "side effect",
+          "zh": "副作用"
+        }
+      ]
+    }
+  ]
+}
