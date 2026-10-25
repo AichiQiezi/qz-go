@@ -1,0 +1,197 @@
+{
+  "date": "2026-10-26",
+  "generatedAt": "2026-10-26T06:44:57+08:00",
+  "questions": [
+    {
+      "id": "20261026-1",
+      "topic": "Go",
+      "difficulty": "Senior",
+      "title": "Every deploy drops a few hundred in-flight requests, although the service calls Shutdown",
+      "title_zh": "每次发布都会丢掉几百个正在处理的请求，尽管服务调用了 Shutdown",
+      "question": "A Go API runs on Kubernetes. On SIGTERM it calls `srv.Shutdown(ctx)` in a goroutine, and `main` ends with `log.Fatal(srv.ListenAndServe())`. Every rolling deploy still causes a burst of 502s at the load balancer and some half-finished product syncs to ad platforms. The team believed `Shutdown` already made this graceful.\n\nFind the bugs and design a correct shutdown sequence.",
+      "question_zh": "一个 Go API 运行在 Kubernetes 上。收到 SIGTERM 时，它在一个 goroutine 里调用 `srv.Shutdown(ctx)`，而 `main` 的最后一行是 `log.Fatal(srv.ListenAndServe())`。每次滚动发布仍然会在负载均衡器上造成一波 502，并留下一些做了一半的商品同步（同步到广告平台）。团队以为 `Shutdown` 已经让这一切变得优雅了。\n\n找出其中的 bug，并设计一个正确的关闭流程。",
+      "answer": "**Bug 1: main exits too early.** When `Shutdown` is called, `ListenAndServe` returns `http.ErrServerClosed` immediately, not when in-flight requests finish. In a local test it returned at once, while `Shutdown` returned about a second later, after the one slow request completed. Here `log.Fatal` then exits the process, killing the requests that `Shutdown` was waiting for. Treat `ErrServerClosed` as normal and make `main` wait for `Shutdown` to return.\n\n**Bug 2: traffic still arrives.** Kubernetes sends SIGTERM and removes the pod from endpoints at roughly the same time, and load balancers and kube-proxy take a moment to notice. `Shutdown` closes the listeners first, so connections that arrive during that window are refused. Fail the readiness probe first, keep serving for a few seconds, and only then call `Shutdown`; a `preStop` sleep achieves the same.\n\n**Bug 3: background work is not covered.** `Shutdown` only waits for HTTP handlers. Goroutines started by handlers, Kafka consumers and sync workers keep running until the process dies. Give them a root context that is cancelled on shutdown, track them with a `sync.WaitGroup`, and make each sync step idempotent so an interrupted one can be retried safely.\n\n```go\nctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)\ndefer stop()\n\ngo func() {\n\tif err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {\n\t\tlog.Fatal(err)\n\t}\n}()\n\n<-ctx.Done()\nready.Store(false)          // readiness probe now fails\ntime.Sleep(drainDelay)      // let load balancers stop sending traffic\n\nshutdownCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)\ndefer cancel()\nif err := srv.Shutdown(shutdownCtx); err != nil {\n\tlog.Printf(\"forced shutdown: %v\", err)\n}\nworkers.Wait()              // background jobs saw ctx.Done() and stopped\n```\n\n**Trade-offs.** The drain delay plus shutdown timeout must fit inside the pod's `terminationGracePeriodSeconds`, or Kubernetes sends SIGKILL anyway. Long requests and streaming connections (SSE, WebSocket) are not tracked by `Shutdown`; use `RegisterOnShutdown` to tell them to close. Longer grace periods make deploys slower; for long jobs, prefer checkpoints and resumable work over very long grace periods.",
+      "answer_zh": "**Bug 1：main 退出得太早。** 调用 `Shutdown` 时，`ListenAndServe` 会立即返回 `http.ErrServerClosed`，而不是等正在处理的请求结束才返回。在本地测试中，它马上就返回了，而 `Shutdown` 在那个慢请求完成后、大约一秒后才返回。在这里，`log.Fatal` 随即让进程退出，杀掉了 `Shutdown` 正在等待的那些请求。应把 `ErrServerClosed` 当作正常情况，并让 `main` 等待 `Shutdown` 返回。\n\n**Bug 2：流量仍在进来。** Kubernetes 发送 SIGTERM 和把 pod 从 endpoints 中移除，几乎是同时发生的，而负载均衡器和 kube-proxy 需要一点时间才能察觉。`Shutdown` 会先关闭监听器，所以在这个时间窗口里到达的连接会被拒绝。应先让就绪探针失败，继续服务几秒钟，然后才调用 `Shutdown`；用 `preStop` 里 sleep 也能达到同样的效果。\n\n**Bug 3：后台工作没有被覆盖。** `Shutdown` 只等待 HTTP 处理函数。由处理函数启动的 goroutine、Kafka 消费者和同步 worker 会一直运行，直到进程被杀死。给它们一个在关闭时会被取消的根 context，用 `sync.WaitGroup` 跟踪它们，并让每个同步步骤幂等，这样被中断的步骤可以安全重试。\n\n```go\nctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)\ndefer stop()\n\ngo func() {\n\tif err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {\n\t\tlog.Fatal(err)\n\t}\n}()\n\n<-ctx.Done()\nready.Store(false)          // readiness probe now fails\ntime.Sleep(drainDelay)      // let load balancers stop sending traffic\n\nshutdownCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)\ndefer cancel()\nif err := srv.Shutdown(shutdownCtx); err != nil {\n\tlog.Printf(\"forced shutdown: %v\", err)\n}\nworkers.Wait()              // background jobs saw ctx.Done() and stopped\n```\n\n**取舍。** 排空延迟加上关闭超时必须在 pod 的 `terminationGracePeriodSeconds` 之内，否则 Kubernetes 还是会发送 SIGKILL。长请求和流式连接（SSE、WebSocket）不会被 `Shutdown` 跟踪；用 `RegisterOnShutdown` 通知它们关闭。更长的宽限期会让发布变慢；对于长时间运行的任务，与其设置很长的宽限期，不如使用检查点和可恢复的工作。",
+      "followups": [
+        "Why does Shutdown not wait for hijacked connections such as WebSockets?",
+        "How would you test graceful shutdown in CI?"
+      ],
+      "followups_zh": [
+        "为什么 Shutdown 不会等待被接管（hijack）的连接，比如 WebSocket？",
+        "你会如何在 CI 中测试优雅关闭？"
+      ],
+      "vocab": [
+        {
+          "en": "graceful shutdown",
+          "zh": "优雅关闭"
+        },
+        {
+          "en": "in-flight request",
+          "zh": "正在处理中的请求"
+        },
+        {
+          "en": "readiness probe",
+          "zh": "就绪探针"
+        },
+        {
+          "en": "drain",
+          "zh": "排空（停止接收新流量并处理完已有请求）"
+        }
+      ]
+    },
+    {
+      "id": "20261026-2",
+      "topic": "System Design",
+      "difficulty": "Hard",
+      "title": "Abandoned-cart emails for 50,000 stores: on time, once, and never after the order",
+      "title_zh": "为 50,000 家店铺发送弃购提醒邮件：准时、只发一次、下单后绝不再发",
+      "question": "Merchants can enable abandoned-cart reminders: an email one hour after a shopper leaves a cart with an email address, and a second one after 24 hours with an optional discount. Today's cron job scans all carts every 10 minutes; it is slow, sometimes sends the same email twice, and sometimes reminds shoppers who already paid.\n\nDesign the system.",
+      "question_zh": "商家可以开启弃购提醒：顾客留下邮箱并放弃购物车一小时后，发送一封邮件；24 小时后再发第二封，可以附带折扣。现在的定时任务每 10 分钟扫描一遍所有购物车；它很慢，有时会把同一封邮件发两次，有时还会提醒已经付过款的顾客。\n\n设计这个系统。",
+      "answer": "**Why the current job fails.** Scanning every cart repeats work that grows with the number of carts, not with the number of reminders due. Two overlapping runs, or a retry after a timeout, both send the same email, because nothing records that a step was already sent. And the paid check happens at scan time, not at send time, so a purchase in between is missed.\n\n**Design.**\n\n- **Schedule from events.** When a cart gets an email and is updated, upsert a row in `cart_reminder(cart_id, step, due_at, status)`. Every update pushes `due_at` forward, so active shoppers are not reminded. Index on `(status, due_at)`.\n- **Claim due work safely.** Workers select due rows with `FOR UPDATE SKIP LOCKED` in small batches and mark them `sending`, so several workers share the load without taking the same row.\n- **Re-check at send time.** Just before sending, check that the cart has no order, the shopper has not unsubscribed, the email is not on the suppression list, and the merchant still has the feature on. Then send.\n- **Send at most once per step.** Use `(cart_id, step)` as the idempotency key with the email provider and as a unique key in a `sent_email` table; a retry finds the existing record and stops.\n- **Respect limits.** Rate-limit per merchant and per provider account, handle bounces and complaints by adding addresses to the suppression list, and avoid sending in the shopper's night if you know their time zone.\n\n**Discount codes.** Generate a single-use code per cart when the second email is sent, with an expiry, so it cannot be shared widely, and link the eventual order back to the reminder for attribution.\n\n**Trade-offs.** A database table with `SKIP LOCKED` is simple and fine for millions of reminders a day; a dedicated delay queue scales further but makes cancellation and re-scheduling harder. Exactly-once delivery of email is impossible: if the provider accepted the message but your process crashed before recording it, you either risk a duplicate or a miss, and the idempotency key at the provider is what makes duplicates rare. Comply with the marketing-consent rules of each market, because these are marketing emails.",
+      "answer_zh": "**现有任务为什么会出问题。** 扫描所有购物车，工作量随购物车总数增长，而不是随到期提醒的数量增长。两次重叠的运行，或者超时后的一次重试，都会发出同一封邮件，因为没有任何地方记录某一步已经发送过。而且“是否已付款”的检查发生在扫描时，而不是发送时，所以中间发生的购买会被漏掉。\n\n**设计。**\n\n- **由事件驱动调度。** 当购物车有了邮箱并发生更新时，在 `cart_reminder(cart_id, step, due_at, status)` 中插入或更新一行。每次更新都把 `due_at` 往后推，这样正在购物的顾客不会被提醒。在 `(status, due_at)` 上建索引。\n- **安全地领取到期任务。** worker 用 `FOR UPDATE SKIP LOCKED` 小批量地选出到期的行，并把它们标记为 `sending`，这样多个 worker 可以分担负载，又不会拿到同一行。\n- **发送时再检查一次。** 就在发送之前，检查购物车还没有订单、顾客没有退订、邮箱不在屏蔽名单上，以及商家仍然开启着这个功能。然后再发送。\n- **每一步最多发送一次。** 用 `(cart_id, step)` 作为发给邮件服务商的幂等键，同时作为 `sent_email` 表中的唯一键；重试时会找到已有记录并停止。\n- **遵守各种限制。** 按商家和按服务商账户限流，处理退信和投诉（把地址加入屏蔽名单），如果知道顾客的时区，就避免在对方的深夜发送。\n\n**折扣码。** 在发送第二封邮件时为每个购物车生成一个一次性的折扣码，并设置过期时间，这样它不会被广泛传播；同时把最终的订单关联回这封提醒，用于归因。\n\n**取舍。** 用数据库表加 `SKIP LOCKED` 很简单，每天几百万条提醒也没问题；专门的延迟队列扩展性更好，但会让取消和重新调度变得更难。邮件不可能做到恰好一次投递：如果服务商已经接收了邮件，而你的进程在记录之前崩溃了，你要么冒重复的风险，要么冒漏发的风险，而发给服务商的幂等键正是让重复变得罕见的手段。由于这些是营销邮件，还要遵守各个市场关于营销同意的规定。",
+      "followups": [
+        "How would you add SMS reminders without duplicating this whole pipeline?",
+        "How do you measure whether the reminders actually increase revenue?",
+        "What changes if a merchant edits the delay while reminders are already scheduled?"
+      ],
+      "followups_zh": [
+        "你会如何加入短信提醒，而不把整个流程再复制一遍？",
+        "你如何衡量这些提醒是否真的提升了收入？",
+        "如果商家在提醒已经排期之后修改了延迟时间，会有什么变化？"
+      ],
+      "vocab": [
+        {
+          "en": "abandoned cart",
+          "zh": "弃购（被放弃的购物车）"
+        },
+        {
+          "en": "suppression list",
+          "zh": "屏蔽名单（不再发送的地址）"
+        },
+        {
+          "en": "idempotency key",
+          "zh": "幂等键"
+        },
+        {
+          "en": "SKIP LOCKED",
+          "zh": "SKIP LOCKED（跳过已被锁定的行）"
+        }
+      ]
+    },
+    {
+      "id": "20261026-3",
+      "topic": "Database",
+      "difficulty": "Medium",
+      "title": "\"Products without ads\" returns nothing, although many products have no ads",
+      "title_zh": "“没有广告的商品”查询返回空，尽管很多商品都没有广告",
+      "question": "A report lists products that are not linked to any ad: `SELECT id FROM product WHERE id NOT IN (SELECT product_id FROM ad_link)`. It worked for months; since a new import started writing some `ad_link` rows with `product_id` set to NULL, the report is always empty.\n\nExplain why and how to write the query correctly.",
+      "question_zh": "一个报表列出没有关联任何广告的商品：`SELECT id FROM product WHERE id NOT IN (SELECT product_id FROM ad_link)`。它正常运行了好几个月；自从一个新的导入任务开始写入一些 `product_id` 为 NULL 的 `ad_link` 行之后，这个报表就一直是空的。\n\n解释原因，以及如何正确地写这个查询。",
+      "answer": "**Why.** SQL uses three-valued logic: comparisons with NULL are neither true nor false but unknown. `x NOT IN (a, b, NULL)` means `x <> a AND x <> b AND x <> NULL`, and `x <> NULL` is unknown, so the whole condition can never be true. A row is returned only when the condition is true, so one NULL in the subquery removes every row. In PostgreSQL 16, `SELECT 3 NOT IN (1, NULL)` returns NULL, and the report query returned 0 rows with one NULL link versus 3 rows without it.\n\n**Fix: use NOT EXISTS.** It asks \"is there a matching row\" for each product, and NULLs simply never match:\n\n```sql\nSELECT p.id\nFROM product p\nWHERE NOT EXISTS (\n  SELECT 1 FROM ad_link a WHERE a.product_id = p.id\n);\n```\n\n- `NOT EXISTS` is also friendlier to the planner: PostgreSQL can run it as an anti-join (here a hash anti join), while `NOT IN` with a subquery is harder to optimize because of the NULL semantics.\n- A `LEFT JOIN ... WHERE a.ad_id IS NULL` gives the same result, as long as you test a column that cannot be NULL in matched rows.\n- Adding `WHERE product_id IS NOT NULL` to the subquery also works, but it is easy to forget in the next query.\n\n**Fix the data too.** A link without a product is meaningless: make `ad_link.product_id` `NOT NULL` with a foreign key to `product`, and fix the import so it rejects or parks rows it cannot match.\n\n**Trade-offs.** `NOT IN` with a short list of constants is fine and readable; the trap is a subquery or column that can contain NULL. A team rule of \"use NOT EXISTS for anti-joins\" plus NOT NULL constraints removes the whole class of bugs.",
+      "answer_zh": "**原因。** SQL 使用三值逻辑：与 NULL 比较的结果既不是真也不是假，而是未知。`x NOT IN (a, b, NULL)` 的意思是 `x <> a AND x <> b AND x <> NULL`，而 `x <> NULL` 是未知，所以整个条件永远不可能为真。只有条件为真时才会返回行，所以子查询中只要有一个 NULL，所有行都会被排除。在 PostgreSQL 16 中，`SELECT 3 NOT IN (1, NULL)` 返回 NULL，而这个报表查询在有一条 NULL 关联时返回 0 行，没有它时返回 3 行。\n\n**修复：使用 NOT EXISTS。** 它针对每个商品询问“是否存在匹配的行”，而 NULL 永远不会匹配：\n\n```sql\nSELECT p.id\nFROM product p\nWHERE NOT EXISTS (\n  SELECT 1 FROM ad_link a WHERE a.product_id = p.id\n);\n```\n\n- `NOT EXISTS` 对查询优化器也更友好：PostgreSQL 可以把它执行为反连接（这里是哈希反连接），而带子查询的 `NOT IN` 因为 NULL 语义更难优化。\n- `LEFT JOIN ... WHERE a.ad_id IS NULL` 也能得到相同的结果，前提是你检查的那一列在匹配到的行中不可能为 NULL。\n- 在子查询中加上 `WHERE product_id IS NOT NULL` 也可行，但在下一个查询里很容易忘掉。\n\n**同时修复数据。** 没有商品的关联是没有意义的：把 `ad_link.product_id` 设为 `NOT NULL`，并加上指向 `product` 的外键，同时修复导入任务，让它拒绝或暂存无法匹配的行。\n\n**取舍。** `NOT IN` 搭配一小串常量是没问题的，也很易读；陷阱在于可能包含 NULL 的子查询或列。团队约定“反连接用 NOT EXISTS”，再加上 NOT NULL 约束，就能消除这一整类 bug。",
+      "followups": [
+        "What does `NULL = NULL` return, and how do you compare nullable columns safely?",
+        "Does `NOT IN` behave the same way in MySQL?"
+      ],
+      "followups_zh": [
+        "`NULL = NULL` 返回什么？如何安全地比较可空列？",
+        "`NOT IN` 在 MySQL 里的行为一样吗？"
+      ],
+      "vocab": [
+        {
+          "en": "three-valued logic",
+          "zh": "三值逻辑"
+        },
+        {
+          "en": "anti-join",
+          "zh": "反连接"
+        },
+        {
+          "en": "nullable column",
+          "zh": "可空列"
+        },
+        {
+          "en": "unknown",
+          "zh": "未知（UNKNOWN）"
+        }
+      ]
+    },
+    {
+      "id": "20261026-4",
+      "topic": "Middleware",
+      "difficulty": "Hard",
+      "title": "Conversion events disappear after a consumer restart, although Kafka still has them",
+      "title_zh": "消费者重启后，转化事件不见了，尽管 Kafka 里它们还在",
+      "question": "A Java service consumes purchase events from Kafka and sends conversions to Meta and Google. To go faster, the poll loop hands each record to a thread pool and immediately polls again. The consumer uses the default automatic offset commits. After a pod is killed during a deploy, about a thousand conversions are never sent, and replaying is hard because the committed offsets are already past them.\n\nExplain the loss and design a consumer that does not lose or badly duplicate conversions.",
+      "question_zh": "一个 Java 服务从 Kafka 消费购买事件，并把转化数据发送给 Meta 和 Google。为了更快，poll 循环把每条记录交给一个线程池，然后立刻再次 poll。消费者使用默认的自动提交 offset。在一次发布中有个 pod 被杀掉之后，大约一千条转化再也没有发送出去，而且很难重放，因为已提交的 offset 已经越过了它们。\n\n解释为什么会丢失，并设计一个不会丢失、也不会大量重复发送转化的消费者。",
+      "answer": "**Why records are lost.** With automatic commits, the consumer periodically commits the offsets of records returned by earlier `poll` calls, regardless of whether your code finished processing them. If processing happens inside the poll loop, that is still at-least-once, because the next poll only happens after the work is done. Here the loop hands records to a thread pool and polls again, so offsets are committed for records that are still queued or in progress. When the pod dies, those records are gone from the consumer's point of view: the committed position is already past them.\n\n**Fix: commit only what is done.** Disable automatic commits (`enable.auto.commit=false`) and commit offsets yourself after processing. With parallel processing, you can only commit up to the lowest offset per partition below which every record is finished, so track completion per partition:\n\n- Simplest: process each batch from `poll` (in parallel if you like), wait for the whole batch, then `commitSync`. A slow record delays the batch, but nothing is lost.\n- For more throughput, keep per-partition ordering by giving each partition its own worker, and commit each partition's highest contiguous finished offset.\n- Pause partitions with `pause()` when the internal queue is full instead of buffering without limit, and keep polling so the consumer is not considered dead.\n- Commit in the rebalance callback when partitions are revoked, after finishing or abandoning in-flight work for them.\n\n**Make duplicates harmless.** At-least-once means a record can be processed twice after a crash between sending and committing. Send each conversion with a stable event ID; ad platforms' conversion APIs use such an ID to deduplicate events, and you can also record sent IDs in your own table to skip repeats.\n\n**Trade-offs.** Manual commits add code and a little latency, and batch-wide waiting reduces parallelism, but losing conversions costs merchants money and is invisible until they compare reports. Kafka transactions give exactly-once only for Kafka-to-Kafka pipelines; for calls to external APIs, at-least-once plus idempotent receivers is the practical answer.",
+      "answer_zh": "**为什么记录会丢失。** 在自动提交模式下，消费者会定期提交之前 `poll` 调用返回的那些记录的 offset，不管你的代码有没有处理完它们。如果处理是在 poll 循环内部完成的，那仍然是至少一次，因为只有工作完成后才会进行下一次 poll。而这里，循环把记录交给线程池后马上再次 poll，于是还在排队或正在处理的记录的 offset 也被提交了。pod 一死，从消费者的角度看，这些记录就没了：已提交的位置已经越过了它们。\n\n**修复：只提交已完成的部分。** 关闭自动提交（`enable.auto.commit=false`），在处理完成后自己提交 offset。在并行处理的情况下，每个分区只能提交到这样一个位置：在它之前的所有记录都已处理完毕，所以要按分区跟踪完成情况：\n\n- 最简单的做法：处理 `poll` 返回的每一批（愿意的话可以并行），等整批完成，再 `commitSync`。一条慢记录会拖慢整批，但不会丢失任何东西。\n- 如果需要更高吞吐量，给每个分区分配自己的 worker 以保持分区内的顺序，并提交每个分区中连续完成的最高 offset。\n- 内部队列满了时，用 `pause()` 暂停分区，而不是无限制地缓存；同时继续 poll，以免消费者被判定为失效。\n- 在分区被收回时的再均衡回调中提交 offset，在此之前先处理完或放弃这些分区上正在处理的工作。\n\n**让重复变得无害。** 至少一次意味着，如果在发送之后、提交之前崩溃，一条记录可能被处理两次。给每条转化带上一个稳定的事件 ID；广告平台的转化 API 会用这类 ID 对事件去重，你也可以在自己的表中记录已发送的 ID，以跳过重复。\n\n**取舍。** 手动提交会增加代码量和一点延迟，整批等待也会降低并行度，但丢失转化会让商家损失真金白银，而且在他们对比报表之前根本看不出来。Kafka 事务只在 Kafka 到 Kafka 的管道中提供恰好一次；对于调用外部 API 的场景，至少一次加上幂等的接收方才是务实的方案。",
+      "followups": [
+        "Why can one slow record block commits for a whole partition?",
+        "How would you replay conversions for a time range after an incident?"
+      ],
+      "followups_zh": [
+        "为什么一条慢记录会阻塞整个分区的提交？",
+        "事故之后，你会如何重放某个时间范围内的转化？"
+      ],
+      "vocab": [
+        {
+          "en": "offset commit",
+          "zh": "offset 提交"
+        },
+        {
+          "en": "at-least-once",
+          "zh": "至少一次"
+        },
+        {
+          "en": "rebalance",
+          "zh": "再均衡"
+        },
+        {
+          "en": "backpressure",
+          "zh": "背压"
+        },
+        {
+          "en": "deduplication",
+          "zh": "去重"
+        }
+      ]
+    },
+    {
+      "id": "20261026-5",
+      "topic": "Java & CS",
+      "difficulty": "Medium",
+      "title": "Order dates in a report are sometimes wrong, and parsing occasionally throws odd exceptions",
+      "title_zh": "报表中的订单日期有时是错的，解析偶尔还会抛出奇怪的异常",
+      "question": "A report service has `private static final SimpleDateFormat FMT = new SimpleDateFormat(\"yyyy-MM-dd\")` and uses it from many request threads to parse and format order dates. Under load, a few rows show the wrong date, and logs contain `NumberFormatException` and `ArrayIndexOutOfBoundsException` from inside the JDK.\n\nExplain the cause and the fix.",
+      "question_zh": "一个报表服务中有 `private static final SimpleDateFormat FMT = new SimpleDateFormat(\"yyyy-MM-dd\")`，许多请求线程都用它来解析和格式化订单日期。在高负载下，少数几行显示了错误的日期，日志里还出现了来自 JDK 内部的 `NumberFormatException` 和 `ArrayIndexOutOfBoundsException`。\n\n解释原因和修复方法。",
+      "answer": "**Cause.** `SimpleDateFormat` is not thread-safe: it keeps a mutable `Calendar` and parsing state inside the object, and every `parse` and `format` call changes them. When two threads use the same instance, they overwrite each other's intermediate state. In a local test with 8 threads and 20,000 round trips, thousands of results came back wrong (for example `2026-02-18` became `2026-03-19`), and both exceptions above appeared. Making it `static final` only makes the reference constant, not the object.\n\n**Fix: use java.time.** `DateTimeFormatter` is immutable and thread-safe, so one shared instance is fine, and the `java.time` types are clearer about what a value means:\n\n```java\nprivate static final DateTimeFormatter DAY = DateTimeFormatter.ISO_LOCAL_DATE;\n\nLocalDate day = LocalDate.parse(\"2026-10-26\", DAY);\nString text = day.format(DAY);\n\n// an order timestamp shown in the merchant's time zone\nString shown = order.createdAt()                 // Instant\n    .atZone(ZoneId.of(merchant.timeZone()))\n    .toLocalDate()\n    .format(DAY);\n```\n\n- If you must keep legacy `Date` APIs, use a `ThreadLocal<SimpleDateFormat>` or create a new instance per call; both are correct, the second is simpler.\n- Do not synchronize on a shared instance in a hot path; it is correct but serializes all report threads.\n- Choose types deliberately: `Instant` for moments in time, `LocalDate` for calendar days, and convert with an explicit `ZoneId`, so a report does not depend on the server's default time zone.\n\n**Trade-offs.** Migrating to `java.time` touches mappers and APIs, but it removes this whole class of bugs and makes time-zone handling explicit. Static analysis can flag shared `SimpleDateFormat` fields, and a small concurrent test like the one above reproduces the problem quickly.",
+      "answer_zh": "**原因。** `SimpleDateFormat` 不是线程安全的：它在对象内部保存了一个可变的 `Calendar` 和解析状态，每次调用 `parse` 和 `format` 都会修改它们。两个线程使用同一个实例时，会互相覆盖对方的中间状态。在本地用 8 个线程、20,000 次往返转换测试时，有几千个结果是错的（例如 `2026-02-18` 变成了 `2026-03-19`），上面那两种异常也都出现了。把它声明为 `static final` 只是让引用不可变，并没有让对象不可变。\n\n**修复：使用 java.time。** `DateTimeFormatter` 是不可变且线程安全的，所以共享一个实例没有问题，而且 `java.time` 的类型能更清楚地表达一个值的含义：\n\n```java\nprivate static final DateTimeFormatter DAY = DateTimeFormatter.ISO_LOCAL_DATE;\n\nLocalDate day = LocalDate.parse(\"2026-10-26\", DAY);\nString text = day.format(DAY);\n\n// an order timestamp shown in the merchant's time zone\nString shown = order.createdAt()                 // Instant\n    .atZone(ZoneId.of(merchant.timeZone()))\n    .toLocalDate()\n    .format(DAY);\n```\n\n- 如果必须保留旧的 `Date` API，就使用 `ThreadLocal<SimpleDateFormat>`，或者每次调用都新建一个实例；两者都正确，后者更简单。\n- 不要在热点路径上对共享实例加同步；这样虽然正确，但会让所有报表线程串行执行。\n- 有意识地选择类型：`Instant` 表示时间点，`LocalDate` 表示日历日，并用明确的 `ZoneId` 转换，这样报表就不会依赖服务器的默认时区。\n\n**取舍。** 迁移到 `java.time` 会涉及映射层和接口，但它能消除这一整类 bug，并让时区处理变得明确。静态分析工具可以标记出共享的 `SimpleDateFormat` 字段，而像上面那样的一个小并发测试就能很快复现这个问题。",
+      "followups": [
+        "Why is a ThreadLocal formatter risky in a thread pool, and when is it still acceptable?",
+        "Which other common JDK classes are not thread-safe?"
+      ],
+      "followups_zh": [
+        "为什么在线程池中使用 ThreadLocal 格式化器有风险？什么时候仍然可以接受？",
+        "还有哪些常用的 JDK 类不是线程安全的？"
+      ],
+      "vocab": [
+        {
+          "en": "thread-safe",
+          "zh": "线程安全"
+        },
+        {
+          "en": "mutable state",
+          "zh": "可变状态"
+        },
+        {
+          "en": "immutable",
+          "zh": "不可变"
+        },
+        {
+          "en": "time zone",
+          "zh": "时区"
+        }
+      ]
+    }
+  ]
+}

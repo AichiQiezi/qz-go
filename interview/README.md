@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 14 天、70 道题。
+共 15 天、75 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-10-26](days/2026-10-26.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Senior | [Every deploy drops a few hundred in-flight requests, although the service calls Shutdown](days/2026-10-26.md#q1) | 每次发布都会丢掉几百个正在处理的请求，尽管服务调用了 Shutdown |
+| 2 | System Design | Hard | [Abandoned-cart emails for 50,000 stores: on time, once, and never after the order](days/2026-10-26.md#q2) | 为 50,000 家店铺发送弃购提醒邮件：准时、只发一次、下单后绝不再发 |
+| 3 | Database | Medium | ["Products without ads" returns nothing, although many products have no ads](days/2026-10-26.md#q3) | “没有广告的商品”查询返回空，尽管很多商品都没有广告 |
+| 4 | Middleware | Hard | [Conversion events disappear after a consumer restart, although Kafka still has them](days/2026-10-26.md#q4) | 消费者重启后，转化事件不见了，尽管 Kafka 里它们还在 |
+| 5 | Java & CS | Medium | [Order dates in a report are sometimes wrong, and parsing occasionally throws odd exceptions](days/2026-10-26.md#q5) | 报表中的订单日期有时是错的，解析偶尔还会抛出奇怪的异常 |
 
 ## [2026-10-25](days/2026-10-25.md)
 
