@@ -1,0 +1,213 @@
+{
+  "id": "daily-2026-10-27",
+  "order": 20261027,
+  "kind": "daily",
+  "title": "Daily set · Oct 27",
+  "title_zh": "每日新题 · 10 月 27 日",
+  "summary": "Five new agent questions: handling refusals and fallbacks in a batch loop, keeping a Q&A agent from delegating every question, referencing large documents by file ID, running a nightly audit agent per merchant on a managed platform, and why retrieving more chunks can make answers worse.",
+  "summary_zh": "五道新的 Agent 题：在批处理循环中处理 refusal 与 fallback、避免问答 Agent 把每个问题都委派出去、按文件 ID 引用大文档、在托管平台上为每家商家运行夜间审计 Agent，以及为什么检索更多片段反而会让回答变差。",
+  "generatedAt": "2026-10-27T06:55:20+08:00",
+  "questions": [
+    {
+      "id": "agent-daily-20261027-1",
+      "topic": "Agent Loop",
+      "difficulty": "Hard",
+      "title": "The listing agent crashes on supplement products: content is empty and stop_reason is \"refusal\"",
+      "title_zh": "商品文案 Agent 在保健品上崩溃：content 为空，stop_reason 是“refusal”",
+      "question": "A nightly agent writes listings for a merchant's catalog. For a few products (sports supplements, a lab kit, a security camera) the loop crashes with an index-out-of-range error when it reads `content[0]`. Logs show HTTP 200 with `stop_reason: \"refusal\"`. Sometimes there is partial text, sometimes nothing. The batch then stops and the remaining 2,000 products are not processed.\n\nExplain what a refusal is in the API and how the loop should handle it.",
+      "question_zh": "一个夜间 Agent 为商家的商品目录撰写商品文案。对少数几个商品（运动补剂、一个实验检测套件、一个安防摄像头），循环在读取 `content[0]` 时因索引越界而崩溃。日志显示 HTTP 200，`stop_reason: \"refusal\"`。有时有部分文本，有时什么都没有。随后整个批次停止，剩下的 2,000 个商品没有被处理。\n\n解释 API 中的 refusal 是什么，以及循环应该如何处理它。",
+      "answer": "**The core idea.** A refusal is a normal outcome, not an error: the request succeeded, but the model or a safety classifier declined it. So the loop must check why generation stopped before it reads any content, treat a refusal as \"this item needs another path\", and keep processing the other items.\n\n**Mechanism.** On newer models, safety classifiers can decline a request. The response is HTTP 200 with `stop_reason: \"refusal\"` and a `stop_details` object whose `category` (for example `cyber` or `bio`) says which kind of decline it was; it may also be null. A classifier can fire before any output, giving an empty `content` array, or mid-stream after partial output, which is billed normally and must be discarded, not published. Branch on `stop_reason`, never on `stop_details`, which is only informational.\n\n```go\nswitch resp.StopReason {\ncase anthropic.StopReasonRefusal:\n\t// partial text from a mid-stream refusal is not an answer\n\treturn markForReview(item, resp.StopDetails.Category)\ncase anthropic.StopReasonMaxTokens:\n\treturn retryWithLargerLimit(item)\n}\n// only now read resp.Content\n```\n\n**Recover with fallbacks.** On the Claude API you can opt into server-side fallbacks: with the `server-side-fallback-2026-07-01` beta and `fallbacks: \"default\"`, a policy decline is re-run on a recommended fallback model chosen by refusal category, inside the same call. Details that matter in a loop:\n\n- Fallbacks trigger only on policy declines. Rate limits, overloads and server errors are returned as they are, so keep your normal retry logic.\n- A `stop_reason: \"refusal\"` on the final response means the whole chain declined. The `usage.iterations` entries show which models ran and are the source of truth for billing.\n- The fallback model cannot read the original model's thinking blocks, so it continues without that reasoning; after a mid-output fallback, follow the documented rules for which blocks to echo back.\n- On providers without server-side fallbacks, the SDKs offer a client-side middleware for the same pattern.\n\n**Design the batch around it.** Process items independently, record each item's outcome (done, refused with category, failed), and continue. Send refused items to a review queue with the category, and look at patterns: many refusals on one product type may mean the prompt or product data reads like something it is not, such as dosage instructions written as medical advice.\n\n**Trade-offs.** Fallbacks keep the pipeline moving, but the fallback model may write differently and costs differ, so track which model served each listing. Retrying the same prompt on the same model is not a fix. And do not try to word prompts to slip past a classifier; fix the data, route to review, or accept that some items need a human.",
+      "answer_zh": "**核心思路。** refusal 是一种正常的结果，而不是错误：请求本身成功了，但模型或安全分类器拒绝了它。所以循环在读取任何内容之前，必须先检查生成为什么停止，把 refusal 当作“这个条目需要走另一条路径”，并继续处理其他条目。\n\n**机制。** 在较新的模型上，安全分类器可能会拒绝一个请求。响应是 HTTP 200，带有 `stop_reason: \"refusal\"` 和一个 `stop_details` 对象，其中的 `category`（例如 `cyber` 或 `bio`）说明是哪一类拒绝；它也可能为 null。分类器可能在任何输出之前触发，此时 `content` 数组为空；也可能在流式输出中途、已经产生部分输出之后触发，这部分照常计费，必须丢弃，不能发布。要根据 `stop_reason` 分支，绝不根据 `stop_details` 分支，后者只是参考信息。\n\n```go\nswitch resp.StopReason {\ncase anthropic.StopReasonRefusal:\n\t// partial text from a mid-stream refusal is not an answer\n\treturn markForReview(item, resp.StopDetails.Category)\ncase anthropic.StopReasonMaxTokens:\n\treturn retryWithLargerLimit(item)\n}\n// only now read resp.Content\n```\n\n**用 fallback 恢复。** 在 Claude API 上，你可以选择开启服务端 fallback：使用 `server-side-fallback-2026-07-01` beta 并设置 `fallbacks: \"default\"`，一次策略性拒绝会在同一次调用中，用根据拒绝类别选出的推荐 fallback 模型重新执行。在循环中需要注意的细节：\n\n- fallback 只在策略性拒绝时触发。限流、过载和服务器错误会原样返回，所以要保留你原有的重试逻辑。\n- 最终响应上的 `stop_reason: \"refusal\"` 意味着整条链都拒绝了。`usage.iterations` 中的条目显示了哪些模型运行过，并且是计费的依据。\n- fallback 模型读不了原模型的思考块，所以它会在没有那部分推理的情况下继续；在输出中途发生 fallback 之后，要按照文档规定的规则决定哪些块需要回传。\n- 在不支持服务端 fallback 的平台上，SDK 提供了实现同样模式的客户端中间件。\n\n**围绕它来设计批处理。** 各个条目独立处理，记录每个条目的结果（完成、因某类别被拒、失败），然后继续。把被拒的条目连同类别一起送进审核队列，并观察规律：某类商品频繁被拒，可能意味着提示或商品数据读起来像别的东西，比如把用量说明写得像医疗建议。\n\n**取舍。** fallback 能让流水线继续运转，但 fallback 模型的写作风格可能不同，成本也不同，所以要记录每条文案是由哪个模型生成的。在同一个模型上用同样的提示重试并不能解决问题。也不要试图通过措辞绕过分类器；应该修正数据、转入审核，或者接受某些条目需要人工处理。",
+      "followups": [
+        "Why is a refusal returned as HTTP 200 instead of an error status?",
+        "How would you measure the refusal rate per category after a model upgrade?",
+        "What should happen to a listing whose text was partly streamed before a refusal?"
+      ],
+      "followups_zh": [
+        "为什么 refusal 以 HTTP 200 返回，而不是错误状态码？",
+        "模型升级之后，你会如何按类别测量拒绝率？",
+        "如果一条文案在被拒绝之前已经流式输出了一部分，应该如何处理？"
+      ],
+      "vocab": [
+        {
+          "en": "refusal",
+          "zh": "拒绝（refusal）"
+        },
+        {
+          "en": "safety classifier",
+          "zh": "安全分类器"
+        },
+        {
+          "en": "fallback model",
+          "zh": "后备模型（fallback）"
+        },
+        {
+          "en": "review queue",
+          "zh": "审核队列"
+        },
+        {
+          "en": "Check why it stopped before reading what it said.",
+          "zh": "先查明它为什么停止，再读它说了什么。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261027-2",
+      "topic": "Multi-agent",
+      "difficulty": "Medium",
+      "title": "The support agent starts a team of subagents to answer \"where is my order?\"",
+      "title_zh": "客服 Agent 为回答“我的订单到哪了？”拉起了一整队子 Agent",
+      "question": "Your team moved the merchant support assistant to a managed multi-agent setup, with subagents and dynamic workflows enabled and a system prompt that says \"use your team for best accuracy\". Simple questions now take much longer and cost several times more, because the assistant often delegates the question to copies of itself and then checks their answers.\n\nWhat went wrong, and when does a multi-agent setup actually help?",
+      "question_zh": "你们团队把商家客服助手迁移到了一个托管的多 Agent 配置上，开启了子 Agent 和动态工作流，system prompt 写着“利用你的团队以获得最佳准确率”。现在简单的问题要花更长时间、成本高出好几倍，因为助手经常把问题委派给自己的副本，然后再去核对它们的答案。\n\n问题出在哪里？多 Agent 配置什么时候才真正有帮助？",
+      "answer": "**The core idea.** Delegation pays off when work splits into independent pieces, or when reading would flood one context. A support agent answers one question at a time; splitting that answer across agents, or having agents re-check or vote on it, multiplies cost and latency without adding information. The fix is to give the agent a clear rule for when to delegate, and to turn delegation off where it does not fit.\n\n**Why the prompt made it worse.** \"Use your team for best accuracy\" tells the model that delegation is always good. Anthropic's guidance for managed multi-agent sessions says the opposite for agents that answer one question at a time: no roster of extra solvers, checkers or voters, and no client-side second pass that re-asks or re-grades the answer, however much the request stresses accuracy. For accuracy, give the agent the right documents and tools and tell it to check its own work before replying.\n\n**The fix.**\n\n- For the Q&A assistant, disable workflows and keep a single agent. Fast tools (order lookup, shipment tracking, policy search) do more for accuracy than extra agents.\n- A cheap check in code is fine, for example confirming that a quoted tracking number appears in the tool result, with a few retries at most in the same session.\n- Keep multi-agent for jobs that fan out: \"audit all 300 campaigns\" or \"compare our catalog with five marketplaces\". There, a lead plans and synthesizes, and a cheaper worker model does the reading in parallel threads.\n- Where delegation is on, make the system prompt conditional: say which kinds of tasks start a workflow run and which the agent does itself, never \"always\".\n\n**See it in your traces.** Record, per answer, how many threads or workflow runs the session started, the tokens each used, and the end-to-end latency. For a Q&A route the expected number of delegations is zero, so alert when it is not, and compare cost per resolved question before and after any change to the agent's configuration or prompt.\n\n**Trade-offs.** One agent per question is cheaper and faster, but a rare hard case gets no second opinion; handle those with escalation to a human rather than a standing panel of agents. Fan-out jobs gain a lot from parallel workers, but every thread costs tokens, so set a session budget and measure cost per completed task before and after.",
+      "answer_zh": "**核心思路。** 当工作能拆成彼此独立的部分，或者阅读量会把单个上下文塞满时，委派才划算。客服 Agent 一次只回答一个问题；把这个回答拆给多个 Agent，或者让多个 Agent 复核、投票，只会让成本和延迟成倍增加，而不会带来新的信息。修复方法是给 Agent 一条清楚的委派规则，并在不适合的地方关闭委派。\n\n**为什么提示让情况更糟。** “利用你的团队以获得最佳准确率”在告诉模型：委派总是好的。Anthropic 关于托管多 Agent 会话的指南，对一次回答一个问题的 Agent 给出的恰恰相反：不要有额外的解答者、核查者或投票者组成的阵容，也不要在客户端再做一轮重新提问或重新评分，无论请求多么强调准确性。要提高准确性，应给 Agent 合适的文档和工具，并让它在回复前检查自己的工作。\n\n**修复方法。**\n\n- 对于问答助手，关闭工作流，保持单个 Agent。快速的工具（订单查询、物流跟踪、政策检索）对准确性的帮助比多几个 Agent 更大。\n- 在代码里做廉价的检查是可以的，例如确认引用的物流单号确实出现在工具结果中，并且最多在同一会话中重试几次。\n- 把多 Agent 留给能展开的任务：“审计全部 300 个广告活动”或“把我们的商品目录与五个电商平台做对比”。在那些场景中，由主 Agent 规划和综合，由更便宜的工作模型在并行线程中完成阅读。\n- 在开启委派的地方，让 system prompt 有条件：说明哪类任务要启动工作流、哪类任务由 Agent 自己完成，绝不写“总是”。\n\n**在链路追踪中看见它。** 针对每个回答，记录会话启动了多少个线程或工作流、每个用了多少 token，以及端到端延迟。对于问答路由，预期的委派次数是零，所以一旦不是零就告警；并在每次修改 Agent 的配置或提示前后，比较每个已解决问题的成本。\n\n**取舍。** 每个问题一个 Agent 更便宜、更快，但少见的疑难问题就得不到第二意见；对这些问题，应升级给人工处理，而不是常设一个 Agent 小组。可展开的任务能从并行工作者中获益良多，但每个线程都要消耗 token，所以要设置会话预算，并在改动前后测量每个完成任务的成本。",
+      "followups": [
+        "How would you detect in production that an agent delegates too often?",
+        "Which tasks in a cross-border e-commerce SaaS are good fits for a lead with workers?"
+      ],
+      "followups_zh": [
+        "你会如何在生产环境中发现一个 Agent 委派得过于频繁？",
+        "在跨境电商 SaaS 中，哪些任务适合“主 Agent 加工作者”的模式？"
+      ],
+      "vocab": [
+        {
+          "en": "delegation",
+          "zh": "委派"
+        },
+        {
+          "en": "fan-out",
+          "zh": "展开（把工作分发给多个执行者）"
+        },
+        {
+          "en": "roster",
+          "zh": "阵容（可调用的 Agent 列表）"
+        },
+        {
+          "en": "escalation",
+          "zh": "升级（转人工）"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261027-3",
+      "topic": "Context & Memory",
+      "difficulty": "Medium",
+      "title": "A 40 MB supplier catalog is re-sent on every turn, and requests start failing",
+      "title_zh": "一份 40 MB 的供应商目录在每一轮都被重新发送，请求开始失败",
+      "question": "A sourcing assistant helps merchants compare a supplier's PDF catalog with their own products. The backend downloads the PDF from a signed URL and sends it as base64 in the first user message, and the whole history is sent again on every turn. Small catalogs work; a 40 MB catalog fails immediately, and with mid-sized ones every turn is slow and expensive. A teammate proposes passing the signed URL instead, but the URL rotates and the supplier sometimes replaces the file.\n\nHow should documents that are used across many turns be handled?",
+      "question_zh": "一个采购助手帮助商家把供应商的 PDF 目录与自己的商品进行对比。后端从一个签名 URL 下载 PDF，以 base64 的形式放进第一条用户消息里，之后每一轮都会把整段历史重新发送。小的目录没问题；一份 40 MB 的目录立刻失败，中等大小的目录则让每一轮都又慢又贵。一位同事提议改为传签名 URL，但这个 URL 会轮换，而且供应商有时会替换文件。\n\n在多轮对话中反复使用的文档，应该如何处理？",
+      "answer": "**The core idea.** A document the agent keeps referring to should be uploaded once and referenced by ID, so the conversation carries a small, stable pointer instead of megabytes of base64. Stability matters twice: for request size, and because both prompt caching and the newer models' thinking-block checks depend on earlier turns staying byte-for-byte the same.\n\n**Why it fails.** PDF input has limits: 32 MB per request and 600 pages (100 pages for models with a 200K context). Base64 also inflates the payload, so a 40 MB file cannot fit at all. For smaller files, every turn re-sends and re-processes the whole document unless the prefix is cached.\n\n**Fix: the Files API.** Upload the file once (the Files API is generally available, no beta header) and reference it in the message as a document block with `source: {\"type\": \"file\", \"file_id\": ...}`. The block type must match the file's type: `document` for PDF and text, `image` for images. Then put a cache breakpoint after the document, so later turns read it from the cache.\n\n- **URLs across turns.** A rotating signed URL that serves the same bytes is fine, but if the supplier replaces the file, an earlier turn now means different content, which breaks caching and, on the newest models, invalidates later thinking blocks. A `file_id` pins the bytes the conversation was about.\n- **New version of the catalog.** Upload it as a new file and say so in a new message (\"the supplier sent an updated catalog\"), instead of swapping the old reference in place.\n- **Too big for one request.** Split very large catalogs by page range or section into several files, or extract the product tables to structured data and let the agent query them with a tool.\n\n**What it does and does not save.** A `file_id` removes the upload from every request and keeps the prefix identical, but the model still reads the document as input tokens on each turn. Caching is what makes those repeated reads cheap, so check `cache_read_input_tokens` on the second turn. For long sessions over a huge catalog, answering from extracted, queryable data is usually cheaper than re-reading the PDF at all.\n\n**Trade-offs.** Uploaded files are stored data: decide retention, delete files you no longer need, and keep supplier documents scoped to the merchant who uploaded them. Extracting tables to structured data costs engineering time but makes questions like \"which items are cheaper than ours\" exact instead of approximate.",
+      "answer_zh": "**核心思路。** Agent 会反复引用的文档，应该只上传一次并按 ID 引用，这样对话中携带的是一个小而稳定的指针，而不是几兆字节的 base64。稳定性在两方面都很重要：一是请求大小，二是提示缓存和较新模型的思考块检查都依赖于早先的轮次逐字节保持不变。\n\n**为什么会失败。** PDF 输入有上限：每个请求 32 MB、600 页（200K 上下文的模型为 100 页）。base64 还会让负载膨胀，所以一个 40 MB 的文件根本放不下。对于较小的文件，除非前缀被缓存，否则每一轮都会重新发送、重新处理整份文档。\n\n**修复：使用 Files API。** 把文件上传一次（Files API 已正式发布，不需要 beta header），然后在消息中以文档块的形式引用它，即 `source: {\"type\": \"file\", \"file_id\": ...}`。块的类型必须与文件类型匹配：PDF 和文本用 `document`，图片用 `image`。再在文档之后放一个缓存断点，这样后续轮次就能从缓存中读取它。\n\n- **跨轮次的 URL。** 轮换但返回相同字节的签名 URL 没有问题；但如果供应商替换了文件，早先的轮次就代表了不同的内容，这会破坏缓存，并且在最新模型上会使后续的思考块失效。`file_id` 则固定住了这段对话所讨论的那份字节内容。\n- **目录的新版本。** 把它作为一个新文件上传，并在一条新消息中说明（“供应商发来了更新后的目录”），而不是原地替换旧的引用。\n- **单个请求放不下。** 把超大的目录按页码范围或章节拆成多个文件，或者把商品表格提取成结构化数据，让 Agent 用工具去查询。\n\n**它能省下什么、省不下什么。** `file_id` 让每个请求不再携带上传内容，并让前缀保持一致，但模型在每一轮仍然要把这份文档当作输入 token 来读取。让这些重复读取变便宜的是缓存，所以要在第二轮检查 `cache_read_input_tokens`。对于针对超大目录的长会话，基于提取出来、可查询的数据来回答，通常比反复阅读 PDF 更便宜。\n\n**取舍。** 上传的文件属于存储数据：要确定保留期限，删除不再需要的文件，并让供应商文档只对上传它的商家可见。把表格提取成结构化数据要花工程时间，但能让“哪些商品比我们的便宜”这类问题从近似变得精确。",
+      "followups": [
+        "Where would you put the cache breakpoint in a conversation that starts with a large document?",
+        "How would you keep one merchant from referencing another merchant's uploaded file?"
+      ],
+      "followups_zh": [
+        "在一段以大文档开头的对话中，你会把缓存断点放在哪里？",
+        "你会如何防止一个商家引用另一个商家上传的文件？"
+      ],
+      "vocab": [
+        {
+          "en": "Files API",
+          "zh": "Files API（文件接口）"
+        },
+        {
+          "en": "file reference",
+          "zh": "文件引用"
+        },
+        {
+          "en": "signed URL",
+          "zh": "签名 URL"
+        },
+        {
+          "en": "payload size",
+          "zh": "负载大小"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261027-4",
+      "topic": "Production",
+      "difficulty": "Senior",
+      "title": "Running a nightly ad-audit agent for 2,000 merchants on a managed agent platform",
+      "title_zh": "在托管 Agent 平台上为 2,000 家商家运行夜间广告审计 Agent",
+      "question": "Every night, an agent should audit each merchant's ad accounts on Meta and Google: find wasted spend, broken tracking and disapproved ads, then write a short report and open tickets for fixes. You plan to use a managed agent platform with scheduled runs instead of your own cron and agent loop.\n\nDesign the system: scheduling, credentials, cost control, output quality and operations.",
+      "question_zh": "每天夜里，一个 Agent 要为每家商家审计他们在 Meta 和 Google 上的广告账户：找出浪费的花费、失效的追踪和被拒登的广告，然后写一份简短报告，并为需要修复的问题建工单。你们计划使用一个支持定时运行的托管 Agent 平台，而不是自己写 cron 和 Agent 循环。\n\n设计这个系统：调度、凭证、成本控制、输出质量和运维。",
+      "answer": "**The core idea.** Treat each merchant's audit as an isolated, budgeted, observable job. The platform runs the loop and the sandbox; your design decides how runs are started, what each run can reach, how much it may spend, how you know the output is good, and what happens when something fails at 3 a.m.\n\n**Scheduling.** On Anthropic's Managed Agents, a scheduled deployment bundles the agent, the environment, optional resources such as vaults and files, a cron schedule with a time zone, and the initial events that start each run; each firing creates a session and a run record. Two shapes: one deployment per merchant, which gives isolation, per-merchant schedules in local time and easy pausing, but 2,000 objects to manage from code; or a few deployments per region whose run delegates per-merchant work. For audits with strict data separation, per-merchant runs are easier to reason about.\n\n**Credentials and reach.** Store each merchant's ad-platform credentials in a vault as environment-variable credentials: the platform substitutes them at egress, so the secret never appears inside the sandbox where the model or a script could print it. Use limited networking with `allowed_hosts` listing only the ad-platform APIs and your ticket API, and give the agent read-only scopes where the audit does not need writes.\n\n- **Cost control.** Set a session budget on each run: a hard cap on list-price spend that pauses the session with `stop_reason: budget_reached` instead of killing it, so you can inspect, raise or remove the cap. Alert on runs that hit it.\n- **Output quality.** The report is a deliverable, so start runs with an outcome and a rubric (every finding cites an account, a campaign and a number; no recommendation without evidence), and let the grader iterate. Ticket creation changes outside systems, so gate it: create tickets only for findings above a threshold, with idempotency keys so a re-run does not duplicate them.\n- **Operations.** Watch run records for failures, budget pauses and long runs; spread schedules so 2,000 runs do not hit the ad APIs' rate limits at the same minute; and keep a way to pause one merchant's deployment without touching the rest.\n\n**Trade-offs.** A managed platform removes the loop, sandbox and scheduler you would otherwise operate, but you accept its limits on configuration, regions and observability, and you depend on its availability for a nightly SLA. Building it yourself gives full control and possibly lower unit cost at scale, at the price of running containers, secrets, retries and tracing. A sensible path is to start managed, measure cost per completed audit and failure modes, and revisit only if a hard requirement is not met.",
+      "answer_zh": "**核心思路。** 把每家商家的审计当作一个隔离的、有预算的、可观测的任务。平台负责运行循环和沙箱；你的设计决定运行如何启动、每次运行能访问什么、最多能花多少钱、你如何知道输出是好的，以及凌晨三点出故障时会发生什么。\n\n**调度。** 在 Anthropic 的 Managed Agents 上，一个定时部署把 Agent、运行环境、可选资源（如 vault 和文件）、带时区的 cron 计划，以及启动每次运行的初始事件打包在一起；每次触发都会创建一个会话和一条运行记录。有两种形态：每个商家一个部署，隔离性好、能按商家当地时间排期、容易暂停，但要通过代码管理 2,000 个对象；或者每个地区少数几个部署，由运行过程把各个商家的工作委派出去。对于需要严格数据隔离的审计，按商家运行更容易推理清楚。\n\n**凭证与访问范围。** 把每家商家的广告平台凭证以环境变量凭证的形式存在 vault 里：平台会在出站时替换它们，所以密钥永远不会出现在沙箱中，模型或脚本也就无法把它打印出来。使用受限网络，`allowed_hosts` 只列出广告平台 API 和你们的工单 API；审计不需要写操作的地方，只给 Agent 只读权限。\n\n- **成本控制。** 为每次运行设置会话预算：这是按公开价格计算的硬性花费上限，达到后会以 `stop_reason: budget_reached` 暂停会话而不是终止它，这样你可以检查、提高或取消上限。对触及上限的运行发出告警。\n- **输出质量。** 报告是一份交付物，所以运行要以 outcome 和评分标准启动（每条发现都引用一个账户、一个广告活动和一个数字；没有证据就不给建议），让评审者迭代把关。创建工单会改变外部系统，所以要加关卡：只对超过阈值的发现建工单，并使用幂等键，避免重跑时重复创建。\n- **运维。** 盯住运行记录中的失败、预算暂停和超长运行；把排期错开，避免 2,000 次运行在同一分钟打到广告 API 的限流；并保留一种只暂停某一个商家的部署、而不影响其他商家的手段。\n\n**取舍。** 托管平台免去了你本来要自己运维的循环、沙箱和调度器，但你要接受它在配置、地域和可观测性方面的限制，而且夜间 SLA 要依赖它的可用性。自建能获得完全的控制，大规模下的单位成本也可能更低，代价是要自己运维容器、密钥、重试和链路追踪。一个合理的路径是先用托管平台，测量每次完成审计的成本和故障模式，只有在某项硬性要求无法满足时再重新评估。",
+      "followups": [
+        "How would you roll out a new version of the audit agent to 2,000 merchants safely?",
+        "What should happen when a merchant's ad-platform token has expired at run time?",
+        "How do you keep 2,000 runs from hitting the same API rate limit at once?"
+      ],
+      "followups_zh": [
+        "你会如何把新版本的审计 Agent 安全地推广到 2,000 家商家？",
+        "如果运行时发现某商家的广告平台 token 已经过期，应该怎么处理？",
+        "你如何避免 2,000 次运行同时撞上同一个 API 的限流？"
+      ],
+      "vocab": [
+        {
+          "en": "scheduled deployment",
+          "zh": "定时部署"
+        },
+        {
+          "en": "vault",
+          "zh": "vault（凭证保险库）"
+        },
+        {
+          "en": "session budget",
+          "zh": "会话预算"
+        },
+        {
+          "en": "run record",
+          "zh": "运行记录"
+        },
+        {
+          "en": "egress",
+          "zh": "出站流量"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261027-5",
+      "topic": "RAG",
+      "difficulty": "Hard",
+      "title": "Retrieving 50 chunks instead of 5 made the policy answers worse",
+      "title_zh": "检索 50 个片段而不是 5 个之后，政策类回答反而变差了",
+      "question": "The help assistant answered ad-policy questions from the top 5 retrieved chunks. Some answers missed relevant rules, so the team raised it to the top 50, reasoning that the model has a huge context window. Recall went up on the retrieval dashboard, but answer accuracy went down: answers now mix rules from different platforms and quote outdated versions.\n\nExplain why, and how you would choose what goes into the context.",
+      "question_zh": "帮助助手原本用检索到的前 5 个片段回答广告政策问题。有些回答漏掉了相关规则，所以团队把它提高到前 50 个，理由是模型的上下文窗口很大。检索看板上的召回率上升了，但回答的准确率却下降了：现在的回答会把不同平台的规则混在一起，还会引用过时的版本。\n\n解释原因，以及你会如何决定把什么放进上下文。",
+      "answer": "**The core idea.** A large window lets you include more, but every extra chunk is also a chance to distract the model. Near-duplicates, rules from another platform and old versions look relevant to a vector search, and once they are in the context the model may use them. Retrieval should aim for the right evidence, not the most evidence.\n\n**Why accuracy dropped.** Vector similarity ranks by topic, not by applicability, so \"Meta alcohol ad rules 2024\" and \"Google alcohol ad rules 2026\" both score high for an alcohol question. With 50 chunks the context contains several near-identical versions with small differences, and nothing tells the model which one applies. Retrieval recall rose, but precision fell, and the answer depends on both.\n\n**Fixes.**\n\n- **Filter before ranking.** Use metadata the question already implies: platform, market, and only the current version of each policy. Store `effective_from` and `superseded_by` on documents and exclude superseded ones by default.\n- **Retrieve wide, then rerank and cut.** Fetch many candidates, score them with a reranker that reads the question and the chunk together, drop low scores, limit chunks per document, and stop at a token budget.\n- **Give structure.** Label each chunk with its source, platform and effective date, and tell the model to use only rules for the platform asked about and to say when sources conflict.\n\n```go\n// selectContext keeps the best chunks, at most maxPerDoc per document,\n// until the token budget is used, and drops chunks below minScore.\nfunc selectContext(cands []Chunk, minScore float64, maxPerDoc, budget int) []Chunk {\n\tsort.Slice(cands, func(i, j int) bool { return cands[i].Score > cands[j].Score })\n\tperDoc := map[string]int{}\n\tvar out []Chunk\n\tused := 0\n\tfor _, c := range cands {\n\t\tif c.Score < minScore || perDoc[c.DocID] >= maxPerDoc || used+c.Tokens > budget {\n\t\t\tcontinue\n\t\t}\n\t\tperDoc[c.DocID]++\n\t\tused += c.Tokens\n\t\tout = append(out, c)\n\t}\n\treturn out\n}\n```\n\n**Measure the right thing.** Evaluate end to end on questions with known correct answers and the platform and date they apply to, and report answer accuracy next to retrieval recall. Add cases designed to tempt the model with a similar rule from another platform or an older version.\n\n**Trade-offs.** Strict filters can hide a rule the question needed, for example a global policy that also applies to one market, so tag such documents explicitly. Reranking adds latency and cost per query, usually worth it for policy questions where a wrong answer is expensive. The right chunk count is whatever maximizes answer accuracy on your eval, not a fixed number.",
+      "answer_zh": "**核心思路。** 大的上下文窗口让你可以放进更多内容，但每多一个片段，也多了一个分散模型注意力的机会。近乎重复的内容、其他平台的规则和旧版本，在向量检索看来都很相关，而它们一旦进入上下文，模型就可能用上它们。检索的目标应该是正确的证据，而不是最多的证据。\n\n**准确率为什么下降。** 向量相似度是按主题排序的，而不是按是否适用排序的，所以对于一个关于酒类的问题，“Meta 2024 年酒类广告规则”和“Google 2026 年酒类广告规则”得分都很高。有了 50 个片段，上下文中就包含了好几个只有细微差别、几乎相同的版本，而没有任何信息告诉模型该用哪一个。检索召回率上升了，但精确率下降了，而回答的质量同时取决于两者。\n\n**修复方法。**\n\n- **先过滤再排序。** 利用问题本身隐含的元数据：平台、市场，以及每条政策的当前版本。在文档上保存 `effective_from` 和 `superseded_by`，默认排除已被取代的版本。\n- **宽检索，再重排和截断。** 先取回较多候选，用能同时读取问题和片段的重排模型打分，丢弃低分项，限制每个文档的片段数，并在达到 token 预算时停止。\n- **提供结构。** 为每个片段标注来源、平台和生效日期，并告诉模型只使用与所问平台相关的规则，在来源相互冲突时要明确指出。\n\n```go\n// selectContext keeps the best chunks, at most maxPerDoc per document,\n// until the token budget is used, and drops chunks below minScore.\nfunc selectContext(cands []Chunk, minScore float64, maxPerDoc, budget int) []Chunk {\n\tsort.Slice(cands, func(i, j int) bool { return cands[i].Score > cands[j].Score })\n\tperDoc := map[string]int{}\n\tvar out []Chunk\n\tused := 0\n\tfor _, c := range cands {\n\t\tif c.Score < minScore || perDoc[c.DocID] >= maxPerDoc || used+c.Tokens > budget {\n\t\t\tcontinue\n\t\t}\n\t\tperDoc[c.DocID]++\n\t\tused += c.Tokens\n\t\tout = append(out, c)\n\t}\n\treturn out\n}\n```\n\n**衡量正确的指标。** 在一组有已知正确答案、并标明适用平台和日期的问题上做端到端评测，把回答准确率和检索召回率放在一起报告。加入一些专门用来诱导模型的用例：用另一个平台的相似规则或旧版本来干扰它。\n\n**取舍。** 严格的过滤可能会把问题所需的规则藏起来，例如同样适用于某个市场的全球政策，所以要给这类文档明确打标签。重排会让每次查询增加延迟和成本，但对于答错代价很高的政策问题，通常是值得的。合适的片段数量，是能让评测中回答准确率最高的那个数字，而不是一个固定值。",
+      "followups": [
+        "How would you build an eval set that catches answers using the wrong platform's rule?",
+        "When is it better to let the agent search iteratively than to retrieve once?"
+      ],
+      "followups_zh": [
+        "你会如何构建一个评测集，来发现使用了错误平台规则的回答？",
+        "什么时候让 Agent 迭代式地搜索，比一次性检索更好？"
+      ],
+      "vocab": [
+        {
+          "en": "recall",
+          "zh": "召回率"
+        },
+        {
+          "en": "precision",
+          "zh": "精确率"
+        },
+        {
+          "en": "reranker",
+          "zh": "重排模型"
+        },
+        {
+          "en": "superseded version",
+          "zh": "已被取代的版本"
+        },
+        {
+          "en": "distractor",
+          "zh": "干扰项"
+        }
+      ]
+    }
+  ]
+}

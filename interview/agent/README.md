@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 19 个模块、79 道题。
+共 20 个模块、84 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -257,3 +257,17 @@ Five new agent questions: treating web search as unreliable retrieval, keeping a
 | 3 | Evals & Observability | Medium | [The cache hit rate fell from 80% to 10% after a release, and nobody knows which change did it](modules/daily-2026-10-26.md#q3) | 一次发布后缓存命中率从 80% 跌到 10%，没人知道是哪个改动造成的 |
 | 4 | Multi-agent | Senior | [Monthly ad reports for 3,000 merchants: who decides a report is good enough to send?](modules/daily-2026-10-26.md#q4) | 为 3,000 家商家生成月度广告报告：由谁来判断一份报告足够好、可以发出？ |
 | 5 | Tools & MCP | Medium | [Call your MCP server through the Messages API connector, or run your own MCP client?](modules/daily-2026-10-26.md#q5) | 通过 Messages API 的连接器调用你的 MCP server，还是自己运行 MCP 客户端？ |
+
+## [Daily set · Oct 27 · 每日新题 · 10 月 27 日](modules/daily-2026-10-27.md)
+
+Five new agent questions: handling refusals and fallbacks in a batch loop, keeping a Q&A agent from delegating every question, referencing large documents by file ID, running a nightly audit agent per merchant on a managed platform, and why retrieving more chunks can make answers worse.
+
+> 五道新的 Agent 题：在批处理循环中处理 refusal 与 fallback、避免问答 Agent 把每个问题都委派出去、按文件 ID 引用大文档、在托管平台上为每家商家运行夜间审计 Agent，以及为什么检索更多片段反而会让回答变差。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Agent Loop | Hard | [The listing agent crashes on supplement products: content is empty and stop_reason is "refusal"](modules/daily-2026-10-27.md#q1) | 商品文案 Agent 在保健品上崩溃：content 为空，stop_reason 是“refusal” |
+| 2 | Multi-agent | Medium | [The support agent starts a team of subagents to answer "where is my order?"](modules/daily-2026-10-27.md#q2) | 客服 Agent 为回答“我的订单到哪了？”拉起了一整队子 Agent |
+| 3 | Context & Memory | Medium | [A 40 MB supplier catalog is re-sent on every turn, and requests start failing](modules/daily-2026-10-27.md#q3) | 一份 40 MB 的供应商目录在每一轮都被重新发送，请求开始失败 |
+| 4 | Production | Senior | [Running a nightly ad-audit agent for 2,000 merchants on a managed agent platform](modules/daily-2026-10-27.md#q4) | 在托管 Agent 平台上为 2,000 家商家运行夜间广告审计 Agent |
+| 5 | RAG | Hard | [Retrieving 50 chunks instead of 5 made the policy answers worse](modules/daily-2026-10-27.md#q5) | 检索 50 个片段而不是 5 个之后，政策类回答反而变差了 |
