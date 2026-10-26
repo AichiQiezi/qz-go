@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 15 天、75 道题。
+共 16 天、80 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-10-27](days/2026-10-27.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Medium | [The retry logic never notices rate limits, and an empty error is not nil](days/2026-10-27.md#q1) | 重试逻辑从来识别不出限流，而一个“空”的错误却不等于 nil |
+| 2 | System Design | Medium | [Showing prices in 40 currencies without losing money on exchange rates](days/2026-10-27.md#q2) | 用 40 种货币显示价格，而不在汇率上亏钱 |
+| 3 | Database | Hard | [A failed CREATE UNIQUE INDEX CONCURRENTLY left an index that does nothing](days/2026-10-27.md#q3) | 一次失败的 CREATE UNIQUE INDEX CONCURRENTLY 留下了一个什么也不做的索引 |
+| 4 | Middleware | Senior | [After adding Kafka partitions, product updates are applied out of order](days/2026-10-27.md#q4) | 增加 Kafka 分区之后，商品更新的应用顺序乱了 |
+| 5 | Java & CS | Hard | [A product cache throws "Recursive update" for about one key in five](days/2026-10-27.md#q5) | 一个商品缓存对大约五分之一的键抛出“Recursive update” |
 
 ## [2026-10-26](days/2026-10-26.md)
 

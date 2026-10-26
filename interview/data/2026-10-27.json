@@ -1,0 +1,197 @@
+{
+  "date": "2026-10-27",
+  "generatedAt": "2026-10-27T06:44:44+08:00",
+  "questions": [
+    {
+      "id": "20261027-1",
+      "topic": "Go",
+      "difficulty": "Medium",
+      "title": "The retry logic never notices rate limits, and an empty error is not nil",
+      "title_zh": "重试逻辑从来识别不出限流，而一个“空”的错误却不等于 nil",
+      "question": "An ad-sync worker retries with backoff when the platform client returns `ErrRateLimited`, checked with `errors.Is(err, ErrRateLimited)`. In production it never backs off: it fails the whole batch on the first 429. While debugging, the team also finds that a helper returning a `*APIError` reports a non-nil error even when the call succeeded.\n\nExplain both bugs and how to design errors in a Go API client.",
+      "question_zh": "一个广告同步 worker 在平台客户端返回 `ErrRateLimited` 时会退避重试，判断方式是 `errors.Is(err, ErrRateLimited)`。但在生产环境中它从来不退避：第一次遇到 429 就让整批任务失败。排查时，团队还发现一个返回 `*APIError` 的辅助函数，即使调用成功也会报告一个非 nil 的错误。\n\n解释这两个 bug，以及在 Go 的 API 客户端里应该如何设计错误。",
+      "answer": "**Bug 1: the wrap verb.** The client returns `fmt.Errorf(\"meta insights: %v\", ErrRateLimited)`. `%v` only formats the text, so the new error has no link to `ErrRateLimited`, and `errors.Is` returns false. With `%w` the original error is wrapped and `errors.Is` finds it; a quick test shows false with `%v` and true with `%w`. Since Go 1.20 one `fmt.Errorf` can wrap several errors with multiple `%w`, and `errors.Join` combines errors that `errors.Is` can still search.\n\n**Bug 2: the typed nil.** An interface value is nil only when both its type and its value are nil. A function with return type `error` that returns a nil `*APIError` variable returns an interface holding type `*APIError` and value nil, so `err == nil` is false. Return a literal `nil` on success instead of a typed pointer variable.\n\n```go\nvar ErrRateLimited = errors.New(\"rate limited\")\n\ntype APIError struct {\n\tStatus     int\n\tCode       string\n\tRetryAfter time.Duration\n}\n\nfunc (e *APIError) Error() string { return fmt.Sprintf(\"api error %d %s\", e.Status, e.Code) }\n\nfunc (e *APIError) Unwrap() error {\n\tif e.Status == http.StatusTooManyRequests {\n\t\treturn ErrRateLimited\n\t}\n\treturn nil\n}\n\n// caller\nvar apiErr *APIError\nif errors.As(err, &apiErr) && errors.Is(err, ErrRateLimited) {\n\tsleep(apiErr.RetryAfter)\n}\n```\n\n- Use sentinel errors for categories callers branch on (rate limited, not found, auth expired), and typed errors when callers need details such as `Retry-After`.\n- Wrap with `%w` at every layer that adds context, and never compare error strings.\n- Linters such as `errorlint` flag `%v` used with errors and `==` comparisons that should be `errors.Is`.\n\n**Trade-offs.** Wrapping exposes the wrapped error as part of your API: callers may start depending on it, so wrap deliberately and document which sentinels a package returns. Wrapping too much leaks internal details; wrapping too little forces callers to parse strings.",
+      "answer_zh": "**Bug 1：包装用的格式动词。** 客户端返回的是 `fmt.Errorf(\"meta insights: %v\", ErrRateLimited)`。`%v` 只格式化文本，所以新的错误和 `ErrRateLimited` 没有任何关联，`errors.Is` 返回 false。用 `%w` 时原错误会被包装起来，`errors.Is` 就能找到它；一个简单的测试显示 `%v` 返回 false，`%w` 返回 true。从 Go 1.20 开始，一个 `fmt.Errorf` 可以用多个 `%w` 包装多个错误，`errors.Join` 组合起来的错误也仍然能被 `errors.Is` 搜索到。\n\n**Bug 2：带类型的 nil。** 接口值只有在类型和值都为 nil 时才等于 nil。一个返回类型为 `error` 的函数，如果返回一个值为 nil 的 `*APIError` 变量，返回的就是一个类型为 `*APIError`、值为 nil 的接口，所以 `err == nil` 为 false。成功时应直接返回字面量 `nil`，而不是一个带类型的指针变量。\n\n```go\nvar ErrRateLimited = errors.New(\"rate limited\")\n\ntype APIError struct {\n\tStatus     int\n\tCode       string\n\tRetryAfter time.Duration\n}\n\nfunc (e *APIError) Error() string { return fmt.Sprintf(\"api error %d %s\", e.Status, e.Code) }\n\nfunc (e *APIError) Unwrap() error {\n\tif e.Status == http.StatusTooManyRequests {\n\t\treturn ErrRateLimited\n\t}\n\treturn nil\n}\n\n// caller\nvar apiErr *APIError\nif errors.As(err, &apiErr) && errors.Is(err, ErrRateLimited) {\n\tsleep(apiErr.RetryAfter)\n}\n```\n\n- 对调用方需要据此分支的类别（被限流、未找到、授权过期）使用哨兵错误；当调用方需要 `Retry-After` 之类的细节时，使用带类型的错误。\n- 在每一个添加上下文的层次上都用 `%w` 包装，绝不比较错误字符串。\n- `errorlint` 之类的 linter 能标记出对错误使用 `%v` 的地方，以及本应使用 `errors.Is` 的 `==` 比较。\n\n**取舍。** 包装会把被包装的错误变成你 API 的一部分：调用方可能会开始依赖它，所以要有意识地包装，并在文档中说明一个包会返回哪些哨兵错误。包装过多会泄露内部细节；包装过少则会逼迫调用方去解析字符串。",
+      "followups": [
+        "When would you use errors.As instead of errors.Is?",
+        "How would you write a test that catches a typed-nil error return?"
+      ],
+      "followups_zh": [
+        "什么时候应该用 errors.As 而不是 errors.Is？",
+        "你会如何写一个测试来发现返回带类型 nil 错误的问题？"
+      ],
+      "vocab": [
+        {
+          "en": "sentinel error",
+          "zh": "哨兵错误"
+        },
+        {
+          "en": "error wrapping",
+          "zh": "错误包装"
+        },
+        {
+          "en": "typed nil",
+          "zh": "带类型的 nil"
+        },
+        {
+          "en": "interface value",
+          "zh": "接口值"
+        }
+      ]
+    },
+    {
+      "id": "20261027-2",
+      "topic": "System Design",
+      "difficulty": "Medium",
+      "title": "Showing prices in 40 currencies without losing money on exchange rates",
+      "title_zh": "用 40 种货币显示价格，而不在汇率上亏钱",
+      "question": "Merchants set prices in their base currency, and the storefront should show local prices to shoppers in about 40 currencies. Today each page view calls an exchange-rate API, which is slow and sometimes down; shoppers see prices like 23.4719 EUR, and the price at checkout sometimes differs from the product page.\n\nDesign multi-currency pricing.",
+      "question_zh": "商家用基础货币设定价格，店铺前台要以大约 40 种货币向顾客展示本地价格。现在每次浏览页面都会调用一个汇率 API，又慢又时不时宕机；顾客会看到 23.4719 EUR 这样的价格，而结账时的价格有时还和商品页上的不一样。\n\n设计多币种定价。",
+      "answer": "**Why it misbehaves.** Rates are fetched on the hot path, so availability and latency depend on a third party. Raw conversion produces prices nobody would choose. And product page and checkout convert at different moments, with different rates, so the shopper is shown one price and charged another.\n\n**Design.**\n\n- **Rate snapshots.** A job fetches rates on a schedule and stores versioned snapshots (`rate_set_id`, timestamp, rates). Serving reads only the current snapshot from cache; if the provider is down, the last snapshot keeps working, with an alert when it gets too old.\n- **Pricing rules per merchant.** Converted price = base price x rate x (1 + buffer for card FX fees), then rounded by the market's rule (for example to .99 or to whole units for currencies without minor units). Merchants can override prices per market.\n- **Lock the price for checkout.** The cart stores the currency, the converted amounts and the `rate_set_id` used. Checkout charges exactly that, as long as the snapshot is within a validity window; otherwise it reprices and tells the shopper.\n- **Money in minor units.** Store amounts as integers in minor units with an ISO 4217 currency code, and use each currency's number of decimal places; never floats.\n\n**Ad platforms and feeds.** Product feeds for each market must use the same converted, rounded price as the storefront, or ad platforms may reject items for price mismatch. Generate feed prices from the same pricing service, not from a separate conversion.\n\n**Trade-offs.** Frequent rate updates track the market closely but make prices jump and invalidate caches; daily snapshots are stable but expose the merchant to currency moves, which the buffer partly covers. Showing converted prices but charging in the base currency is simpler but confuses shoppers when their bank converts again.",
+      "answer_zh": "**为什么会出问题。** 汇率是在关键路径上获取的，所以可用性和延迟都取决于第三方。直接换算得到的价格谁都不会这样定。而且商品页和结账在不同的时刻、用不同的汇率换算，于是顾客看到的是一个价格，被收取的却是另一个。\n\n**设计。**\n\n- **汇率快照。** 由一个定时任务拉取汇率，并保存带版本的快照（`rate_set_id`、时间戳、汇率）。对外服务只从缓存中读取当前快照；如果供应商宕机，上一个快照继续生效，并在它过于陈旧时告警。\n- **按商家设置定价规则。** 换算后的价格 = 基础价格 × 汇率 ×（1 + 用于覆盖银行卡换汇费用的缓冲），再按该市场的规则取整（例如取到 .99，或者对没有辅币单位的货币取整到整数）。商家可以按市场覆盖价格。\n- **结账时锁定价格。** 购物车保存币种、换算后的金额以及所用的 `rate_set_id`。只要快照仍在有效期内，结账就按这个金额收费；否则重新定价并告知顾客。\n- **金额以最小单位存储。** 用整数按最小货币单位存储金额，并附上 ISO 4217 货币代码，按每种货币的小数位数处理；绝不使用浮点数。\n\n**广告平台与商品 feed。** 每个市场的商品 feed 必须使用与店铺前台相同的、经过换算和取整的价格，否则广告平台可能会因为价格不一致而拒绝这些商品。feed 中的价格要由同一个定价服务生成，而不是另做一次换算。\n\n**取舍。** 频繁更新汇率能紧跟市场，但会让价格跳动并使缓存失效；每日快照很稳定，但会让商家承受汇率波动，而缓冲只能覆盖其中一部分。只展示换算价、实际仍按基础货币收费更简单，但当顾客的银行再换算一次时，会让顾客感到困惑。",
+      "followups": [
+        "How would you handle refunds when the rate changed since the order?",
+        "Where would you cache converted prices, and how do you invalidate them?"
+      ],
+      "followups_zh": [
+        "如果下单后汇率变了，你会如何处理退款？",
+        "你会把换算后的价格缓存在哪里，又如何让它失效？"
+      ],
+      "vocab": [
+        {
+          "en": "exchange rate",
+          "zh": "汇率"
+        },
+        {
+          "en": "minor unit",
+          "zh": "最小货币单位"
+        },
+        {
+          "en": "price rounding",
+          "zh": "价格取整"
+        },
+        {
+          "en": "snapshot",
+          "zh": "快照"
+        }
+      ]
+    },
+    {
+      "id": "20261027-3",
+      "topic": "Database",
+      "difficulty": "Hard",
+      "title": "A failed CREATE UNIQUE INDEX CONCURRENTLY left an index that does nothing",
+      "title_zh": "一次失败的 CREATE UNIQUE INDEX CONCURRENTLY 留下了一个什么也不做的索引",
+      "question": "To stop duplicate ad-platform connections, a migration runs `CREATE UNIQUE INDEX CONCURRENTLY uq_conn ON platform_connection (platform, external_account)`. It fails with \"could not create unique index\" because one duplicate already exists. The deploy is retried with `CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS`, which succeeds instantly. Weeks later, duplicates are still being inserted and the lookup by account is a sequential scan.\n\nExplain what happened and how to run such migrations safely.",
+      "question_zh": "为了阻止重复的广告平台连接，一次迁移执行了 `CREATE UNIQUE INDEX CONCURRENTLY uq_conn ON platform_connection (platform, external_account)`。由于已经存在一条重复数据，它以“could not create unique index”失败。之后重新部署时改用了 `CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS`，瞬间就成功了。几周后，重复数据仍在不断插入，而按账户查找用的是顺序扫描。\n\n解释发生了什么，以及如何安全地执行这类迁移。",
+      "answer": "**What happened.** A concurrent index build cannot run inside one transaction, so when it fails it cannot roll back cleanly: PostgreSQL leaves the index behind marked invalid. In a PostgreSQL 16 test, the failed build left `uq_conn` with `indisvalid = false`; the planner ignored it (sequential scan), and inserting the same new key twice succeeded. The retry with `IF NOT EXISTS` only saw that a relation named `uq_conn` existed and printed \"already exists, skipping\". The migration was recorded as done while the index was useless.\n\n**Find invalid indexes.** They are easy to miss, so check for them after every concurrent build and in monitoring:\n\n```sql\nSELECT indexrelid::regclass AS index, indrelid::regclass AS table\nFROM pg_index\nWHERE NOT indisvalid;\n```\n\n**Fix and run it safely.**\n\n- Drop the invalid index with `DROP INDEX CONCURRENTLY uq_conn` (it must run outside a transaction block, like the build).\n- Clean the data first: find duplicates with a `GROUP BY ... HAVING count(*) > 1`, decide which row wins, and merge references to the losing rows.\n- Stop new duplicates while you clean, for example with an application-level check plus an advisory lock, or by fixing the insert path to use `ON CONFLICT` once the index exists.\n- Build again, then verify `indisvalid` in the migration itself and fail the deploy if it is false. Avoid `IF NOT EXISTS` for concurrent builds unless you also check validity.\n\nIn the same test, dropping the invalid index, deleting the duplicate and rebuilding produced a valid index that the planner used immediately.\n\n**Trade-offs.** `CONCURRENTLY` avoids blocking writes for the whole build but takes longer, needs extra checks and can fail halfway. On a small table a plain `CREATE INDEX` in a short maintenance window may be simpler. Either way, migrations that add constraints should start with a data check, because the constraint is only as good as the data already in the table.",
+      "answer_zh": "**发生了什么。** 并发建索引不能在单个事务中执行，所以失败时无法干净地回滚：PostgreSQL 会把这个索引留下，并标记为无效。在 PostgreSQL 16 的测试中，失败的构建留下了 `indisvalid = false` 的 `uq_conn`；查询优化器忽略了它（走顺序扫描），把同一个新键插入两次也都成功了。带 `IF NOT EXISTS` 的重试只看到已经存在一个名为 `uq_conn` 的关系，打印出“already exists, skipping”。迁移被记录为已完成，而这个索引却毫无用处。\n\n**找出无效索引。** 它们很容易被忽视，所以每次并发建索引之后都要检查，并纳入监控：\n\n```sql\nSELECT indexrelid::regclass AS index, indrelid::regclass AS table\nFROM pg_index\nWHERE NOT indisvalid;\n```\n\n**修复并安全执行。**\n\n- 用 `DROP INDEX CONCURRENTLY uq_conn` 删除无效索引（它和建索引一样，必须在事务块之外执行）。\n- 先清理数据：用 `GROUP BY ... HAVING count(*) > 1` 找出重复项，决定保留哪一行，并把指向被删除行的引用合并过去。\n- 在清理期间阻止新的重复数据产生，例如在应用层检查并配合咨询锁，或者在索引建好后把插入路径改成使用 `ON CONFLICT`。\n- 重新构建，然后在迁移脚本中验证 `indisvalid`，如果为 false 就让部署失败。对于并发建索引，除非同时检查有效性，否则不要使用 `IF NOT EXISTS`。\n\n在同一个测试中，删除无效索引、删除重复行再重新构建之后，得到了一个有效的索引，查询优化器立即就用上了它。\n\n**取舍。** `CONCURRENTLY` 避免了在整个构建过程中阻塞写入，但耗时更长、需要额外的检查，还可能中途失败。对于小表，在一个简短的维护窗口内直接执行普通的 `CREATE INDEX` 可能更简单。无论哪种方式，添加约束的迁移都应该先检查数据，因为约束的效果取决于表中已有数据的质量。",
+      "followups": [
+        "Why can CREATE INDEX CONCURRENTLY not run inside a transaction?",
+        "How would you add a NOT NULL or CHECK constraint to a large table without a long lock?",
+        "What other operations leave work half done when they fail outside a transaction?"
+      ],
+      "followups_zh": [
+        "为什么 CREATE INDEX CONCURRENTLY 不能在事务中执行？",
+        "你会如何在不长时间锁表的情况下，给一张大表加上 NOT NULL 或 CHECK 约束？",
+        "还有哪些操作在事务之外失败时，会留下做了一半的工作？"
+      ],
+      "vocab": [
+        {
+          "en": "invalid index",
+          "zh": "无效索引"
+        },
+        {
+          "en": "concurrent build",
+          "zh": "并发构建"
+        },
+        {
+          "en": "deduplicate",
+          "zh": "去重"
+        },
+        {
+          "en": "migration",
+          "zh": "迁移"
+        }
+      ]
+    },
+    {
+      "id": "20261027-4",
+      "topic": "Middleware",
+      "difficulty": "Senior",
+      "title": "After adding Kafka partitions, product updates are applied out of order",
+      "title_zh": "增加 Kafka 分区之后，商品更新的应用顺序乱了",
+      "question": "Product updates are published to a Kafka topic keyed by `product_id`, so all updates for one product land in one partition and are consumed in order. To handle Black Friday traffic, the team increased the topic from 12 to 48 partitions while the system was running. Afterwards, some products show old prices on ad platforms: a newer update was applied before an older one.\n\nExplain why, and how to scale such a topic without breaking ordering.",
+      "question_zh": "商品更新以 `product_id` 为键发布到一个 Kafka 主题，这样同一个商品的所有更新都落在同一个分区里，并按顺序被消费。为了应对黑五流量，团队在系统运行时把这个主题从 12 个分区扩到了 48 个。之后，一些商品在广告平台上显示的是旧价格：较新的更新反而先于较旧的更新被应用了。\n\n解释原因，以及如何在不破坏顺序的前提下扩展这样的主题。",
+      "answer": "**Why ordering broke.** Kafka only guarantees order within a partition. The default partitioner picks a partition from a hash of the key modulo the number of partitions, so changing the partition count moves most keys to a different partition. Updates for product 42 produced before the change sit in the old partition; updates produced after go to a new one. The two partitions are consumed independently, possibly by different consumers at different speeds, so the newer update can be processed first. Kafka also cannot reduce the partition count, so the change cannot simply be undone.\n\n**Make consumers robust first.** Ordering from the broker is fragile anyway (retries, replays, manual fixes), so make each update safe to apply in any order:\n\n- Carry a monotonic version per product (a database version column or the commit sequence from an outbox) in every event.\n- Apply with a conditional write: update the stored state only if the event's version is newer than the stored one, and drop older events.\n- For ad-platform pushes, send the current state read at send time rather than the payload of whichever event triggered the push.\n\n**Scaling without reordering.** Plan the partition count up front for several years of growth, because partitions are cheap compared to a migration. If you must change it, either pause producers and let consumers drain all partitions before resuming with the new count, or create a new topic with more partitions, mirror into it, and switch consumers over at a known point once the old topic is fully consumed. If consumers are the bottleneck rather than partitions, scale processing within a consumer instead, for example by keyed worker pools that keep per-key order.\n\n**Trade-offs.** Version checks add a read or a conditional write per event, but they also protect against replays and duplicate deliveries, which happen anyway. Drain-and-switch migrations are safe but need coordination and a pause. Over-provisioning partitions costs some broker resources and longer rebalances; a moderate surplus is usually the right balance.",
+      "answer_zh": "**为什么顺序被破坏了。** Kafka 只保证分区内的顺序。默认分区器根据键的哈希值对分区数取模来选择分区，所以改变分区数会让大多数键映射到不同的分区。变更前为商品 42 生产的更新留在旧分区里；变更后生产的更新则进入新分区。这两个分区是独立消费的，可能由不同的消费者以不同的速度处理，所以较新的更新可能先被处理。而且 Kafka 不能减少分区数，所以这个变更没法简单地撤销。\n\n**先让消费者变得健壮。** 来自 broker 的顺序本来就很脆弱（重试、重放、人工修复都会打乱它），所以要让每条更新无论以什么顺序到达都能安全应用：\n\n- 在每个事件中带上每个商品单调递增的版本号（数据库中的版本列，或来自 outbox 的提交序号）。\n- 用条件写入来应用：只有当事件的版本比已存储的版本更新时才更新状态，较旧的事件直接丢弃。\n- 向广告平台推送时，发送在发送时刻读取到的当前状态，而不是触发这次推送的那条事件里的内容。\n\n**不打乱顺序地扩容。** 一开始就按几年的增长来规划分区数，因为与一次迁移相比，分区的成本很低。如果必须修改，要么暂停生产者，让消费者把所有分区消费完，再以新的分区数恢复；要么创建一个分区更多的新主题，把数据镜像过去，在旧主题被完全消费后，在一个明确的时间点把消费者切换过去。如果瓶颈在消费者而不在分区，就在消费者内部扩展处理能力，例如使用按键划分、能保持同一键顺序的 worker 池。\n\n**取舍。** 版本检查会让每条事件多一次读取或一次条件写入，但它们也能防御本来就会发生的重放和重复投递。排空后切换的迁移方式是安全的，但需要协调，并且要暂停一段时间。预留过多分区会消耗一些 broker 资源，也会让再均衡变慢；适度的余量通常是合适的平衡点。",
+      "followups": [
+        "Why is a version number safer than an event timestamp for ordering?",
+        "How would you detect out-of-order applications in production?"
+      ],
+      "followups_zh": [
+        "为什么用版本号来判断顺序比用事件时间戳更安全？",
+        "你会如何在生产环境中发现乱序应用的情况？"
+      ],
+      "vocab": [
+        {
+          "en": "partition key",
+          "zh": "分区键"
+        },
+        {
+          "en": "per-key ordering",
+          "zh": "按键有序"
+        },
+        {
+          "en": "conditional write",
+          "zh": "条件写入"
+        },
+        {
+          "en": "drain",
+          "zh": "排空"
+        },
+        {
+          "en": "over-provision",
+          "zh": "预留富余（超额配置）"
+        }
+      ]
+    },
+    {
+      "id": "20261027-5",
+      "topic": "Java & CS",
+      "difficulty": "Hard",
+      "title": "A product cache throws \"Recursive update\" for about one key in five",
+      "title_zh": "一个商品缓存对大约五分之一的键抛出“Recursive update”",
+      "question": "A Java service caches catalog data in a `ConcurrentHashMap`. Loading a variant needs its parent product, so the loader does `cache.computeIfAbsent(variantKey, k -> buildVariant(cache.computeIfAbsent(productKey, this::loadProduct)))`. In tests most keys work, but some fail with `IllegalStateException: Recursive update`, and which keys fail seems random.\n\nExplain the failure and how to fix the cache.",
+      "question_zh": "一个 Java 服务用 `ConcurrentHashMap` 缓存商品目录数据。加载一个变体需要它的父商品，所以加载逻辑写成了 `cache.computeIfAbsent(variantKey, k -> buildVariant(cache.computeIfAbsent(productKey, this::loadProduct)))`。测试中大多数键都正常，但有些会以 `IllegalStateException: Recursive update` 失败，而且哪些键失败看起来是随机的。\n\n解释这个失败，以及如何修复这个缓存。",
+      "answer": "**Cause.** `computeIfAbsent` runs the mapping function while holding a lock on the bin that will hold the key, and its documentation says the function must not modify the map during the computation. The nested `computeIfAbsent` for the product key needs to insert another entry. If the product key happens to fall into the same bin as the variant key, the map detects the recursive update and throws. Whether two keys share a bin depends on their hashes and the table size, which is why it looks random: in a test with 200 fresh maps, 44 nested calls failed and 156 passed. Calling the same key recursively always fails. On a plain `HashMap`, a nested update throws `ConcurrentModificationException` instead.\n\n**Fix: resolve dependencies outside the mapping function.** Load the product first, then compute the variant with a function that only builds the value:\n\n```java\nProduct product = cache.computeIfAbsent(productKey, this::loadProduct);\nVariant variant = cache.computeIfAbsent(variantKey, k -> buildVariant(product));\n```\n\n- Keep mapping functions short and side-effect free: no calls back into the same map, no slow I/O while holding the bin lock, because other threads touching that bin wait.\n- For loads that call remote services, prefer a cache library designed for it (for example Caffeine's loading cache), which handles concurrent loads of the same key, expiry and size limits.\n- Use separate maps for products and variants if they have different lifetimes; that also removes the recursion entirely.\n\n**Trade-offs.** Loading the product outside `computeIfAbsent` means two threads may both load it at the same moment, but only one result is stored, which is usually acceptable. If duplicate loads are expensive, a per-key future (store a `CompletableFuture` in the map) or a loading cache gives single-flight behaviour without nested updates.",
+      "answer_zh": "**原因。** `computeIfAbsent` 在持有将要存放该键的桶的锁时执行映射函数，而它的文档规定，映射函数在计算过程中不得修改这个 map。为商品键执行的嵌套 `computeIfAbsent` 需要插入另一个条目。如果商品键恰好和变体键落在同一个桶里，map 就会检测到递归更新并抛出异常。两个键是否共用一个桶取决于它们的哈希值和表的大小，这就是它看起来随机的原因：在 200 个全新 map 的测试中，44 次嵌套调用失败，156 次通过。对同一个键递归调用则总是失败。在普通的 `HashMap` 上，嵌套更新会改为抛出 `ConcurrentModificationException`。\n\n**修复：在映射函数之外解决依赖。** 先加载商品，再用一个只负责构建值的函数计算变体：\n\n```java\nProduct product = cache.computeIfAbsent(productKey, this::loadProduct);\nVariant variant = cache.computeIfAbsent(variantKey, k -> buildVariant(product));\n```\n\n- 让映射函数保持简短、没有副作用：不回调同一个 map，持有桶锁时不做缓慢的 I/O，因为其他访问这个桶的线程都在等待。\n- 对于需要调用远程服务的加载，优先使用专门为此设计的缓存库（例如 Caffeine 的 loading cache），它能处理同一个键的并发加载、过期以及容量限制。\n- 如果商品和变体的生命周期不同，就为它们使用不同的 map；这样也能彻底消除递归。\n\n**取舍。** 在 `computeIfAbsent` 之外加载商品，意味着两个线程可能在同一时刻都去加载它，但只有一个结果会被存下来，这通常是可以接受的。如果重复加载代价很高，可以为每个键存一个 future（在 map 中存放 `CompletableFuture`）或使用 loading cache，在没有嵌套更新的情况下实现只加载一次。",
+      "followups": [
+        "Why is holding the bin lock during a slow remote call a problem even without recursion?",
+        "How does storing a CompletableFuture in the map avoid duplicate loads?"
+      ],
+      "followups_zh": [
+        "即使没有递归，为什么在持有桶锁时进行缓慢的远程调用仍然是个问题？",
+        "在 map 中存放 CompletableFuture 是如何避免重复加载的？"
+      ],
+      "vocab": [
+        {
+          "en": "mapping function",
+          "zh": "映射函数"
+        },
+        {
+          "en": "hash bin",
+          "zh": "哈希桶"
+        },
+        {
+          "en": "recursive update",
+          "zh": "递归更新"
+        },
+        {
+          "en": "loading cache",
+          "zh": "自动加载缓存"
+        }
+      ]
+    }
+  ]
+}
