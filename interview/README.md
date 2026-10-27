@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 16 天、80 道题。
+共 17 天、85 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-10-28](days/2026-10-28.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Hard | [A catalog fan-in crashes with "send on closed channel" when the consumer stops early](days/2026-10-28.md#q1) | 商品目录的扇入流程在消费者提前停止时，以“send on closed channel”崩溃 |
+| 2 | System Design | Senior | [EU merchants require their data to stay in the EU: turning a single-region SaaS multi-region](days/2026-10-28.md#q2) | 欧盟商家要求数据留在欧盟境内：把单区域 SaaS 改造成多区域 |
+| 3 | Database | Medium | [A US merchant's daily sales report puts evening orders on the next day](days/2026-10-28.md#q3) | 美国商家的每日销售报表把晚上的订单算到了第二天 |
+| 4 | Middleware | Medium | [A merchant saves a product, but search does not find it for a moment](days/2026-10-28.md#q4) | 商家保存了商品，但搜索在片刻之内找不到它 |
+| 5 | Java & CS | Hard | [@Transactional is on the method, but the data is saved without a transaction](days/2026-10-28.md#q5) | 方法上加了 @Transactional，数据却在没有事务的情况下被保存了 |
 
 ## [2026-10-27](days/2026-10-27.md)
 

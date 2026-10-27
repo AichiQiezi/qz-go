@@ -1,0 +1,197 @@
+{
+  "date": "2026-10-28",
+  "generatedAt": "2026-10-28T06:45:12+08:00",
+  "questions": [
+    {
+      "id": "20261028-1",
+      "topic": "Go",
+      "difficulty": "Hard",
+      "title": "A catalog fan-in crashes with \"send on closed channel\" when the consumer stops early",
+      "title_zh": "商品目录的扇入流程在消费者提前停止时，以“send on closed channel”崩溃",
+      "question": "A Go service fetches product pages from several ad-platform catalogs in parallel. Four producer goroutines send products into one channel; the consumer stops after it has collected enough items for a preview and calls `close(results)` to tell the producers to stop. In production the process occasionally crashes with `panic: send on closed channel`.\n\nExplain the rules behind this crash and the correct way to stop producers early.",
+      "question_zh": "一个 Go 服务并行地从多个广告平台的商品目录中抓取商品页面。四个生产者 goroutine 把商品发送到同一个 channel；消费者收集到足够预览的条目后就停止，并调用 `close(results)` 通知生产者停止。在生产环境中，进程偶尔会以 `panic: send on closed channel` 崩溃。\n\n解释这个崩溃背后的规则，以及提前停止生产者的正确方式。",
+      "answer": "**The rule.** Sending on a closed channel panics, and so does closing an already closed channel. Closing is a signal from the sender side meaning \"no more values\"; receivers can always read from a closed channel. When the consumer closes the channel while producers are still sending, any producer blocked on or reaching `results <- p` panics, and an unrecovered panic in any goroutine kills the whole process. A local run with four producers crashed exactly this way.\n\n**The fix: separate \"stop\" from \"no more values\".** The consumer signals stop with a separate channel or a context; producers select on it; and only the side that knows all senders are finished closes the results channel:\n\n```go\nctx, cancel := context.WithCancel(parent)\ndefer cancel()\n\nresults := make(chan Product)\nvar wg sync.WaitGroup\nfor _, src := range sources {\n\twg.Add(1)\n\tgo func(src Source) {\n\t\tdefer wg.Done()\n\t\tfor p := range src.Products(ctx) {\n\t\t\tselect {\n\t\t\tcase results <- p:\n\t\t\tcase <-ctx.Done():\n\t\t\t\treturn\n\t\t\t}\n\t\t}\n\t}(src)\n}\ngo func() { wg.Wait(); close(results) }() // the only closer\n\nfor p := range results {\n\tpreview = append(preview, p)\n\tif len(preview) == limit {\n\t\tcancel() // ask producers to stop; never close results here\n\t\tbreak\n\t}\n}\n```\n\n- After `break`, nobody reads `results` any more; that is safe here because every send also selects on `ctx.Done()`. Without that case, producers would block forever and leak.\n- Pass `ctx` into the HTTP calls as well, so in-flight catalog requests are cancelled, not just future sends.\n- `golang.org/x/sync/errgroup` with `WithContext` packages this pattern: the first error cancels the others, and `Wait` returns it.\n\n**Trade-offs.** Recovering from the panic in each producer hides the bug and still leaves goroutines in an unknown state; fix the ownership instead. The rule of thumb is that the sender owns the channel: one closer, chosen deliberately. Buffered channels do not fix this; they only change when the crash happens.",
+      "answer_zh": "**规则。** 向已关闭的 channel 发送会 panic，关闭一个已经关闭的 channel 也会 panic。关闭是来自发送方的信号，意思是“不会再有值了”；接收方则总是可以从已关闭的 channel 中读取。当消费者在生产者仍在发送时关闭 channel，任何阻塞在或执行到 `results <- p` 的生产者都会 panic，而任何 goroutine 中未被恢复的 panic 都会让整个进程退出。本地用四个生产者运行时，正是以这种方式崩溃的。\n\n**修复：把“停止”和“不会再有值”分开。** 消费者用一个单独的 channel 或 context 发出停止信号；生产者在 select 中监听它；只有确切知道所有发送者都已结束的那一方，才去关闭结果 channel：\n\n```go\nctx, cancel := context.WithCancel(parent)\ndefer cancel()\n\nresults := make(chan Product)\nvar wg sync.WaitGroup\nfor _, src := range sources {\n\twg.Add(1)\n\tgo func(src Source) {\n\t\tdefer wg.Done()\n\t\tfor p := range src.Products(ctx) {\n\t\t\tselect {\n\t\t\tcase results <- p:\n\t\t\tcase <-ctx.Done():\n\t\t\t\treturn\n\t\t\t}\n\t\t}\n\t}(src)\n}\ngo func() { wg.Wait(); close(results) }() // the only closer\n\nfor p := range results {\n\tpreview = append(preview, p)\n\tif len(preview) == limit {\n\t\tcancel() // ask producers to stop; never close results here\n\t\tbreak\n\t}\n}\n```\n\n- `break` 之后就没有人再读取 `results` 了；这里之所以安全，是因为每一次发送都同时在 select 中监听 `ctx.Done()`。如果没有这个分支，生产者会永远阻塞并泄漏。\n- 把 `ctx` 也传进 HTTP 调用，这样正在进行的目录请求也会被取消，而不只是取消后续的发送。\n- `golang.org/x/sync/errgroup` 的 `WithContext` 封装了这种模式：第一个错误会取消其他任务，`Wait` 会返回这个错误。\n\n**取舍。** 在每个生产者中恢复 panic 只会掩盖 bug，goroutine 仍处于不确定的状态；应该修正所有权。经验法则是发送方拥有 channel：只有一个关闭者，并且是有意选定的。带缓冲的 channel 解决不了这个问题，只是改变了崩溃发生的时机。",
+      "followups": [
+        "Why can receivers keep reading from a closed channel, and what do they get?",
+        "How would you test that no producer goroutine leaks after an early stop?"
+      ],
+      "followups_zh": [
+        "为什么接收方可以继续从已关闭的 channel 读取？读到的是什么？",
+        "你会如何测试提前停止之后没有生产者 goroutine 泄漏？"
+      ],
+      "vocab": [
+        {
+          "en": "fan-in",
+          "zh": "扇入"
+        },
+        {
+          "en": "channel ownership",
+          "zh": "channel 的所有权"
+        },
+        {
+          "en": "cancellation",
+          "zh": "取消"
+        },
+        {
+          "en": "goroutine leak",
+          "zh": "goroutine 泄漏"
+        }
+      ]
+    },
+    {
+      "id": "20261028-2",
+      "topic": "System Design",
+      "difficulty": "Senior",
+      "title": "EU merchants require their data to stay in the EU: turning a single-region SaaS multi-region",
+      "title_zh": "欧盟商家要求数据留在欧盟境内：把单区域 SaaS 改造成多区域",
+      "question": "Your cross-border e-commerce SaaS runs in one US region. Large EU merchants now require that their store, customer and order data be stored and processed in the EU, and some ask for lower latency in Asia too. Some services are global by nature: login, billing, the app marketplace, and the ad-platform integrations.\n\nDesign the move to multiple regions.",
+      "question_zh": "你们的跨境电商 SaaS 运行在一个美国区域。如今大型欧盟商家要求他们的店铺、顾客和订单数据在欧盟境内存储和处理，一些商家还希望亚洲的访问延迟更低。有些服务天然是全局性的：登录、计费、应用市场，以及广告平台集成。\n\n设计向多区域迁移的方案。",
+      "answer": "**The core idea.** Make the region a property of the tenant. Each merchant is pinned to a home region, and everything that holds the merchant's personal or business data lives and runs there. A thin global layer only knows which region a tenant belongs to, plus data that is truly global and contains no protected personal data.\n\n**Design.**\n\n- **Cells per region.** Each region runs a full stack (API, workers, databases, caches, queues, search, object storage). No cross-region database reads on the request path.\n- **Global directory and routing.** A small global service maps `merchant_id` and store domains to a region. The edge or gateway routes each request to the right cell; tokens carry the region so services can reject misrouted traffic.\n- **Classify data.** Identity and billing stay global but store only what they need; order, customer and analytics data stay regional. Logs, traces, backups and data warehouse exports are data too and must stay in the region, which is where most leaks happen.\n- **Third parties.** Calls to ad platforms leave your infrastructure anyway; document them as processors, and use regional endpoints where the platform offers them.\n\n**Migrating existing merchants.** Move one tenant at a time: copy the tenant's data to the new region, keep it in sync with change data capture, briefly freeze writes for that tenant, verify counts and checksums, flip the directory entry, then delete the copy in the old region, including backups after their retention period. Every table therefore needs a tenant key, which is often the biggest preparatory refactor.\n\n**Trade-offs.** Cells limit blast radius and satisfy residency, but cost more to run and operate, and cross-tenant features (global analytics, marketplace search across all stores) need aggregated, anonymized pipelines. Active-active writes across regions are rarely worth it for tenant data; failover within a region plus cross-region disaster recovery, where the law allows it, is simpler. Legal requirements differ by market, so involve legal early and encode the rules as data classification, not as tribal knowledge.",
+      "answer_zh": "**核心思路。** 把区域变成租户的一个属性。每个商家被固定在一个归属区域，所有承载该商家个人数据或业务数据的东西都存放并运行在那里。一个很薄的全局层只知道某个租户属于哪个区域，以及那些真正全局、且不包含受保护个人数据的数据。\n\n**设计。**\n\n- **每个区域一个单元。** 每个区域运行一整套栈（API、worker、数据库、缓存、队列、搜索、对象存储）。请求路径上不跨区域读取数据库。\n- **全局目录与路由。** 一个小型的全局服务把 `merchant_id` 和店铺域名映射到区域。边缘网关或 API 网关把每个请求路由到正确的单元；token 中携带区域信息，这样服务可以拒绝被错误路由的流量。\n- **数据分类。** 身份和计费保持全局，但只存它们需要的内容；订单、顾客和分析数据保持在区域内。日志、链路追踪、备份和数据仓库导出也都是数据，同样必须留在区域内，而大多数泄露恰恰发生在这里。\n- **第三方。** 对广告平台的调用无论如何都会离开你们的基础设施；把它们作为数据处理方记录在案，并在平台提供区域端点时使用区域端点。\n\n**迁移现有商家。** 一次迁移一个租户：把该租户的数据复制到新区域，用变更数据捕获保持同步，短暂冻结该租户的写入，校验数量和校验和，切换目录条目，然后删除旧区域中的副本，包括超过保留期后的备份。因此每张表都需要租户键，这往往是最大的一项前期重构。\n\n**取舍。** 单元化能限制故障影响范围并满足数据驻留要求，但运行和运维成本更高，而跨租户的功能（全局分析、跨所有店铺的应用市场搜索）需要经过聚合、匿名化的数据管道。对租户数据来说，跨区域多活写入很少值得；区域内故障切换，再加上法律允许时的跨区域灾备，要简单得多。各个市场的法律要求不同，所以要尽早让法务参与，并把规则落实为数据分类，而不是靠口口相传。",
+      "followups": [
+        "How would you handle a merchant who sells in both the EU and the US?",
+        "What must the global directory never contain?",
+        "How do you test that no service reads data across regions?"
+      ],
+      "followups_zh": [
+        "对于一个同时在欧盟和美国销售的商家，你会如何处理？",
+        "全局目录中绝不能包含什么？",
+        "你如何测试没有任何服务跨区域读取数据？"
+      ],
+      "vocab": [
+        {
+          "en": "data residency",
+          "zh": "数据驻留"
+        },
+        {
+          "en": "cell",
+          "zh": "单元（独立部署的一整套栈）"
+        },
+        {
+          "en": "home region",
+          "zh": "归属区域"
+        },
+        {
+          "en": "blast radius",
+          "zh": "故障影响范围"
+        },
+        {
+          "en": "change data capture",
+          "zh": "变更数据捕获"
+        }
+      ]
+    },
+    {
+      "id": "20261028-3",
+      "topic": "Database",
+      "difficulty": "Medium",
+      "title": "A US merchant's daily sales report puts evening orders on the next day",
+      "title_zh": "美国商家的每日销售报表把晚上的订单算到了第二天",
+      "question": "The daily report groups orders with `GROUP BY created_at::date`. `created_at` is a `timestamptz`, and the database session runs in UTC. A merchant in Los Angeles says that orders placed after 5 p.m. appear under the next day, and that one day in November looks one hour \"too long\".\n\nExplain the behaviour and write the report correctly.",
+      "question_zh": "每日报表用 `GROUP BY created_at::date` 对订单分组。`created_at` 是 `timestamptz` 类型，数据库会话运行在 UTC 时区。一位洛杉矶的商家说，下午 5 点之后下的订单出现在了第二天，而且 11 月的某一天看起来“多了”一个小时。\n\n解释这种行为，并正确地编写这个报表。",
+      "answer": "**Why.** A `timestamptz` stores an absolute moment. Casting it to `date` uses the session's `TimeZone`, so in UTC the day boundary is midnight UTC, which is 5 p.m. in Los Angeles during daylight saving time. In a PostgreSQL 16 test, an order at 20:30 Los Angeles time was grouped under the next day in a UTC session, and changing the session to another time zone changes the result again: the date depends on a connection setting, not on the merchant.\n\n**Fix: convert to the merchant's zone explicitly.** `created_at AT TIME ZONE 'America/Los_Angeles'` turns the moment into local wall-clock time (a `timestamp without time zone`); group by its date. For filtering one local day, convert the boundaries instead, so an index on `created_at` can still be used:\n\n```sql\n-- one local day for one merchant, index-friendly\nSELECT sum(total_cents)\nFROM orders\nWHERE merchant_id = $1\n  AND created_at >= ('2026-10-27'::timestamp AT TIME ZONE 'America/Los_Angeles')\n  AND created_at <  ('2026-10-28'::timestamp AT TIME ZONE 'America/Los_Angeles');\n\n-- daily totals in the merchant's zone\nSELECT (created_at AT TIME ZONE m.time_zone)::date AS day, sum(o.total_cents)\nFROM orders o JOIN merchant m ON m.id = o.merchant_id\nWHERE o.merchant_id = $1\nGROUP BY 1 ORDER BY 1;\n```\n\n- Store the merchant's IANA zone name (such as `America/Los_Angeles`), not a fixed offset like `-07:00`, because offsets change with daylight saving time.\n- The \"long\" day is real: on the day daylight saving time ends, the local day lasts 25 hours, and the test confirmed the difference between the two local midnights is 1 day 1 hour. Hourly charts must handle the repeated hour.\n- Do not rely on the session `TimeZone` in application code; set it explicitly or, better, make every query state the zone it means.\n\n**Trade-offs.** Converting in SQL is exact but prevents a plain index on the expression unless you add one per zone; for large reports, precompute daily aggregates per merchant in the merchant's zone. If a merchant changes their time zone, decide whether history is recomputed or kept, and record the zone used for each aggregate.",
+      "answer_zh": "**原因。** `timestamptz` 存储的是一个绝对的时间点。把它转换成 `date` 时使用的是会话的 `TimeZone`，所以在 UTC 下，日期分界线是 UTC 午夜，而在夏令时期间这相当于洛杉矶的下午 5 点。在 PostgreSQL 16 的测试中，一笔洛杉矶时间 20:30 的订单在 UTC 会话中被归到了第二天，而把会话改成另一个时区，结果又会随之变化：日期取决于连接的设置，而不是商家。\n\n**修复：显式转换到商家的时区。** `created_at AT TIME ZONE 'America/Los_Angeles'` 把这个时间点转换成当地的挂钟时间（一个 `timestamp without time zone`）；按它的日期分组。若要筛选当地的某一天，则转换边界值，这样 `created_at` 上的索引仍然可以使用：\n\n```sql\n-- one local day for one merchant, index-friendly\nSELECT sum(total_cents)\nFROM orders\nWHERE merchant_id = $1\n  AND created_at >= ('2026-10-27'::timestamp AT TIME ZONE 'America/Los_Angeles')\n  AND created_at <  ('2026-10-28'::timestamp AT TIME ZONE 'America/Los_Angeles');\n\n-- daily totals in the merchant's zone\nSELECT (created_at AT TIME ZONE m.time_zone)::date AS day, sum(o.total_cents)\nFROM orders o JOIN merchant m ON m.id = o.merchant_id\nWHERE o.merchant_id = $1\nGROUP BY 1 ORDER BY 1;\n```\n\n- 存储商家的 IANA 时区名（例如 `America/Los_Angeles`），而不是像 `-07:00` 这样的固定偏移量，因为偏移量会随夏令时变化。\n- 那个“更长”的一天是真实存在的：在夏令时结束的那天，当地的一天有 25 个小时，测试也确认两个当地午夜之间相差 1 天 1 小时。按小时的图表必须处理那个重复的小时。\n- 不要在应用代码中依赖会话的 `TimeZone`；要显式设置它，或者更好的做法是让每个查询都写明它指的是哪个时区。\n\n**取舍。** 在 SQL 中转换是精确的，但除非为每个时区单独建索引，否则无法对这个表达式使用普通索引；对于大型报表，应按商家时区预先计算每个商家的每日汇总。如果商家修改了时区，要决定是重算历史还是保持不变，并记录每份汇总所使用的时区。",
+      "followups": [
+        "What is the difference between timestamp and timestamptz in PostgreSQL?",
+        "How would you build an hourly chart that handles the day DST ends?"
+      ],
+      "followups_zh": [
+        "PostgreSQL 中 timestamp 和 timestamptz 有什么区别？",
+        "你会如何构建一个能处理夏令时结束那天的按小时图表？"
+      ],
+      "vocab": [
+        {
+          "en": "time zone",
+          "zh": "时区"
+        },
+        {
+          "en": "daylight saving time",
+          "zh": "夏令时"
+        },
+        {
+          "en": "wall-clock time",
+          "zh": "挂钟时间（当地时间）"
+        },
+        {
+          "en": "day boundary",
+          "zh": "日期分界线"
+        }
+      ]
+    },
+    {
+      "id": "20261028-4",
+      "topic": "Middleware",
+      "difficulty": "Medium",
+      "title": "A merchant saves a product, but search does not find it for a moment",
+      "title_zh": "商家保存了商品，但搜索在片刻之内找不到它",
+      "question": "Product edits are written to PostgreSQL and then indexed into Elasticsearch. The admin redirects to the product list, which is backed by a search query, right after saving. Merchants report that a newly created product is missing from the list for about a second, while opening the product by ID works. QA \"fixed\" it by adding `refresh=true` to every index request, and indexing throughput dropped sharply during bulk imports.\n\nExplain the behaviour and a better fix.",
+      "question_zh": "商品的修改先写入 PostgreSQL，然后再索引到 Elasticsearch。后台在保存后立即跳转到商品列表，而这个列表是由一次搜索查询支撑的。商家反馈，新建的商品在大约一秒内不会出现在列表中，而按 ID 打开商品是正常的。QA 通过给每个索引请求加上 `refresh=true` 来“修复”了它，结果批量导入时的索引吞吐量大幅下降。\n\n解释这种行为，并给出更好的修复方法。",
+      "answer": "**Why.** Elasticsearch search is near real time. A newly indexed document becomes searchable only after a refresh, which opens a new searchable segment; by default refreshes happen periodically (every second for indices that are being searched). A get by ID reads the document directly and does not wait for a refresh, which is why opening the product works. Forcing `refresh=true` on every write creates many tiny segments and extra merging work, which is what slowed bulk imports.\n\n**Better fixes, from cheapest to most involved.**\n\n- **Read your own write in the UI.** After saving, show the saved product from the save response (or a get by ID) at the top of the list, and refresh the list a moment later. This costs nothing on the cluster.\n- **Wait only where it matters.** For the single interactive save, index with `refresh=wait_for`: the request returns after the next scheduled refresh makes the document visible, without forcing an extra refresh.\n- **Bulk imports without refresh.** Never request refresh on bulk writes. For very large imports, temporarily lengthen or disable the refresh interval on the index and restore it afterwards.\n\n**The bigger consistency question.** If indexing runs asynchronously from the database (an outbox or change data capture), the delay can be seconds or more during backlogs, and no refresh setting fixes that. Treat the search index as a derived, eventually consistent view: show the source of truth where freshness matters, and monitor indexing lag.\n\n**Trade-offs.** `wait_for` adds up to one refresh interval of latency to that request, acceptable for an interactive save but not for high-volume writes. A longer refresh interval makes indexing cheaper but makes all searches staler. Choose per use case, not one global setting.",
+      "answer_zh": "**原因。** Elasticsearch 的搜索是近实时的。新索引的文档只有在一次 refresh 之后才可被搜索到，refresh 会打开一个新的可搜索分段；默认情况下 refresh 会周期性地发生（对于正在被搜索的索引，每秒一次）。按 ID 获取文档是直接读取文档，不需要等待 refresh，这就是为什么打开商品是正常的。在每次写入时强制 `refresh=true` 会产生大量很小的分段和额外的合并工作，这正是批量导入变慢的原因。\n\n**更好的修复方法，从最便宜到最复杂。**\n\n- **在界面上读到自己刚写入的数据。** 保存后，用保存接口的返回值（或按 ID 获取的结果）把刚保存的商品显示在列表顶部，片刻之后再刷新列表。这对集群没有任何开销。\n- **只在必要的地方等待。** 对于单次交互式保存，以 `refresh=wait_for` 进行索引：请求会在下一次定期 refresh 让文档可见之后才返回，而不会强制额外的 refresh。\n- **批量导入不做 refresh。** 批量写入时绝不请求 refresh。对于非常大的导入，可以临时延长或关闭该索引的 refresh 间隔，结束后再恢复。\n\n**更大的一致性问题。** 如果索引是与数据库异步进行的（通过 outbox 或变更数据捕获），在积压时延迟可能达到几秒甚至更长，任何 refresh 设置都解决不了这个问题。要把搜索索引当作一个派生的、最终一致的视图：在需要新鲜度的地方展示真实数据源，并监控索引延迟。\n\n**取舍。** `wait_for` 会给那个请求增加最多一个 refresh 间隔的延迟，这对一次交互式保存可以接受，但不适合高频写入。更长的 refresh 间隔让索引更便宜，但会让所有搜索都更陈旧。要按使用场景选择，而不是使用一个全局设置。",
+      "followups": [
+        "Why does a get by ID see the document before a search does?",
+        "How would you measure indexing lag from the database to the search index?"
+      ],
+      "followups_zh": [
+        "为什么按 ID 获取能比搜索更早看到文档？",
+        "你会如何测量从数据库到搜索索引的索引延迟？"
+      ],
+      "vocab": [
+        {
+          "en": "near real time",
+          "zh": "近实时"
+        },
+        {
+          "en": "refresh interval",
+          "zh": "refresh 间隔"
+        },
+        {
+          "en": "segment",
+          "zh": "分段（segment）"
+        },
+        {
+          "en": "eventually consistent",
+          "zh": "最终一致"
+        }
+      ]
+    },
+    {
+      "id": "20261028-5",
+      "topic": "Java & CS",
+      "difficulty": "Hard",
+      "title": "@Transactional is on the method, but the data is saved without a transaction",
+      "title_zh": "方法上加了 @Transactional，数据却在没有事务的情况下被保存了",
+      "question": "In a Spring service, `placeOrder()` validates the cart and then calls `this.saveOrderWithItems()`, which is annotated `@Transactional`. When inserting an item fails halfway, the order row stays in the database without its items. The same `saveOrderWithItems()` behaves correctly when another bean calls it. A similar `@Async` method called from the same class also runs synchronously.\n\nExplain the cause and the fixes.",
+      "question_zh": "在一个 Spring 服务中，`placeOrder()` 先校验购物车，然后调用 `this.saveOrderWithItems()`，后者标注了 `@Transactional`。当插入某个订单项中途失败时，订单行留在了数据库里，却没有对应的订单项。同一个 `saveOrderWithItems()` 被另一个 bean 调用时，行为却是正确的。同一个类中调用的一个类似的 `@Async` 方法也是同步执行的。\n\n解释原因和修复方法。",
+      "answer": "**Cause: proxies only see calls that go through them.** Spring implements `@Transactional`, `@Async`, `@Cacheable` and similar annotations with a proxy around the bean. A call from another bean goes through the proxy, which starts the transaction and then calls the real object. A call from inside the bean, `this.saveOrderWithItems()`, goes straight to the real object and never passes the proxy, so no transaction is started. A small JDK dynamic proxy demo shows the same effect: the external call ran \"inside the transaction\", the self-call did not.\n\n**Fixes.**\n\n- Put the transaction boundary on the public method that callers use: annotate `placeOrder()` itself, if validation inside the transaction is acceptable.\n- Move the transactional work into a separate bean (for example `OrderWriter.saveOrderWithItems()`) and inject it; the call then goes through that bean's proxy. This is usually the cleanest design.\n- Use `TransactionTemplate` for an explicit, local transaction block when you need one inside a method.\n\n```java\n@Service\nclass OrderService {\n    private final OrderWriter writer;   // separate bean, called through its proxy\n\n    OrderService(OrderWriter writer) { this.writer = writer; }\n\n    public OrderId placeOrder(Cart cart) {\n        validate(cart);\n        return writer.saveOrderWithItems(cart);   // transactional\n    }\n}\n```\n\n**Related traps.** With proxy-based transactions, the annotation is ignored on calls that do not go through the proxy, and visibility rules apply: older Spring versions only applied it to public methods. By default rollback happens on unchecked exceptions, not on checked ones, unless you set `rollbackFor`. A transaction started on one thread does not follow work handed to another thread, so `@Async` work inside a transactional method runs outside that transaction.\n\n**Trade-offs.** Extra beans add some structure but make transaction boundaries visible in the design. AspectJ weaving removes the self-invocation limit, but adds build complexity and surprises for people who expect proxy behaviour. Whatever you choose, write an integration test that fails halfway through and asserts nothing was committed.",
+      "answer_zh": "**原因：代理只能看到经过它的调用。** Spring 用包裹在 bean 外面的代理来实现 `@Transactional`、`@Async`、`@Cacheable` 等注解。来自另一个 bean 的调用会经过代理，代理开启事务后再调用真正的对象。而 bean 内部的调用 `this.saveOrderWithItems()` 直接到达真正的对象，从不经过代理，所以不会开启事务。一个小的 JDK 动态代理演示也展示了同样的效果：外部调用是在“事务中”运行的，自调用则不是。\n\n**修复方法。**\n\n- 把事务边界放在调用方使用的那个公共方法上：如果校验放在事务内可以接受，就直接给 `placeOrder()` 加注解。\n- 把事务性的工作移到一个单独的 bean 中（例如 `OrderWriter.saveOrderWithItems()`）并注入它；这样调用就会经过那个 bean 的代理。这通常是最干净的设计。\n- 当需要在方法内部开启事务时，用 `TransactionTemplate` 写一个显式的局部事务块。\n\n```java\n@Service\nclass OrderService {\n    private final OrderWriter writer;   // separate bean, called through its proxy\n\n    OrderService(OrderWriter writer) { this.writer = writer; }\n\n    public OrderId placeOrder(Cart cart) {\n        validate(cart);\n        return writer.saveOrderWithItems(cart);   // transactional\n    }\n}\n```\n\n**相关的陷阱。** 在基于代理的事务中，不经过代理的调用会忽略这个注解，并且还受可见性规则约束：较旧的 Spring 版本只对 public 方法生效。默认情况下，只有非受检异常会触发回滚，受检异常不会，除非你设置了 `rollbackFor`。在一个线程上开启的事务不会跟随交给另一个线程的工作，所以在事务方法中发起的 `@Async` 工作运行在该事务之外。\n\n**取舍。** 额外的 bean 会增加一些结构，但能让事务边界在设计中清晰可见。AspectJ 织入可以消除自调用的限制，但会增加构建复杂度，也会让预期代理行为的人感到意外。无论选择哪种，都要写一个中途失败、并断言什么都没有提交的集成测试。",
+      "followups": [
+        "Why does Spring not roll back on checked exceptions by default, and how do you change it?",
+        "What happens to the transaction if a @Transactional method starts work with @Async?"
+      ],
+      "followups_zh": [
+        "为什么 Spring 默认不对受检异常回滚？如何修改？",
+        "如果一个 @Transactional 方法用 @Async 发起了工作，事务会怎样？"
+      ],
+      "vocab": [
+        {
+          "en": "proxy",
+          "zh": "代理"
+        },
+        {
+          "en": "self-invocation",
+          "zh": "自调用"
+        },
+        {
+          "en": "transaction boundary",
+          "zh": "事务边界"
+        },
+        {
+          "en": "rollback rule",
+          "zh": "回滚规则"
+        }
+      ]
+    }
+  ]
+}
