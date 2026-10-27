@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 20 个模块、84 道题。
+共 21 个模块、89 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -271,3 +271,17 @@ Five new agent questions: handling refusals and fallbacks in a batch loop, keepi
 | 3 | Context & Memory | Medium | [A 40 MB supplier catalog is re-sent on every turn, and requests start failing](modules/daily-2026-10-27.md#q3) | 一份 40 MB 的供应商目录在每一轮都被重新发送，请求开始失败 |
 | 4 | Production | Senior | [Running a nightly ad-audit agent for 2,000 merchants on a managed agent platform](modules/daily-2026-10-27.md#q4) | 在托管 Agent 平台上为 2,000 家商家运行夜间广告审计 Agent |
 | 5 | RAG | Hard | [Retrieving 50 chunks instead of 5 made the policy answers worse](modules/daily-2026-10-27.md#q5) | 检索 50 个片段而不是 5 个之后，政策类回答反而变差了 |
+
+## [Daily set · Oct 28 · 每日新题 · 10 月 28 日](modules/daily-2026-10-28.md)
+
+Five new agent questions: an SDK upgrade that switched the API version, connecting your traces with the API's spans, planning context with the right tokenizer, permission policies that avoid both approval fatigue and unchecked actions, and when to let an agent operate a web portal that has no API.
+
+> 五道新的 Agent 题：一次切换了 API 版本的 SDK 升级、把你的链路追踪与 API 的 span 连接起来、用正确的分词器规划上下文、既避免审批疲劳又避免失控操作的权限策略，以及什么时候让 Agent 操作一个没有 API 的网页后台。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Production | Medium | [After an SDK upgrade, every ad-copy request fails with a 400](modules/daily-2026-10-28.md#q1) | 升级 SDK 之后，所有广告文案请求都以 400 失败 |
+| 2 | Evals & Observability | Hard | [A merchant's question took 40 seconds, and the trace shows the Claude call as one opaque bar](modules/daily-2026-10-28.md#q2) | 一位商家的问题花了 40 秒，而链路追踪里 Claude 调用只是一根看不透的长条 |
+| 3 | Context & Memory | Medium | [The context budget was estimated with the wrong tokenizer, and long catalogs fail](modules/daily-2026-10-28.md#q3) | 上下文预算是用错误的分词器估算的，长商品目录因此失败 |
+| 4 | Safety & Security | Hard | [Merchants approve every agent action without reading, or the agent runs shell commands unasked](modules/daily-2026-10-28.md#q4) | 商家看都不看就批准 Agent 的每个操作，或者 Agent 不经询问就执行 shell 命令 |
+| 5 | Tools & MCP | Senior | [A regional marketplace has no API: should an agent upload listings by operating its seller portal?](modules/daily-2026-10-28.md#q5) | 一个地区性电商平台没有 API：要不要让 Agent 通过操作卖家后台来上传商品？ |
