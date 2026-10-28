@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 17 天、85 道题。
+共 18 天、90 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-10-29](days/2026-10-29.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Medium | [Merchants cannot un-pause a campaign or set a budget to zero through the API](days/2026-10-29.md#q1) | 商家无法通过 API 恢复暂停的广告活动，也无法把预算设为零 |
+| 2 | System Design | Hard | [Order numbers collide after the order service scales to many instances](days/2026-10-29.md#q2) | 订单服务扩展到多个实例之后，订单号开始冲突 |
+| 3 | Database | Hard | [Invoice numbers must have no gaps, but the sequence skips numbers](days/2026-10-29.md#q3) | 发票号必须连续无间隔，但序列会跳号 |
+| 4 | Middleware | Senior | [Migrating the order event pipeline from RabbitMQ to Kafka without losing or duplicating events](days/2026-10-29.md#q4) | 把订单事件管道从 RabbitMQ 迁移到 Kafka，同时不丢失、不重复事件 |
+| 5 | Java & CS | Medium | [Adding to a list of SKUs throws UnsupportedOperationException after a refactor](days/2026-10-29.md#q5) | 重构之后，向一个 SKU 列表添加元素时抛出 UnsupportedOperationException |
 
 ## [2026-10-28](days/2026-10-28.md)
 
