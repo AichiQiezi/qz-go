@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 21 个模块、89 道题。
+共 22 个模块、94 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -285,3 +285,17 @@ Five new agent questions: an SDK upgrade that switched the API version, connecti
 | 3 | Context & Memory | Medium | [The context budget was estimated with the wrong tokenizer, and long catalogs fail](modules/daily-2026-10-28.md#q3) | 上下文预算是用错误的分词器估算的，长商品目录因此失败 |
 | 4 | Safety & Security | Hard | [Merchants approve every agent action without reading, or the agent runs shell commands unasked](modules/daily-2026-10-28.md#q4) | 商家看都不看就批准 Agent 的每个操作，或者 Agent 不经询问就执行 shell 命令 |
 | 5 | Tools & MCP | Senior | [A regional marketplace has no API: should an agent upload listings by operating its seller portal?](modules/daily-2026-10-28.md#q5) | 一个地区性电商平台没有 API：要不要让 Agent 通过操作卖家后台来上传商品？ |
+
+## [Daily set · Oct 29 · 每日新题 · 10 月 29 日](modules/daily-2026-10-29.md)
+
+Five new agent questions: hybrid retrieval for exact SKUs, separating and governing agent memory stores, auditing an eval before it gates releases, tracking thousands of background sessions with webhooks, and keeping a merchant's data inside their network with self-hosted sandboxes.
+
+> 五道新的 Agent 题：针对精确 SKU 的混合检索、拆分并治理 Agent 的记忆存储、在评测成为发布关卡之前先审查它、用 webhook 跟踪成千上万个后台会话，以及用自托管沙箱让商家的数据留在其网络内部。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | RAG | Medium | ["Do you have AB-1234 in navy?" The assistant finds similar products but never the right SKU](modules/daily-2026-10-29.md#q1) | “AB-1234 有藏青色吗？”助手能找到相似的商品，却从来找不到那个 SKU |
+| 2 | Context & Memory | Hard | [Nightly agents share one memory store, and merchants' learnings start to mix](modules/daily-2026-10-29.md#q2) | 夜间 Agent 共用一个记忆存储，商家之间学到的东西开始混在一起 |
+| 3 | Evals & Observability | Hard | [The inherited eval says 92%, until you find that timeouts are scored as passes](modules/daily-2026-10-29.md#q3) | 接手的评测显示 92%，直到你发现超时被算作了通过 |
+| 4 | Production | Medium | [Holding 2,000 event streams open every night just to learn when sessions finish](modules/daily-2026-10-29.md#q4) | 每晚保持 2,000 条事件流开着，只为了知道会话什么时候结束 |
+| 5 | Safety & Security | Senior | [An enterprise merchant requires that order data never leave their network: can you still offer the agent?](modules/daily-2026-10-29.md#q5) | 一家大企业商家要求订单数据绝不离开他们的网络：你还能提供这个 Agent 吗？ |
