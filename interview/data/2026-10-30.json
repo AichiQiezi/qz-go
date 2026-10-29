@@ -1,0 +1,195 @@
+{
+  "date": "2026-10-30",
+  "generatedAt": "2026-10-30T06:44:31+08:00",
+  "questions": [
+    {
+      "id": "20261030-1",
+      "topic": "Go",
+      "difficulty": "Senior",
+      "title": "A product cache evicts 99% of its entries, but the service's memory barely drops",
+      "title_zh": "商品缓存淘汰了 99% 的条目，但服务的内存几乎没有下降",
+      "question": "A Go service keeps an in-memory `map[int64]Product` of catalog data. During a big import it grows to a million entries; afterwards a cleanup job deletes everything except about ten thousand active products. Heap usage drops much less than expected and stays high for days, and the pod is close to its memory limit.\n\nExplain what is happening and how to design the cache.",
+      "question_zh": "一个 Go 服务在内存里用 `map[int64]Product` 保存商品目录数据。一次大规模导入时，它增长到一百万个条目；之后一个清理任务删除了除大约一万个活跃商品以外的所有条目。堆内存的下降远低于预期，而且好几天都居高不下，pod 已经接近它的内存上限。\n\n解释发生了什么，以及应该如何设计这个缓存。",
+      "answer": "**Why.** A Go map grows its internal table as you insert, but deleting entries does not shrink it: the slots stay allocated so later inserts can reuse them. Values that are stored out of line are freed when deleted, but the table itself remains sized for the peak. In a local test with a million entries, deleting 99% left about 39 MB of heap; copying the remaining ten thousand entries into a new map and dropping the old one brought it down to about 3 MB.\n\n**Fixes, from quick to structural.**\n\n- **Rebuild after large deletions.** When the live size falls far below the peak, copy the live entries into a fresh map sized for them and swap it in under the lock. The old table becomes garbage and is collected.\n- **Bound the cache.** Use a size-limited cache with an eviction policy (LRU or similar) instead of an unbounded map, so a one-off import cannot grow it to a million entries in the first place.\n- **Do not cache what the import touches.** Bulk jobs should read and write the database directly, or use a separate short-lived structure, so they do not pollute the cache used by request traffic.\n- **Set a soft memory limit.** `GOMEMLIMIT` makes the garbage collector work harder as the heap approaches a target, which helps with garbage but cannot free memory that is still referenced, such as the oversized table.\n\n```go\nfunc (c *Cache) compact() {\n\tc.mu.Lock()\n\tdefer c.mu.Unlock()\n\tfresh := make(map[int64]Product, len(c.items))\n\tfor k, v := range c.items {\n\t\tfresh[k] = v\n\t}\n\tc.items = fresh // the old table is now garbage\n}\n```\n\n**How to confirm.** Compare `runtime/metrics` or heap profiles before and after: a heap profile shows the map's memory attributed to the insertion site, and the number of live entries tells you whether it is data or table overhead. Watch the RSS too, since the runtime returns freed memory to the OS gradually.\n\n**Trade-offs.** Rebuilding costs a full copy and holds the lock while copying; for large caches, build the new map from a snapshot and swap atomically, or shard the cache so each shard is rebuilt independently. An off-the-shelf bounded cache adds a dependency but solves sizing, eviction and metrics together.",
+      "answer_zh": "**原因。** Go 的 map 在插入时会扩大其内部的表，但删除条目并不会让它缩小：这些槽位仍然保持分配状态，以便后续插入时复用。存放在表外的值在删除时会被释放，但表本身仍保持峰值时的大小。在一个包含一百万个条目的本地测试中，删除 99% 之后堆上还剩约 39 MB；把剩下的一万个条目复制到一个新 map 里并丢弃旧 map 之后，降到了约 3 MB。\n\n**修复方法，从快速到结构性。**\n\n- **大量删除之后重建。** 当实际大小远低于峰值时，把仍然有效的条目复制到一个按其大小创建的新 map 中，并在锁的保护下替换进去。旧的表就变成了垃圾，会被回收。\n- **给缓存设上限。** 使用带淘汰策略（LRU 或类似策略）的有容量限制的缓存，而不是无上限的 map，这样一次性的导入从一开始就不会让它增长到一百万个条目。\n- **不要缓存导入任务碰到的数据。** 批量任务应该直接读写数据库，或者使用一个单独的、生命周期很短的结构，这样就不会污染供请求流量使用的缓存。\n- **设置软内存上限。** `GOMEMLIMIT` 会让垃圾回收器在堆接近目标值时更积极地工作，这对垃圾有帮助，但无法释放仍被引用的内存，比如这个过大的表。\n\n```go\nfunc (c *Cache) compact() {\n\tc.mu.Lock()\n\tdefer c.mu.Unlock()\n\tfresh := make(map[int64]Product, len(c.items))\n\tfor k, v := range c.items {\n\t\tfresh[k] = v\n\t}\n\tc.items = fresh // the old table is now garbage\n}\n```\n\n**如何确认。** 对比前后的 `runtime/metrics` 或堆 profile：堆 profile 会把 map 的内存归到插入的代码位置上，而有效条目的数量能告诉你这些内存是数据本身还是表的开销。也要关注 RSS，因为运行时是逐步把释放的内存归还给操作系统的。\n\n**取舍。** 重建需要完整复制一次，并且在复制期间持有锁；对于大型缓存，可以基于快照构建新 map 再原子地替换，或者把缓存分片，让每个分片独立重建。使用现成的有界缓存会多一个依赖，但能把容量、淘汰和指标这几个问题一起解决。",
+      "followups": [
+        "Why does Go not shrink maps automatically after deletions?",
+        "How would you decide when to compact the cache?",
+        "What does GOMEMLIMIT help with, and what can it not fix?"
+      ],
+      "followups_zh": [
+        "为什么 Go 不会在删除之后自动收缩 map？",
+        "你会如何决定什么时候压缩缓存？",
+        "GOMEMLIMIT 能帮助解决什么问题，又解决不了什么问题？"
+      ],
+      "vocab": [
+        {
+          "en": "hash table",
+          "zh": "哈希表"
+        },
+        {
+          "en": "heap profile",
+          "zh": "堆 profile"
+        },
+        {
+          "en": "bounded cache",
+          "zh": "有界缓存"
+        },
+        {
+          "en": "soft memory limit",
+          "zh": "软内存上限"
+        }
+      ]
+    },
+    {
+      "id": "20261030-2",
+      "topic": "System Design",
+      "difficulty": "Medium",
+      "title": "Designing returns and refunds: partial refunds, duplicate clicks and a slow payment provider",
+      "title_zh": "设计退货与退款：部分退款、重复点击和缓慢的支付服务商",
+      "question": "Merchants need to refund orders fully or partially, for example one item out of three plus shipping. Today a refund button calls the payment provider directly; double clicks have caused double refunds, a timeout left orders marked \"refunded\" when the money never moved, and refunds are not reflected in the ad-platform conversion data.\n\nDesign the refund flow.",
+      "question_zh": "商家需要对订单进行全额或部分退款，例如三件商品中的一件再加上运费。现在退款按钮直接调用支付服务商；重复点击曾导致重复退款，一次超时让订单被标记为“已退款”而钱实际上并没有退回，而且退款也没有反映到广告平台的转化数据中。\n\n设计退款流程。",
+      "answer": "**Model refunds as records with a state machine.** Create a `refund` row first, with the order, the items and amounts, a reason, and a status: `requested`, `pending_provider`, `succeeded`, `failed`. The UI and APIs act on refund records, never by calling the provider directly.\n\n- **Validate against what is refundable.** In one transaction, lock the order and check that the new refund plus earlier refunds does not exceed what was paid per line and for shipping. This makes over-refunding impossible, including from two admins at once.\n- **Idempotency end to end.** The client sends an idempotency key with the request, so a double click returns the same refund record. The worker passes the refund ID as the idempotency key to the payment provider, so a retry after a timeout cannot refund twice.\n- **Asynchronous execution.** A worker sends the refund to the provider and updates the status from the provider's response or webhook. A timeout means \"unknown\", not \"failed\": the worker queries the provider by the idempotency key before retrying.\n- **Side effects after success.** When a refund succeeds, emit an event from an outbox: restock items if the merchant chose to, update accounting, send the customer email, and send an adjusted or retracted conversion to the ad platforms where their APIs support it.\n\n**Reconcile.** A daily job compares refunds in your database with the provider's settlement reports and flags mismatches, such as a refund the provider processed that your system still shows as pending.\n\n**Trade-offs.** The asynchronous flow means the merchant sees \"refund pending\" for a moment instead of an instant result, which is honest and avoids false \"refunded\" states. Per-line accounting is more work than a single amount field but is required for partial refunds, taxes and inventory. Keep refunds immutable once they succeed; corrections are new records.",
+      "answer_zh": "**把退款建模为带状态机的记录。** 先创建一条 `refund` 记录，包含订单、商品与金额、原因以及状态：`requested`、`pending_provider`、`succeeded`、`failed`。界面和 API 都基于退款记录来操作，绝不直接调用支付服务商。\n\n- **按可退金额进行校验。** 在一个事务中锁住订单，检查这次新退款加上之前的退款，不会超过每一行商品以及运费实际支付的金额。这样就不可能超额退款，包括两个管理员同时操作的情况。\n- **端到端的幂等性。** 客户端在请求中带上一个幂等键，这样重复点击会返回同一条退款记录。worker 把退款 ID 作为幂等键传给支付服务商，这样超时后的重试就不会退两次款。\n- **异步执行。** 由 worker 把退款发送给支付服务商，并根据服务商的响应或 webhook 更新状态。超时意味着“未知”，而不是“失败”：worker 在重试之前要先用幂等键向服务商查询。\n- **成功之后再处理副作用。** 退款成功后，通过 outbox 发出一个事件：如果商家选择了，就把商品补回库存；更新账务；给顾客发邮件；并在广告平台 API 支持的情况下，发送调整或撤回的转化数据。\n\n**对账。** 一个每日任务把数据库中的退款与支付服务商的结算报表进行比对，并标记不一致之处，例如服务商已经处理、而你们系统里仍显示为待处理的退款。\n\n**取舍。** 异步流程意味着商家会短暂地看到“退款处理中”，而不是立即得到结果，但这样做是诚实的，并且能避免错误的“已退款”状态。按商品行记账比只用一个金额字段更费事，但部分退款、税费和库存都需要它。退款一旦成功就保持不可变；更正通过新的记录来完成。",
+      "followups": [
+        "How would you handle a refund for an order paid partly with a gift card?",
+        "What should the system do if the provider's webhook says succeeded but your request had timed out?"
+      ],
+      "followups_zh": [
+        "对于一笔部分用礼品卡支付的订单，你会如何处理退款？",
+        "如果服务商的 webhook 显示成功，而你们的请求当时已经超时，系统应该怎么处理？"
+      ],
+      "vocab": [
+        {
+          "en": "partial refund",
+          "zh": "部分退款"
+        },
+        {
+          "en": "state machine",
+          "zh": "状态机"
+        },
+        {
+          "en": "idempotency key",
+          "zh": "幂等键"
+        },
+        {
+          "en": "settlement report",
+          "zh": "结算报表"
+        }
+      ]
+    },
+    {
+      "id": "20261030-3",
+      "topic": "Database",
+      "difficulty": "Hard",
+      "title": "A batch product upsert fails with \"cannot affect row a second time\"",
+      "title_zh": "批量商品 upsert 以“cannot affect row a second time”失败",
+      "question": "A sync job upserts products from an ad-platform catalog in batches of 500 with `INSERT ... ON CONFLICT (merchant_id, sku) DO UPDATE`. Some batches fail with `ON CONFLICT DO UPDATE command cannot affect row a second time`, and when they fail, none of the 500 rows are written. A teammate switched one path to `ON CONFLICT DO NOTHING ... RETURNING id` and now the code thinks existing products were never processed.\n\nExplain both problems and write a correct, efficient upsert.",
+      "question_zh": "一个同步任务以每批 500 条的方式，用 `INSERT ... ON CONFLICT (merchant_id, sku) DO UPDATE` 对广告平台目录中的商品做 upsert。有些批次以 `ON CONFLICT DO UPDATE command cannot affect row a second time` 失败，而且一旦失败，这 500 行一条都没有写入。一位同事把其中一条路径改成了 `ON CONFLICT DO NOTHING ... RETURNING id`，结果代码以为已有的商品从未被处理过。\n\n解释这两个问题，并写出一个正确、高效的 upsert。",
+      "answer": "**Why the batch fails.** One `INSERT ... ON CONFLICT DO UPDATE` statement may update a given row only once. If the batch contains the same key twice (the platform sent two versions of one SKU), the second occurrence would update a row the statement already changed, so PostgreSQL raises an error, and because it is one statement, the whole batch is rolled back. A PostgreSQL 16 test reproduced it with the same `(merchant_id, sku)` twice in one batch; even the unrelated row in the batch was not written.\n\n**Why RETURNING misled the other path.** With `DO NOTHING`, rows that hit a conflict are skipped and are not returned by `RETURNING`; only newly inserted rows come back. In the test, a batch with one existing and one new SKU returned only the new one.\n\n**Fix: deduplicate inside the statement, keep the latest version, and skip no-op updates.**\n\n```sql\nINSERT INTO product (merchant_id, sku, price_cents)\nSELECT DISTINCT ON (merchant_id, sku) merchant_id, sku, price_cents\nFROM incoming                         -- the batch, with a sequence or timestamp\nORDER BY merchant_id, sku, seq DESC   -- latest version wins\nON CONFLICT (merchant_id, sku) DO UPDATE\n   SET price_cents = EXCLUDED.price_cents, updated_at = now()\n WHERE product.price_cents IS DISTINCT FROM EXCLUDED.price_cents\nRETURNING sku, price_cents;\n```\n\n- Deduplicate by the conflict key and pick the version deliberately (latest timestamp or highest source version), so the result does not depend on the order the platform sent rows.\n- The `WHERE` on `DO UPDATE` skips rows whose values did not change, which avoids dead tuples, write amplification and needless change events. Those skipped rows are not returned either, so do not use `RETURNING` alone to decide which SKUs were processed.\n- To know which SKUs were seen, compare the batch with the result in your code, or join the batch against the table after the statement.\n\n**Trade-offs.** Large batches are efficient but make one bad row fail many; keep batches moderate and, on failure, split and retry to isolate the offending rows. Concurrent jobs upserting the same keys can still deadlock if they lock rows in different orders, so sort each batch by the conflict key.",
+      "answer_zh": "**批次为什么会失败。** 一条 `INSERT ... ON CONFLICT DO UPDATE` 语句对某一行最多只能更新一次。如果一个批次中包含两次相同的键（平台发来了同一个 SKU 的两个版本），第二次出现就要更新一行该语句已经修改过的数据，于是 PostgreSQL 报错；又因为这是一条语句，整个批次都会回滚。在 PostgreSQL 16 的测试中，同一个批次里出现两次相同的 `(merchant_id, sku)` 就复现了这个问题，连批次中不相关的那一行也没有写入。\n\n**为什么 RETURNING 误导了另一条路径。** 使用 `DO NOTHING` 时，遇到冲突的行会被跳过，也不会被 `RETURNING` 返回；只有新插入的行才会返回。在测试中，一个包含一个已有 SKU 和一个新 SKU 的批次，只返回了那个新的。\n\n**修复：在语句内部去重、保留最新版本，并跳过无变化的更新。**\n\n```sql\nINSERT INTO product (merchant_id, sku, price_cents)\nSELECT DISTINCT ON (merchant_id, sku) merchant_id, sku, price_cents\nFROM incoming                         -- the batch, with a sequence or timestamp\nORDER BY merchant_id, sku, seq DESC   -- latest version wins\nON CONFLICT (merchant_id, sku) DO UPDATE\n   SET price_cents = EXCLUDED.price_cents, updated_at = now()\n WHERE product.price_cents IS DISTINCT FROM EXCLUDED.price_cents\nRETURNING sku, price_cents;\n```\n\n- 按冲突键去重，并有意识地选择版本（最新时间戳或最高的源版本号），这样结果就不会依赖平台发送行的顺序。\n- `DO UPDATE` 上的 `WHERE` 会跳过值没有变化的行，从而避免死元组、写放大以及不必要的变更事件。这些被跳过的行同样不会被返回，所以不要只靠 `RETURNING` 来判断哪些 SKU 已经处理过。\n- 要知道哪些 SKU 已经被处理过，可以在代码中把批次和结果进行比对，或者在语句执行后把批次与表做一次关联查询。\n\n**取舍。** 大批次效率高，但一行有问题就会让很多行一起失败；要让批次保持适中的大小，并在失败时拆分重试，把出问题的行隔离出来。并发的任务对相同的键做 upsert 时，如果它们以不同的顺序锁行，仍然可能死锁，所以要按冲突键对每个批次排序。",
+      "followups": [
+        "Why does sorting each batch by key reduce deadlocks between concurrent upserts?",
+        "How would you tell inserted rows from updated rows in the result?",
+        "When would MERGE be a better fit than INSERT ... ON CONFLICT?"
+      ],
+      "followups_zh": [
+        "为什么按键对每个批次排序，可以减少并发 upsert 之间的死锁？",
+        "你会如何在结果中区分插入的行和更新的行？",
+        "什么时候 MERGE 会比 INSERT ... ON CONFLICT 更合适？"
+      ],
+      "vocab": [
+        {
+          "en": "upsert",
+          "zh": "upsert（插入或更新）"
+        },
+        {
+          "en": "conflict target",
+          "zh": "冲突目标"
+        },
+        {
+          "en": "no-op update",
+          "zh": "无变化的更新"
+        },
+        {
+          "en": "write amplification",
+          "zh": "写放大"
+        }
+      ]
+    },
+    {
+      "id": "20261030-4",
+      "topic": "Middleware",
+      "difficulty": "Medium",
+      "title": "Shoppers in Germany see US prices because the CDN cached a personalized page",
+      "title_zh": "德国顾客看到了美国价格，因为 CDN 缓存了一个个性化页面",
+      "question": "To speed up storefronts, the team put product pages behind a CDN with a cache time of several minutes. Soon after, shoppers in Germany sometimes saw prices in US dollars, and a few logged-in shoppers saw another customer's name in the header. The pages pick currency from the shopper's country and show the customer name when a session cookie is present.\n\nExplain the cause and design caching that is fast and safe.",
+      "question_zh": "为了加快店铺前台的速度，团队把商品页放到了 CDN 后面，缓存时间为几分钟。不久之后，德国的顾客有时会看到以美元标价的价格，还有几位已登录的顾客在页头看到了别的顾客的名字。这些页面会根据顾客所在国家选择币种，并在存在会话 cookie 时显示顾客姓名。\n\n解释原因，并设计一种既快又安全的缓存方式。",
+      "answer": "**Why.** A shared cache stores one response per cache key, usually the URL. If the response depends on something that is not in the key, such as the shopper's country or session cookie, the first shopper's version is served to everyone who requests that URL until it expires. Personal data in a cached page is not only a bug but a privacy incident.\n\n**Fix.**\n\n- **Never cache personalized responses in shared caches.** Any response that includes customer data gets `Cache-Control: private, no-store` or is not served through the CDN cache at all. Make this the default in the framework, so a developer must opt in to public caching.\n- **Split the page.** Serve a cacheable shell with product data, and load the personalized parts (customer name, cart, recommendations) with a separate uncached request from the browser or through edge includes.\n- **Put variants in the key, explicitly.** For country or currency, include the market in the URL (`/de/products/...`) or in a normalized cache key the CDN controls, rather than relying on headers with many values. Avoid varying on raw cookies, which effectively disables caching.\n- **Purge on change.** Tag cached pages by product and purge by tag when price or stock changes, so short staleness windows are bounded by events, not just by TTL.\n\n**Respond to the incident.** Purge the CDN immediately, disable caching for the affected routes, find which customers' data may have been shown, and follow your privacy incident process. Then add a test that requests a page with and without a session cookie and asserts the cache headers.\n\n**Trade-offs.** Splitting pages adds requests and complexity in the frontend, but keeps most bytes cacheable. Market-specific URLs multiply cache entries by the number of markets, which is usually fine. Short TTLs reduce staleness but increase origin load; event-driven purges give both freshness and a high hit rate.",
+      "answer_zh": "**原因。** 共享缓存为每个缓存键存储一份响应，缓存键通常就是 URL。如果响应依赖于不在键中的东西，比如顾客所在国家或会话 cookie，那么在缓存过期之前，第一位顾客看到的版本会被返回给所有请求这个 URL 的人。缓存页面里出现个人数据不只是一个 bug，还是一起隐私事故。\n\n**修复方法。**\n\n- **绝不在共享缓存中缓存个性化的响应。** 任何包含顾客数据的响应都要设置 `Cache-Control: private, no-store`，或者根本不经过 CDN 缓存。在框架中把这设为默认值，让开发者必须显式选择才能启用公共缓存。\n- **拆分页面。** 提供一个可缓存的、包含商品数据的页面框架，再由浏览器通过单独的、不缓存的请求（或通过边缘包含）加载个性化的部分（顾客姓名、购物车、推荐）。\n- **把变体显式地放进缓存键中。** 对于国家或币种，把市场放进 URL（`/de/products/...`）或放进由 CDN 控制的、规范化的缓存键中，而不是依赖取值繁多的请求头。避免根据原始 cookie 做区分，那样实际上会让缓存失效。\n- **变更时清除缓存。** 按商品给缓存页面打标签，在价格或库存变化时按标签清除，这样短暂的过期窗口就由事件来限定，而不只是依赖 TTL。\n\n**处理这起事故。** 立即清除 CDN 缓存，关闭受影响路由的缓存，找出哪些顾客的数据可能被展示过，并按照你们的隐私事故流程处理。然后加一个测试：分别在带和不带会话 cookie 的情况下请求页面，并断言缓存相关的响应头。\n\n**取舍。** 拆分页面会增加前端的请求数和复杂度，但能让大部分字节保持可缓存。按市场区分的 URL 会让缓存条目数乘以市场数量，这通常没问题。较短的 TTL 能减少过期内容，但会增加源站负载；事件驱动的清除则能同时做到新鲜和高命中率。",
+      "followups": [
+        "What does the Vary header do, and why can varying on Cookie be harmful?",
+        "How would you detect personal data leaking into cached responses before release?"
+      ],
+      "followups_zh": [
+        "Vary 响应头的作用是什么？为什么根据 Cookie 做区分可能有害？",
+        "你会如何在发布前发现个人数据泄漏到缓存响应中的情况？"
+      ],
+      "vocab": [
+        {
+          "en": "shared cache",
+          "zh": "共享缓存"
+        },
+        {
+          "en": "cache key",
+          "zh": "缓存键"
+        },
+        {
+          "en": "purge",
+          "zh": "清除（缓存）"
+        },
+        {
+          "en": "personalization",
+          "zh": "个性化"
+        }
+      ]
+    },
+    {
+      "id": "20261030-5",
+      "topic": "Java & CS",
+      "difficulty": "Hard",
+      "title": "The product feed breaks only on servers configured for Germany and Turkey",
+      "title_zh": "商品 feed 只在配置为德国和土耳其的服务器上出错",
+      "question": "A Java service generates CSV product feeds for ad platforms. After moving some workers to servers whose default locale is German or Turkish, the platforms reject feeds: prices appear as `1234,50`, which breaks the CSV columns, and in the Turkish deployment a lookup that lower-cases attribute keys stops matching `\"ID\"`.\n\nExplain both bugs and how to make the code locale-safe.",
+      "question_zh": "一个 Java 服务为广告平台生成 CSV 格式的商品 feed。把部分 worker 迁移到默认语言区域为德语或土耳其语的服务器后，平台开始拒绝这些 feed：价格显示为 `1234,50`，破坏了 CSV 的列；在土耳其的部署中，一个把属性键转成小写的查找逻辑再也匹配不上 `\"ID\"` 了。\n\n解释这两个 bug，以及如何让代码不受语言区域影响。",
+      "answer": "**Why.** Many Java formatting and case-conversion methods use the JVM's default locale when you do not pass one. `String.format(\"%.2f\", price)` uses the default locale's decimal separator, so on a German or Turkish server it prints a comma. `toLowerCase()` and `toUpperCase()` also follow the default locale, and Turkish has dotted and dotless i: lower-casing `\"ID\"` does not give `\"id\"`, and upper-casing `\"title\"` does not give `\"TITLE\"`. A local Java 21 test showed both, while US and French defaults behaved as the developers expected for case conversion.\n\n**Fix: be explicit about locale wherever the output is for machines.**\n\n```java\nString price = String.format(Locale.ROOT, \"%.2f\", amount);     // 1234.50\nString key   = rawKey.toLowerCase(Locale.ROOT);                 // \"id\"\n\n// better for money: no floating point at all\nString price2 = new BigDecimal(\"1234.50\").toPlainString();\n```\n\n- Use `Locale.ROOT` for identifiers, protocol values, file formats and anything parsed by other systems. Use the shopper's or merchant's locale only for text shown to humans.\n- Parsing has the same issue in reverse: `Double.parseDouble(\"1234,50\")` throws, and locale-aware parsers accept input you did not intend. Parse machine input with fixed formats.\n- Use a CSV library that quotes fields correctly, so a comma inside a value can never shift columns, whatever the locale.\n- Static analysis rules can flag calls to locale-sensitive methods without an explicit locale.\n\n**Make it testable.** Run part of the test suite with a different default locale (for example Turkish), or set `-Duser.language` and `-Duser.country` in CI, so these bugs fail tests instead of production feeds. Setting the server default locale to English hides the bug but breaks again on the next machine.\n\n**Trade-offs.** Passing a locale everywhere is a little verbose, but it makes intent explicit and removes a dependency on machine configuration. Keep the human-facing formatting in one place (a formatter service per market) and use fixed formats everywhere else.",
+      "answer_zh": "**原因。** Java 中很多格式化和大小写转换方法，在你没有传入语言区域时，会使用 JVM 的默认语言区域。`String.format(\"%.2f\", price)` 使用默认语言区域的小数分隔符，所以在德语或土耳其语的服务器上会打印出逗号。`toLowerCase()` 和 `toUpperCase()` 同样遵循默认语言区域，而土耳其语中有带点和不带点的 i：把 `\"ID\"` 转成小写得不到 `\"id\"`，把 `\"title\"` 转成大写也得不到 `\"TITLE\"`。本地的 Java 21 测试同时展示了这两个问题，而在美国和法国的默认设置下，大小写转换的行为符合开发者的预期。\n\n**修复：只要输出是给机器读的，就显式指定语言区域。**\n\n```java\nString price = String.format(Locale.ROOT, \"%.2f\", amount);     // 1234.50\nString key   = rawKey.toLowerCase(Locale.ROOT);                 // \"id\"\n\n// better for money: no floating point at all\nString price2 = new BigDecimal(\"1234.50\").toPlainString();\n```\n\n- 对于标识符、协议取值、文件格式以及任何会被其他系统解析的内容，使用 `Locale.ROOT`。只有展示给人看的文本才使用顾客或商家的语言区域。\n- 解析时同样的问题会反过来出现：`Double.parseDouble(\"1234,50\")` 会抛出异常，而依赖语言区域的解析器则会接受你本不打算接受的输入。对机器输入要用固定的格式来解析。\n- 使用能正确为字段加引号的 CSV 库，这样无论语言区域如何，值中的逗号都永远不会导致列错位。\n- 静态分析规则可以标记出那些没有显式指定语言区域、却调用了依赖语言区域的方法的地方。\n\n**让它可以被测试到。** 用不同的默认语言区域（例如土耳其语）运行一部分测试，或者在 CI 中设置 `-Duser.language` 和 `-Duser.country`，让这类 bug 在测试中失败，而不是在生产 feed 中暴露。把服务器的默认语言区域设为英语只会掩盖这个 bug，换一台机器又会出问题。\n\n**取舍。** 到处传入语言区域会稍显啰嗦，但能让意图变得明确，并消除对机器配置的依赖。把面向人的格式化集中在一个地方（按市场划分的格式化服务），其他地方一律使用固定格式。",
+      "followups": [
+        "Why is the Turkish i problem a common source of security bugs in identifier checks?",
+        "Where in a typical service would you still want locale-aware formatting?"
+      ],
+      "followups_zh": [
+        "为什么土耳其语的 i 问题，会成为标识符校验中常见的安全漏洞来源？",
+        "在一个典型的服务中，哪些地方仍然需要依赖语言区域的格式化？"
+      ],
+      "vocab": [
+        {
+          "en": "default locale",
+          "zh": "默认语言区域"
+        },
+        {
+          "en": "decimal separator",
+          "zh": "小数分隔符"
+        },
+        {
+          "en": "case mapping",
+          "zh": "大小写映射"
+        },
+        {
+          "en": "locale-neutral",
+          "zh": "与语言区域无关的"
+        }
+      ]
+    }
+  ]
+}

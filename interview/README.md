@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 18 天、90 道题。
+共 19 天、95 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-10-30](days/2026-10-30.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Senior | [A product cache evicts 99% of its entries, but the service's memory barely drops](days/2026-10-30.md#q1) | 商品缓存淘汰了 99% 的条目，但服务的内存几乎没有下降 |
+| 2 | System Design | Medium | [Designing returns and refunds: partial refunds, duplicate clicks and a slow payment provider](days/2026-10-30.md#q2) | 设计退货与退款：部分退款、重复点击和缓慢的支付服务商 |
+| 3 | Database | Hard | [A batch product upsert fails with "cannot affect row a second time"](days/2026-10-30.md#q3) | 批量商品 upsert 以“cannot affect row a second time”失败 |
+| 4 | Middleware | Medium | [Shoppers in Germany see US prices because the CDN cached a personalized page](days/2026-10-30.md#q4) | 德国顾客看到了美国价格，因为 CDN 缓存了一个个性化页面 |
+| 5 | Java & CS | Hard | [The product feed breaks only on servers configured for Germany and Turkey](days/2026-10-30.md#q5) | 商品 feed 只在配置为德国和土耳其的服务器上出错 |
 
 ## [2026-10-29](days/2026-10-29.md)
 
