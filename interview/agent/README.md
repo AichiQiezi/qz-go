@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 23 个模块、99 道题。
+共 24 个模块、104 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -313,3 +313,17 @@ Five new agent questions: showing progress during long agent turns, producing re
 | 3 | Multi-agent | Hard | ["Stop, that's the wrong store!" The lead agent stops, but its workers keep editing](modules/daily-2026-10-30.md#q3) | “停下，店铺选错了！”主 Agent 停了，可它的工作者还在继续改 |
 | 4 | Safety & Security | Senior | [A US merchant requires US-only processing, and an EU merchant asks for EU-only: what can you promise?](modules/daily-2026-10-30.md#q4) | 一家美国商家要求只在美国处理数据，一家欧盟商家要求只在欧盟处理：你能承诺什么？ |
 | 5 | RAG | Medium | [The policy assistant must return JSON with citations, and the API rejects the request](modules/daily-2026-10-30.md#q5) | 政策助手必须返回带引用的 JSON，而 API 拒绝了这个请求 |
+
+## [Daily set · Oct 31 · 每日新题 · 10 月 31 日](modules/daily-2026-10-31.md)
+
+Five new agent questions: migrating a no-thinking chat route to a model that rejects it, defending against third-party MCP servers that change their tools, deciding where fast mode pays off, keeping secrets and personal data out of traces, and attributing AI cost per merchant so it matches the invoice.
+
+> 五道新的 Agent 题：把一条“不思考”的聊天路由迁移到不再支持该设置的模型、防范会修改工具定义的第三方 MCP server、判断快速模式在哪里值得使用、让机密和个人数据远离链路追踪，以及按商家做 AI 成本归因并与账单对上。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Agent Loop | Hard | [Moving a latency-critical chat agent to a new model: "thinking disabled" now returns a 400](modules/daily-2026-10-31.md#q1) | 把一个对延迟敏感的聊天 Agent 迁移到新模型：“关闭思考”现在返回 400 |
+| 2 | Tools & MCP | Hard | [A third-party MCP server you approved quietly changed its tool descriptions](modules/daily-2026-10-31.md#q2) | 一个你们审核通过的第三方 MCP server，悄悄修改了它的工具描述 |
+| 3 | Production | Medium | [The biggest merchants want faster agent replies: is fast mode worth it?](modules/daily-2026-10-31.md#q3) | 最大的几家商家希望 Agent 回复更快：快速模式值得用吗？ |
+| 4 | Safety & Security | Medium | [After turning on full-content tracing, customer emails and API keys show up in the observability backend](modules/daily-2026-10-31.md#q4) | 开启完整内容追踪之后，顾客邮箱和 API key 出现在了可观测性后端里 |
+| 5 | Evals & Observability | Senior | [Your per-merchant AI cost dashboard is 30% lower than the invoice: designing cost attribution](modules/daily-2026-10-31.md#q5) | 按商家统计的 AI 成本看板比账单少了 30%：设计成本归因 |
