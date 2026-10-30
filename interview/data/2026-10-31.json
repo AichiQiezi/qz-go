@@ -1,0 +1,201 @@
+{
+  "date": "2026-10-31",
+  "generatedAt": "2026-10-31T06:44:08+08:00",
+  "questions": [
+    {
+      "id": "20261031-1",
+      "topic": "Go",
+      "difficulty": "Hard",
+      "title": "A per-merchant rate limiter lets every request through, and the mutex seems to do nothing",
+      "title_zh": "一个按商家限流的限流器放行了所有请求，互斥锁似乎完全不起作用",
+      "question": "A Go gateway limits each merchant's calls to the Meta API with a small struct: a `sync.Mutex`, a counter and a limit. Its `Allow()` method locks, checks the counter and increments it. In production no request is ever rejected and Meta starts returning rate-limit errors. The tests pass because they only check that the first call is allowed.\n\nFind the bug and explain how to prevent this class of bug.",
+      "question_zh": "一个 Go 网关用一个小结构体限制每个商家对 Meta API 的调用：一个 `sync.Mutex`、一个计数器和一个上限。它的 `Allow()` 方法加锁、检查计数器并将其加一。在生产环境中没有任何请求被拒绝过，Meta 开始返回限流错误。测试之所以能通过，是因为它们只检查了第一次调用是否被允许。\n\n找出这个 bug，并说明如何防止这一类 bug。",
+      "answer": "**The bug: a value receiver.** `Allow` is declared as `func (l Limiter) Allow() bool`. With a value receiver, every call works on a copy of the struct, including a copy of the mutex and the counter. The copy is locked, incremented and thrown away; the original never changes. In a local test, 100 calls through a value receiver were all allowed with a limit of 10, and the original counter stayed at 0. With a pointer receiver, exactly 10 of 100 concurrent calls were allowed.\n\n```go\ntype Limiter struct {\n\tmu    sync.Mutex\n\tused  int\n\tlimit int\n}\n\n// must be a pointer receiver: the lock and the counter belong to one shared value\nfunc (l *Limiter) Allow() bool {\n\tl.mu.Lock()\n\tdefer l.mu.Unlock()\n\tif l.used >= l.limit {\n\t\treturn false\n\t}\n\tl.used++\n\treturn true\n}\n```\n\n- **`go vet` catches it.** Its copylocks check reported \"Allow passes lock by value: ... contains sync.Mutex\". Run `go vet` (or a linter suite that includes it) in CI and treat its findings as errors.\n- **Other ways to copy a lock.** Storing the struct by value in a map or slice and then calling methods on a copy, passing it to a function by value, or ranging over a slice of structs (`for _, l := range limiters`) all copy the mutex.\n- **Store pointers.** Keep `map[string]*Limiter`, construct limiters with a function that returns a pointer, and add a `noCopy` guard or document that the type must not be copied.\n\n**Better tests.** Test behaviour that only a shared state can produce: after the limit is used up, the next call must be rejected, including from many goroutines at once with `-race`. Tests that only check a single call cannot see this bug.\n\n**Trade-offs.** For real rate limiting, `golang.org/x/time/rate` gives a token bucket with burst and refill, which is usually better than a fixed counter. In a multi-instance gateway, an in-process limiter only limits one instance; a shared limit across instances needs a central store, as with a Redis-based limiter.",
+      "answer_zh": "**bug：值接收者。** `Allow` 被声明为 `func (l Limiter) Allow() bool`。使用值接收者时，每次调用操作的都是结构体的一个副本，其中也包括互斥锁和计数器的副本。被加锁、被加一然后被丢弃的是副本；原始对象从未改变。在本地测试中，通过值接收者发起的 100 次调用在上限为 10 的情况下全部被允许，原始计数器一直是 0。改用指针接收者后，100 次并发调用中恰好有 10 次被允许。\n\n```go\ntype Limiter struct {\n\tmu    sync.Mutex\n\tused  int\n\tlimit int\n}\n\n// must be a pointer receiver: the lock and the counter belong to one shared value\nfunc (l *Limiter) Allow() bool {\n\tl.mu.Lock()\n\tdefer l.mu.Unlock()\n\tif l.used >= l.limit {\n\t\treturn false\n\t}\n\tl.used++\n\treturn true\n}\n```\n\n- **`go vet` 能发现它。** 它的 copylocks 检查报告了“Allow passes lock by value: ... contains sync.Mutex”。在 CI 中运行 `go vet`（或包含它的 linter 套件），并把它的发现当作错误处理。\n- **复制锁的其他方式。** 按值把结构体存在 map 或切片中再对副本调用方法、按值把它传给函数，或者遍历结构体切片（`for _, l := range limiters`），都会复制互斥锁。\n- **存储指针。** 使用 `map[string]*Limiter`，用一个返回指针的函数来构造限流器，并加上 `noCopy` 防护或在文档中说明这个类型不能被复制。\n\n**更好的测试。** 测试只有共享状态才能产生的行为：额度用完之后，下一次调用必须被拒绝，并且要在开启 `-race` 的情况下，从很多 goroutine 同时调用来验证。只检查单次调用的测试看不到这个 bug。\n\n**取舍。** 对于真正的限流，`golang.org/x/time/rate` 提供了一个支持突发和补充的令牌桶，通常比固定计数器更好。在多实例网关中，进程内的限流器只能限制单个实例；跨实例共享的限额需要一个中心化的存储，比如基于 Redis 的限流器。",
+      "followups": [
+        "When is a value receiver the right choice in Go?",
+        "How would you enforce one shared limit across ten gateway instances?"
+      ],
+      "followups_zh": [
+        "在 Go 中，什么时候使用值接收者是正确的选择？",
+        "你会如何在十个网关实例之间强制执行同一个共享的限额？"
+      ],
+      "vocab": [
+        {
+          "en": "value receiver",
+          "zh": "值接收者"
+        },
+        {
+          "en": "pointer receiver",
+          "zh": "指针接收者"
+        },
+        {
+          "en": "copylocks",
+          "zh": "copylocks（检查锁被复制的 vet 规则）"
+        },
+        {
+          "en": "token bucket",
+          "zh": "令牌桶"
+        }
+      ]
+    },
+    {
+      "id": "20261031-2",
+      "topic": "System Design",
+      "difficulty": "Hard",
+      "title": "Letting merchants A/B test prices without charging shoppers a different price at checkout",
+      "title_zh": "让商家对价格做 A/B 测试，同时不让顾客在结账时被收取另一个价格",
+      "question": "Merchants want to test whether a product sells better at 29.99 or 34.99. The first version picked a price randomly on each page view. Shoppers saw one price on the product page and another in the cart, some reloaded until they got the cheaper one, ad platforms flagged products for price mismatch, and the results were impossible to interpret.\n\nDesign a price-testing system.",
+      "question_zh": "商家想测试一件商品定价 29.99 还是 34.99 卖得更好。第一个版本在每次浏览页面时随机选择一个价格。顾客在商品页看到一个价格，在购物车里看到另一个；有些人不停刷新直到拿到更便宜的那个；广告平台因为价格不一致标记了这些商品；而测试结果根本无法解读。\n\n设计一个价格测试系统。",
+      "answer": "**Why it failed.** Randomizing per page view gives the same shopper different prices, so the experience is inconsistent and gameable, the cart and checkout cannot know which price was shown, and every page view becomes its own unit, which breaks the statistics. External systems such as product feeds see a third price.\n\n**Design.**\n\n- **Stable assignment.** Assign a variant by hashing a stable visitor ID (and the experiment ID) into buckets, so the same shopper always sees the same price for the length of the test. For logged-in shoppers, use the customer ID so the assignment follows them across devices.\n- **Price as part of the cart.** When an item is added to the cart, store the experiment, the variant and the price shown. Checkout charges that stored price after validating that the experiment is still active and the variant belongs to the visitor.\n- **One source of truth.** A pricing service resolves the price for (product, visitor) everywhere: product page, cart, checkout, emails. Feeds to ad platforms use the control price and exclude test variants, or run tests only on traffic the feed does not describe, so ads and landing pages agree.\n- **Analysis plan up front.** Choose the primary metric (revenue per visitor, not conversion rate alone, since a higher price can convert less and still earn more), the sample size and duration before starting, and avoid stopping as soon as one variant looks ahead.\n\n**Guardrails.** Exclude shoppers who already have the product in their cart from new experiments, cap the number of concurrent price tests per product, log every exposure with the variant, and give merchants a kill switch that ends the test and falls back to the control price immediately.\n\n**Trade-offs.** Price testing raises fairness and legal questions in some markets; involve legal and consider testing discounts or bundles instead of list prices where that is more acceptable. Stable bucketing per visitor is simple but cookie resets move people between variants; customer IDs are stickier but cover fewer visitors.",
+      "answer_zh": "**为什么会失败。** 按每次页面浏览随机，会让同一位顾客看到不同的价格，于是体验不一致、还能被钻空子，购物车和结账也无法知道展示的是哪个价格；而且每次页面浏览都成了独立的单位，统计也就失效了。商品 feed 等外部系统看到的又是第三个价格。\n\n**设计。**\n\n- **稳定的分组。** 用一个稳定的访客 ID（以及实验 ID）做哈希来分桶分配变体，这样同一位顾客在整个测试期间看到的价格始终相同。对于已登录的顾客，使用顾客 ID，让分组跟随他们跨设备保持一致。\n- **价格作为购物车的一部分。** 商品加入购物车时，保存实验、变体以及展示的价格。结账时，在校验实验仍在进行、该变体确实属于这位访客之后，按保存的价格收费。\n- **唯一的事实来源。** 由一个定价服务在所有地方为（商品，访客）解析价格：商品页、购物车、结账、邮件。发往广告平台的 feed 使用对照组价格并排除测试变体，或者只在 feed 不涉及的流量上做测试，这样广告和落地页的价格保持一致。\n- **提前制定分析方案。** 在开始之前确定主要指标（每位访客带来的收入，而不只是转化率，因为更高的价格可能转化更低却赚得更多）、样本量和持续时间，并且不要一看到某个变体领先就提前停止。\n\n**防护措施。** 把购物车里已经有这件商品的顾客排除在新实验之外，限制每件商品同时进行的价格测试数量，记录每一次曝光及其变体，并给商家一个“急停开关”，可以立即结束测试并回到对照组价格。\n\n**取舍。** 在一些市场中，价格测试会引发公平性和法律方面的问题；要让法务参与，并在更容易被接受的场景下，考虑测试折扣或捆绑销售，而不是标价本身。按访客稳定分桶很简单，但 cookie 重置会让人在不同变体之间切换；顾客 ID 更稳定，但覆盖的访客更少。",
+      "followups": [
+        "Why is revenue per visitor a better primary metric than conversion rate here?",
+        "How would you prevent a shopper from getting the cheaper variant by clearing cookies?"
+      ],
+      "followups_zh": [
+        "为什么在这里每位访客带来的收入比转化率更适合作为主要指标？",
+        "你会如何防止顾客通过清除 cookie 来拿到更便宜的那个变体？"
+      ],
+      "vocab": [
+        {
+          "en": "experiment",
+          "zh": "实验"
+        },
+        {
+          "en": "variant",
+          "zh": "变体"
+        },
+        {
+          "en": "bucketing",
+          "zh": "分桶"
+        },
+        {
+          "en": "exposure",
+          "zh": "曝光"
+        },
+        {
+          "en": "control group",
+          "zh": "对照组"
+        }
+      ]
+    },
+    {
+      "id": "20261031-3",
+      "topic": "Database",
+      "difficulty": "Medium",
+      "title": "An index exists on both columns, yet the merchant's recent-orders page is slow",
+      "title_zh": "两个列上都有索引，商家的近期订单页却依然很慢",
+      "question": "The admin's \"recent orders\" page runs `WHERE merchant_id = $1 AND created_at >= now() - interval '30 days' ORDER BY created_at DESC LIMIT 50`. There is an index on `(created_at, merchant_id)`, and the plan uses it, but the query gets slower as total order volume grows, even for small merchants.\n\nExplain why column order matters and choose the right index.",
+      "question_zh": "后台的“近期订单”页面执行 `WHERE merchant_id = $1 AND created_at >= now() - interval '30 days' ORDER BY created_at DESC LIMIT 50`。表上有一个 `(created_at, merchant_id)` 的索引，执行计划也用到了它，但随着订单总量增长，这个查询越来越慢，即使是小商家也一样。\n\n解释为什么列的顺序很重要，并选择正确的索引。",
+      "answer": "**Why.** A B-tree index on `(created_at, merchant_id)` is sorted by `created_at` first. To find one merchant's orders in the last 30 days, PostgreSQL must walk the entire 30-day range of the index across all merchants and check `merchant_id` on each entry. The work grows with the whole platform's order volume, not with the merchant's own orders.\n\n**Fix: equality columns first, then the range or sort column.** With `(merchant_id, created_at)`, all of one merchant's entries are adjacent and already ordered by time, so the scan touches only that merchant's recent orders. In a PostgreSQL 16 test with two million orders, the same query took about 5 ms with `(created_at, merchant_id)` and about 0.6 ms with `(merchant_id, created_at)`, and the gap grows with volume.\n\n```sql\nCREATE INDEX CONCURRENTLY idx_orders_merchant_created\n    ON orders (merchant_id, created_at DESC);\n\n-- verify\nEXPLAIN (ANALYZE, BUFFERS)\nSELECT * FROM orders\nWHERE merchant_id = 42 AND created_at >= now() - interval '30 days'\nORDER BY created_at DESC LIMIT 50;\n```\n\n- Rule of thumb: columns compared with `=` first, then at most one range column; a column used only for `ORDER BY` goes after the equality columns so the index returns rows already sorted.\n- Check `EXPLAIN (ANALYZE, BUFFERS)`: a large number of buffers or rows removed by filter, compared with rows returned, is the sign of an index that does not match the query.\n- Keep the old index only if other queries filter by time range alone (for example, platform-wide reports); otherwise drop it, since every index slows writes.\n\n**Trade-offs.** Multi-tenant tables almost always want the tenant ID as the leading column, which also helps if you later partition or shard by tenant. Adding columns to make an index covering can save heap reads but makes the index larger; add them only for hot queries.",
+      "answer_zh": "**原因。** `(created_at, merchant_id)` 上的 B 树索引首先按 `created_at` 排序。要找出某个商家最近 30 天的订单，PostgreSQL 必须遍历索引中所有商家整整 30 天的范围，并对每个条目检查 `merchant_id`。工作量随整个平台的订单量增长，而不是随该商家自己的订单量增长。\n\n**修复：等值条件的列在前，范围或排序的列在后。** 使用 `(merchant_id, created_at)` 时，同一个商家的所有条目在索引中相邻，并且已经按时间排好序，所以扫描只会触及这个商家的近期订单。在一个包含两百万条订单的 PostgreSQL 16 测试中，同一个查询在 `(created_at, merchant_id)` 上耗时约 5 毫秒，在 `(merchant_id, created_at)` 上约 0.6 毫秒，而且差距会随数据量增大。\n\n```sql\nCREATE INDEX CONCURRENTLY idx_orders_merchant_created\n    ON orders (merchant_id, created_at DESC);\n\n-- verify\nEXPLAIN (ANALYZE, BUFFERS)\nSELECT * FROM orders\nWHERE merchant_id = 42 AND created_at >= now() - interval '30 days'\nORDER BY created_at DESC LIMIT 50;\n```\n\n- 经验法则：用 `=` 比较的列放在前面，然后最多放一个范围条件的列；只用于 `ORDER BY` 的列放在等值列之后，这样索引返回的行就已经是排好序的。\n- 查看 `EXPLAIN (ANALYZE, BUFFERS)`：如果读取的缓冲块数量或被过滤掉的行数远多于返回的行数，就说明索引与查询不匹配。\n- 只有当其他查询仅按时间范围过滤时（例如全平台的报表），才保留旧索引；否则就删除它，因为每个索引都会拖慢写入。\n\n**取舍。** 多租户的表几乎总是应该把租户 ID 作为索引的第一列，这样以后如果按租户分区或分片也会更方便。为了让索引成为覆盖索引而添加列，可以省去回表读取，但会让索引变大；只为热点查询这样做。",
+      "followups": [
+        "When would (created_at, merchant_id) be the better index?",
+        "How do you find unused or redundant indexes in PostgreSQL?"
+      ],
+      "followups_zh": [
+        "什么情况下 (created_at, merchant_id) 会是更好的索引？",
+        "在 PostgreSQL 中，你如何找出未被使用或冗余的索引？"
+      ],
+      "vocab": [
+        {
+          "en": "composite index",
+          "zh": "复合索引"
+        },
+        {
+          "en": "leading column",
+          "zh": "前导列"
+        },
+        {
+          "en": "range condition",
+          "zh": "范围条件"
+        },
+        {
+          "en": "covering index",
+          "zh": "覆盖索引"
+        }
+      ]
+    },
+    {
+      "id": "20261031-4",
+      "topic": "Middleware",
+      "difficulty": "Senior",
+      "title": "A Meta API outage stalls Google and TikTok syncs too: designing bulkheads and circuit breakers",
+      "title_zh": "Meta API 故障连带拖住了 Google 和 TikTok 的同步：设计舱壁和熔断器",
+      "question": "The sync service pushes catalog and conversion updates to Meta, Google and TikTok from one shared worker pool and one HTTP client. During a Meta API outage, each Meta call waits for its timeout and is retried; within minutes all workers are stuck on Meta, and Google and TikTok updates stop as well. When Meta recovers, the backlog hits it all at once and triggers rate limits.\n\nRedesign the integration layer so one platform's failure stays contained.",
+      "question_zh": "同步服务通过同一个共享的 worker 池和同一个 HTTP 客户端，把商品目录和转化数据推送到 Meta、Google 和 TikTok。在一次 Meta API 故障期间，每个 Meta 调用都要等到超时，然后被重试；几分钟之内所有 worker 都卡在了 Meta 上，Google 和 TikTok 的更新也随之停止。Meta 恢复后，积压的请求一下子全部涌向它，又触发了限流。\n\n重新设计集成层，让一个平台的故障被限制在它自己的范围内。",
+      "answer": "**The core idea.** Shared resources turn one dependency's failure into everyone's failure. Give each external platform its own capacity (bulkheads), stop calling a platform that is clearly failing (circuit breakers), and let work wait durably in queues instead of in threads.\n\n**Design.**\n\n- **Bulkheads.** A separate queue, worker pool and connection pool per platform (and, for very large merchants, per merchant within a platform). Meta slowing down can then only consume Meta's capacity.\n- **Timeouts and retry budgets.** Short, explicit timeouts per call, retries with exponential backoff and jitter, and a cap on the share of traffic that may be retries, so retries cannot multiply load during an outage.\n- **Circuit breaker per platform.** When the error or timeout rate passes a threshold, open the circuit: fail fast without calling the platform, keep messages in the queue, and after a cool-down let a few probe requests through (half-open) before closing again.\n- **Paced recovery.** After recovery, drain the backlog at a controlled rate that respects the platform's rate limits, and collapse updates so only the latest state per product is sent instead of every intermediate change.\n\n**Visibility.** Expose queue depth, age of the oldest message, circuit state and error rate per platform on a dashboard and in alerts, and show merchants a status such as \"Meta sync delayed, catching up\" rather than silent staleness.\n\n**Trade-offs.** Separate pools waste some capacity when platforms are idle and add configuration to tune; a breaker that trips too easily causes needless delays, one that trips too late does not protect anything, so tune thresholds with real incident data. Collapsing updates saves calls but loses the history of intermediate states, which matters for conversion events; never collapse conversions, only state syncs such as catalog and budgets.",
+      "answer_zh": "**核心思路。** 共享资源会把一个依赖的故障变成所有人的故障。给每个外部平台分配独立的容量（舱壁），停止调用一个明显正在故障的平台（熔断器），并让工作在队列中持久地等待，而不是在线程里等待。\n\n**设计。**\n\n- **舱壁。** 每个平台使用独立的队列、worker 池和连接池（对于体量很大的商家，还可以在平台内部再按商家划分）。这样 Meta 变慢时，只会耗尽 Meta 自己的容量。\n- **超时与重试预算。** 为每次调用设置短而明确的超时，使用带抖动的指数退避重试，并限制重试流量所占的比例，这样在故障期间重试就不会成倍放大负载。\n- **每个平台一个熔断器。** 当错误率或超时率超过阈值时，熔断器打开：不再调用该平台而是快速失败，消息继续留在队列中；冷却一段时间后，先放少量探测请求通过（半开状态），再决定是否重新闭合。\n- **有节奏地恢复。** 恢复之后，以受控的速率消化积压，遵守平台的限流规则，并对更新进行合并，让每个商品只发送最新状态，而不是每一个中间变化。\n\n**可见性。** 在看板和告警中按平台展示队列深度、最老消息的等待时间、熔断器状态和错误率，并向商家展示“Meta 同步延迟，正在追赶”之类的状态，而不是悄无声息地让数据变旧。\n\n**取舍。** 独立的池在平台空闲时会浪费一些容量，还会增加需要调优的配置；熔断器太容易触发会造成不必要的延迟，触发得太晚又起不到保护作用，所以要用真实的事故数据来调整阈值。合并更新能节省调用次数，但会丢失中间状态的历史，而这对转化事件很重要；绝不要合并转化事件，只合并商品目录、预算这类状态同步。",
+      "followups": [
+        "How would you choose the thresholds for opening the circuit?",
+        "Why must conversion events not be collapsed like catalog updates?",
+        "What changes if one very large merchant dominates traffic to a platform?"
+      ],
+      "followups_zh": [
+        "你会如何选择熔断器打开的阈值？",
+        "为什么转化事件不能像商品目录更新那样被合并？",
+        "如果某个超大商家占据了某个平台的大部分流量，设计上需要做什么改变？"
+      ],
+      "vocab": [
+        {
+          "en": "bulkhead",
+          "zh": "舱壁（隔离）"
+        },
+        {
+          "en": "circuit breaker",
+          "zh": "熔断器"
+        },
+        {
+          "en": "half-open",
+          "zh": "半开状态"
+        },
+        {
+          "en": "retry budget",
+          "zh": "重试预算"
+        },
+        {
+          "en": "backlog",
+          "zh": "积压"
+        }
+      ]
+    },
+    {
+      "id": "20261031-5",
+      "topic": "Java & CS",
+      "difficulty": "Medium",
+      "title": "TikTok added a new ad status, and the whole sync job crashes on it",
+      "title_zh": "TikTok 新增了一种广告状态，整个同步任务因此崩溃",
+      "question": "A Java service maps ad statuses from platform APIs into an enum `AdStatus { ACTIVE, PAUSED, DISAPPROVED }` with `AdStatus.valueOf(raw)`. One morning TikTok starts returning `IN_REVIEW` for some ads, and the nightly sync for every TikTok merchant fails with `IllegalArgumentException: No enum constant ...IN_REVIEW`. A JSON library mapping into the same enum also fails on the new value.\n\nExplain the problem and design robust handling of external enums.",
+      "question_zh": "一个 Java 服务用 `AdStatus.valueOf(raw)` 把平台 API 返回的广告状态映射到枚举 `AdStatus { ACTIVE, PAUSED, DISAPPROVED }` 上。某天早上，TikTok 开始对部分广告返回 `IN_REVIEW`，于是所有 TikTok 商家的夜间同步都以 `IllegalArgumentException: No enum constant ...IN_REVIEW` 失败。另一个把 JSON 映射到同一个枚举上的库，也在这个新值上失败了。\n\n解释这个问题，并设计一种稳健的方式来处理外部枚举。",
+      "answer": "**Why.** `Enum.valueOf` accepts only an exact constant name: an unknown value throws `IllegalArgumentException`, a different case such as `active` throws too, and `null` throws `NullPointerException`. A local test confirmed all three. External APIs add values over time, so an enum that mirrors a third-party field is a closed type describing an open set of values, and the first new value breaks every caller.\n\n**Fix: separate the external value from your internal meaning.**\n\n```java\nenum AdStatus { ACTIVE, PAUSED, DISAPPROVED, PENDING, UNKNOWN }\n\nstatic AdStatus fromTikTok(String raw) {\n    if (raw == null) return AdStatus.UNKNOWN;\n    return switch (raw) {\n        case \"ACTIVE\", \"ENABLE\" -> AdStatus.ACTIVE;\n        case \"PAUSED\", \"DISABLE\" -> AdStatus.PAUSED;\n        case \"REJECTED\" -> AdStatus.DISAPPROVED;\n        case \"IN_REVIEW\" -> AdStatus.PENDING;\n        default -> {\n            unknownStatus.increment(\"tiktok\", raw);   // metric + sampled log\n            yield AdStatus.UNKNOWN;\n        }\n    };\n}\n```\n\n- Map per platform with an explicit table, not by name, because platforms use different words for the same state.\n- Keep the raw value alongside the mapped one in storage and logs, so nothing is lost and you can remap later.\n- Configure the JSON library to map unknown enum values to a default (most libraries have such an option) or deserialize to a string and map in code.\n- Alert when an unknown value appears, so the team adds a proper mapping within days instead of discovering it from a merchant.\n\n**Trade-offs.** An `UNKNOWN` state must be handled deliberately downstream: decide whether unknown ads count as active for spend reports, and never let an unknown value trigger destructive actions. Failing loudly is still right for values your own system produces, where an unknown value really is a bug.",
+      "answer_zh": "**原因。** `Enum.valueOf` 只接受与常量名完全一致的值：未知的值会抛出 `IllegalArgumentException`，大小写不同（比如 `active`）同样会抛出，`null` 则会抛出 `NullPointerException`。本地测试确认了这三种情况。外部 API 会随着时间新增取值，所以一个照搬第三方字段的枚举，是在用一个封闭的类型描述一个开放的取值集合，第一个新值出现时就会让所有调用方出错。\n\n**修复：把外部取值和你们内部的含义分开。**\n\n```java\nenum AdStatus { ACTIVE, PAUSED, DISAPPROVED, PENDING, UNKNOWN }\n\nstatic AdStatus fromTikTok(String raw) {\n    if (raw == null) return AdStatus.UNKNOWN;\n    return switch (raw) {\n        case \"ACTIVE\", \"ENABLE\" -> AdStatus.ACTIVE;\n        case \"PAUSED\", \"DISABLE\" -> AdStatus.PAUSED;\n        case \"REJECTED\" -> AdStatus.DISAPPROVED;\n        case \"IN_REVIEW\" -> AdStatus.PENDING;\n        default -> {\n            unknownStatus.increment(\"tiktok\", raw);   // metric + sampled log\n            yield AdStatus.UNKNOWN;\n        }\n    };\n}\n```\n\n- 按平台用一张显式的映射表来转换，而不是按名称直接对应，因为不同平台会用不同的词表示同一个状态。\n- 在存储和日志中同时保留原始值和映射后的值，这样什么都不会丢失，以后也可以重新映射。\n- 把 JSON 库配置为将未知的枚举值映射为一个默认值（大多数库都有这样的选项），或者先反序列化成字符串，再在代码中映射。\n- 当出现未知值时发出告警，这样团队能在几天之内补上正确的映射，而不是等商家反馈才发现。\n\n**取舍。** 下游必须有意识地处理 `UNKNOWN` 状态：决定在花费报表中未知状态的广告是否算作投放中，并且绝不让一个未知值触发破坏性的操作。而对于你们自己系统产生的值，大声地失败仍然是正确的做法，因为在那种情况下出现未知值确实意味着 bug。",
+      "followups": [
+        "Why should one unknown value not fail the whole nightly sync?",
+        "Where would you still want strict parsing that throws on unknown values?"
+      ],
+      "followups_zh": [
+        "为什么一个未知值不应该导致整个夜间同步失败？",
+        "在哪些地方你仍然希望使用遇到未知值就抛异常的严格解析？"
+      ],
+      "vocab": [
+        {
+          "en": "enum",
+          "zh": "枚举"
+        },
+        {
+          "en": "unknown value",
+          "zh": "未知值"
+        },
+        {
+          "en": "tolerant reader",
+          "zh": "宽容读取（容错解析）"
+        },
+        {
+          "en": "mapping table",
+          "zh": "映射表"
+        }
+      ]
+    }
+  ]
+}

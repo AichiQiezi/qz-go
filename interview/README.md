@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 19 天、95 道题。
+共 20 天、100 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-10-31](days/2026-10-31.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Hard | [A per-merchant rate limiter lets every request through, and the mutex seems to do nothing](days/2026-10-31.md#q1) | 一个按商家限流的限流器放行了所有请求，互斥锁似乎完全不起作用 |
+| 2 | System Design | Hard | [Letting merchants A/B test prices without charging shoppers a different price at checkout](days/2026-10-31.md#q2) | 让商家对价格做 A/B 测试，同时不让顾客在结账时被收取另一个价格 |
+| 3 | Database | Medium | [An index exists on both columns, yet the merchant's recent-orders page is slow](days/2026-10-31.md#q3) | 两个列上都有索引，商家的近期订单页却依然很慢 |
+| 4 | Middleware | Senior | [A Meta API outage stalls Google and TikTok syncs too: designing bulkheads and circuit breakers](days/2026-10-31.md#q4) | Meta API 故障连带拖住了 Google 和 TikTok 的同步：设计舱壁和熔断器 |
+| 5 | Java & CS | Medium | [TikTok added a new ad status, and the whole sync job crashes on it](days/2026-10-31.md#q5) | TikTok 新增了一种广告状态，整个同步任务因此崩溃 |
 
 ## [2026-10-30](days/2026-10-30.md)
 
