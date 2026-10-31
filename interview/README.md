@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 20 天、100 道题。
+共 21 天、105 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-01](days/2026-11-01.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Senior | [Conversions sent to Meta after the response is written fail with "context canceled"](days/2026-11-01.md#q1) | 在响应写出之后再发往 Meta 的转化事件，以 "context canceled" 失败 |
+| 2 | System Design | Hard | [Deleting a shopper's personal data across a dozen services within 30 days](days/2026-11-01.md#q2) | 在 30 天内删除一位顾客分散在十几个服务中的个人数据 |
+| 3 | Database | Medium | [A unique constraint should stop duplicate ad connections, but duplicates still appear when one column is NULL](days/2026-11-01.md#q3) | 唯一约束本应阻止重复的广告连接，但当某一列为 NULL 时仍然出现了重复 |
+| 4 | Middleware | Medium | [Redis memory keeps growing because keys that were supposed to expire have no TTL](days/2026-11-01.md#q4) | Redis 内存持续增长，因为本该过期的键没有 TTL |
+| 5 | Java & CS | Hard | [A product-sync service runs out of memory during a Meta API slowdown, even though it uses a fixed pool of 20 threads](days/2026-11-01.md#q5) | 一个商品同步服务在 Meta API 变慢时内存耗尽，尽管它只用了一个固定 20 个线程的线程池 |
 
 ## [2026-10-31](days/2026-10-31.md)
 
