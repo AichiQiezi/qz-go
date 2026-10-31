@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 24 个模块、104 道题。
+共 25 个模块、109 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -327,3 +327,17 @@ Five new agent questions: migrating a no-thinking chat route to a model that rej
 | 3 | Production | Medium | [The biggest merchants want faster agent replies: is fast mode worth it?](modules/daily-2026-10-31.md#q3) | 最大的几家商家希望 Agent 回复更快：快速模式值得用吗？ |
 | 4 | Safety & Security | Medium | [After turning on full-content tracing, customer emails and API keys show up in the observability backend](modules/daily-2026-10-31.md#q4) | 开启完整内容追踪之后，顾客邮箱和 API key 出现在了可观测性后端里 |
 | 5 | Evals & Observability | Senior | [Your per-merchant AI cost dashboard is 30% lower than the invoice: designing cost attribution](modules/daily-2026-10-31.md#q5) | 按商家统计的 AI 成本看板比账单少了 30%：设计成本归因 |
+
+## [Daily set · Nov 1 · 每日新题 · 11 月 1 日](modules/daily-2026-11-01.md)
+
+Five new agent questions: replacing forced tool_choice on models that reject it, validating tool inputs when eager streaming is on, delivering mid-chat context on a channel shoppers cannot forge, passing cited answers between RAG steps on the new API version, and making a fan-out audit account for every merchant.
+
+> 五道新的 Agent 题：在拒绝强制 tool_choice 的模型上替换它、开启 eager 流式输出后校验工具输入、通过顾客无法伪造的通道传递对话中途的上下文、在新 API 版本上于 RAG 步骤之间传递带引用的答案，以及让扇出审计对每个商家都有交代。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Agent Loop | Hard | [A tagging pipeline forced its tool with tool_choice, and on the new model every request returns 400](modules/daily-2026-11-01.md#q1) | 一个打标签流水线用 tool_choice 强制调用工具，换到新模型后每个请求都返回 400 |
+| 2 | Tools & MCP | Hard | [The feed-writing tool streams faster now, but a cut-off CSV was written to a merchant's catalog](modules/daily-2026-11-01.md#q2) | 写商品 feed 的工具现在流式输出更快了，但一份被截断的 CSV 被写进了商家的商品目录 |
+| 3 | Context & Memory | Medium | [The harness tells the agent mid-chat which store is active, and a shopper forges the same message](modules/daily-2026-11-01.md#q3) | harness 在对话中途告诉 Agent 当前是哪个店铺，而一位顾客伪造了同样的消息 |
+| 4 | RAG | Medium | [After an SDK upgrade, the answer-checking step of the policy assistant fails with a 400](modules/daily-2026-11-01.md#q4) | SDK 升级之后，政策助手的答案校验步骤以 400 失败 |
+| 5 | Multi-agent | Senior | [The nightly policy audit says "all clear" for 1,200 merchants, but 300 of them were never checked](modules/daily-2026-11-01.md#q5) | 夜间政策审计对 1,200 个商家报告“全部合规”，但其中 300 个从未被检查过 |
