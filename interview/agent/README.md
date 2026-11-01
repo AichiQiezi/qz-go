@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 25 个模块、109 道题。
+共 26 个模块、114 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -341,3 +341,17 @@ Five new agent questions: replacing forced tool_choice on models that reject it,
 | 3 | Context & Memory | Medium | [The harness tells the agent mid-chat which store is active, and a shopper forges the same message](modules/daily-2026-11-01.md#q3) | harness 在对话中途告诉 Agent 当前是哪个店铺，而一位顾客伪造了同样的消息 |
 | 4 | RAG | Medium | [After an SDK upgrade, the answer-checking step of the policy assistant fails with a 400](modules/daily-2026-11-01.md#q4) | SDK 升级之后，政策助手的答案校验步骤以 400 失败 |
 | 5 | Multi-agent | Senior | [The nightly policy audit says "all clear" for 1,200 merchants, but 300 of them were never checked](modules/daily-2026-11-01.md#q5) | 夜间政策审计对 1,200 个商家报告“全部合规”，但其中 300 个从未被检查过 |
+
+## [Daily set · Nov 2 · 每日新题 · 11 月 2 日](modules/daily-2026-11-02.md)
+
+Five new agent questions: raising effort mid-conversation without losing the cache, the child-thread limit of a long multi-agent session, keeping a large cached prefix warm across merchant pauses, answering aggregate questions with code execution instead of retrieval, and tuning a prompt against an eval without overfitting.
+
+> 五道新的 Agent 题：在不丢失缓存的前提下于对话中途提高 effort、长时间多 Agent 会话的子线程上限、在商家停顿期间让大型缓存前缀保持预热、用代码执行而不是检索来回答聚合问题，以及在不过拟合的前提下基于评测调优提示。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Agent Loop | Hard | [A support chat turns into a hard investigation halfway through: raising effort without losing the cache](modules/daily-2026-11-02.md#q1) | 一段客服对话在中途变成了一次复杂的排查：在不丢失缓存的前提下提高 effort |
+| 2 | Multi-agent | Medium | [An all-day coordinator agent stops starting helpers in the afternoon](modules/daily-2026-11-02.md#q2) | 一个运行一整天的协调者 Agent 到了下午就无法再启动助手了 |
+| 3 | Production | Medium | [Merchants pause for 20 minutes in a planning chat, and every reply after a pause is slow and expensive](modules/daily-2026-11-02.md#q3) | 商家在规划对话中停顿 20 分钟，之后的每次回复都又慢又贵 |
+| 4 | RAG | Hard | ["What were my top 10 products by refund rate last quarter?" RAG over the order export gives confident wrong numbers](modules/daily-2026-11-02.md#q4) | “上个季度退款率最高的 10 个商品是哪些？”基于订单导出数据的 RAG 给出了自信却错误的数字 |
+| 5 | Evals & Observability | Senior | [The prompt was tuned from 71% to 94% on the eval, and production did not improve at all](modules/daily-2026-11-02.md#q5) | 提示在评测上从 71% 调到了 94%，而生产环境却毫无改善 |
