@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 21 天、105 道题。
+共 22 天、110 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-02](days/2026-11-02.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Medium | [Products imported from a JSON feed inherit the sale price and attributes of the product before them](days/2026-11-02.md#q1) | 从 JSON feed 导入的商品，继承了前一个商品的促销价和属性 |
+| 2 | System Design | Hard | [Opening the platform to third-party apps: OAuth install flow, scopes, and revoking access](days/2026-11-02.md#q2) | 向第三方应用开放平台：OAuth 安装流程、权限范围与撤销访问 |
+| 3 | Database | Medium | [The conversion-rate report shows 0% for every campaign, and one campaign crashes it with division by zero](days/2026-11-02.md#q3) | 转化率报表中每个广告活动都显示 0%，还有一个活动让报表因除以零而崩溃 |
+| 4 | Middleware | Senior | [Order events on Redis Streams: a crashed worker's messages are stuck forever, and trimming loses others](days/2026-11-02.md#q4) | 基于 Redis Streams 的订单事件：崩溃的 worker 手里的消息永远卡住，而裁剪又丢掉了另一些消息 |
+| 5 | Java & CS | Hard | [Moving budget between two campaigns occasionally freezes both campaigns forever](days/2026-11-02.md#q5) | 在两个广告活动之间调拨预算，偶尔会让两个活动永远卡住 |
 
 ## [2026-11-01](days/2026-11-01.md)
 

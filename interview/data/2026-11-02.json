@@ -1,0 +1,195 @@
+{
+  "date": "2026-11-02",
+  "generatedAt": "2026-11-02T06:45:31+08:00",
+  "questions": [
+    {
+      "id": "20261102-1",
+      "topic": "Go",
+      "difficulty": "Medium",
+      "title": "Products imported from a JSON feed inherit the sale price and attributes of the product before them",
+      "title_zh": "从 JSON feed 导入的商品，继承了前一个商品的促销价和属性",
+      "question": "A Go importer reads a supplier's feed, one JSON object per line, and upserts each product. To avoid allocations, it declares `var p Product` once outside the loop and calls `json.Unmarshal(line, &p)` for every line. Merchants report that some products show a sale price they never had, and that a T-shirt has a `color` attribute copied from a different product. Products whose JSON contains `\"sale_price\": null` look correct.\n\nExplain the behaviour and fix it.",
+      "question_zh": "一个 Go 导入程序读取供应商的 feed（每行一个 JSON 对象），并对每个商品执行 upsert。为了避免内存分配，它在循环外只声明了一次 `var p Product`，然后对每一行调用 `json.Unmarshal(line, &p)`。商家反馈，有些商品显示了它们从未有过的促销价，还有一件 T 恤带着从另一个商品复制过来的 `color` 属性。JSON 中包含 `\"sale_price\": null` 的商品看起来是正确的。\n\n解释这种行为并修复它。",
+      "answer": "**Why.** `json.Unmarshal` into an existing value only sets the fields present in the JSON; it does not reset the rest. In a local test with a reused struct, a product without `sale_price` kept the previous product's 15, while an explicit `null` set the pointer to nil, which is why those products looked fine. Maps are worse: Unmarshal adds keys to an existing map, so the second product's attributes became `color:red size:M`, a union of both. A slice present in the JSON is replaced, but a missing one keeps the old value.\n\n**Fix.** Decode each record into a fresh value. The allocation is tiny compared with the JSON parsing itself, and correctness is not negotiable. In the same test, a fresh `var q Product` per line produced the expected result for all three products.\n\n```go\ndec := json.NewDecoder(r)\nfor {\n\tvar p Product // fresh value for every record\n\tif err := dec.Decode(&p); err == io.EOF {\n\t\tbreak\n\t} else if err != nil {\n\t\treturn err\n\t}\n\tif err := upsert(ctx, p); err != nil {\n\t\treturn err\n\t}\n}\n```\n\n- **If you must reuse a value**, reset it explicitly with `p = Product{}` before each decode. That also clears maps and slices, because it drops the references.\n- **Missing versus null versus zero.** For fields where \"not sent\" and \"set to empty\" mean different things, such as a sale price the supplier wants to remove, use pointer fields and decide the rule for each case in the upsert, not in the decoder.\n- **Test with feeds where fields vary between records**, not only with complete records; this bug is invisible when every line has every field.\n\n**Trade-offs.** Reusing structs is a valid optimization only when you reset them, and profiling usually shows the decode itself dominates, so the saving is rarely worth the risk. Distinguishing missing from null with pointers makes the struct a little clumsier, but it is the only way to apply partial updates from a supplier correctly.",
+      "answer_zh": "**原因。** 对一个已有的值执行 `json.Unmarshal` 时，它只会设置 JSON 中出现的字段，不会重置其余字段。在本地用复用结构体的测试中，一个没有 `sale_price` 的商品保留了前一个商品的 15，而显式的 `null` 会把指针置为 nil，这就是那些商品看起来正常的原因。map 的情况更糟：Unmarshal 会往已有的 map 里添加键，所以第二个商品的属性变成了 `color:red size:M`，也就是两者的并集。JSON 中出现的切片会被替换，但缺失的切片会保留旧值。\n\n**修复方法。** 把每条记录解码到一个新的值中。与 JSON 解析本身相比，这点内存分配微不足道，而正确性是不能妥协的。在同一个测试中，每行使用一个新的 `var q Product`，三个商品都得到了预期的结果。\n\n```go\ndec := json.NewDecoder(r)\nfor {\n\tvar p Product // fresh value for every record\n\tif err := dec.Decode(&p); err == io.EOF {\n\t\tbreak\n\t} else if err != nil {\n\t\treturn err\n\t}\n\tif err := upsert(ctx, p); err != nil {\n\t\treturn err\n\t}\n}\n```\n\n- **如果必须复用某个值**，就在每次解码前用 `p = Product{}` 显式地重置它。这同样会清空 map 和切片，因为它丢掉了对它们的引用。\n- **缺失、null 与零值的区别。** 对于“未发送”和“被设为空”含义不同的字段（例如供应商想要取消的促销价），使用指针字段，并在 upsert 中而不是在解码器中为每种情况确定规则。\n- **用记录之间字段各不相同的 feed 来测试**，而不只是用字段完整的记录；当每一行都包含所有字段时，这个 bug 是看不出来的。\n\n**取舍。** 只有在重置的前提下，复用结构体才是有效的优化；而性能分析通常表明解码本身才是主要开销，所以这点节省很少值得冒险。用指针区分缺失和 null 会让结构体稍显笨重，但这是正确应用供应商部分更新的唯一办法。",
+      "followups": [
+        "How would you tell \"field not sent\" from \"field set to null\" in Go?",
+        "Why does a map field merge instead of being replaced?"
+      ],
+      "followups_zh": [
+        "在 Go 中你会如何区分“字段未发送”和“字段被设为 null”？",
+        "为什么 map 字段会合并而不是被替换？"
+      ],
+      "vocab": [
+        {
+          "en": "reuse",
+          "zh": "复用"
+        },
+        {
+          "en": "partial update",
+          "zh": "部分更新"
+        },
+        {
+          "en": "zero value",
+          "zh": "零值"
+        },
+        {
+          "en": "upsert",
+          "zh": "插入或更新（upsert）"
+        }
+      ]
+    },
+    {
+      "id": "20261102-2",
+      "topic": "System Design",
+      "difficulty": "Hard",
+      "title": "Opening the platform to third-party apps: OAuth install flow, scopes, and revoking access",
+      "title_zh": "向第三方应用开放平台：OAuth 安装流程、权限范围与撤销访问",
+      "question": "Your SaaS wants an app marketplace: third-party developers build apps (reviews, loyalty, feed tools) that read and change a merchant's products and orders. Today partners get a merchant's admin API key by email, which gives full access forever. Design how apps get access to a store, what they can do, and how a merchant takes access away.",
+      "question_zh": "你们的 SaaS 想要建立一个应用市场：第三方开发者开发应用（评价、会员积分、feed 工具），用来读取和修改商家的商品和订单。目前合作伙伴通过邮件拿到商家的管理员 API key，这会永久地给予完全访问权限。请设计应用如何获得某个店铺的访问权限、能做什么，以及商家如何收回访问权限。",
+      "answer": "**The core idea.** Become an OAuth authorization server for your own API. Each app gets its own credentials, each install produces a token scoped to one store and to the permissions the merchant approved, and the merchant can revoke it at any time. An admin key in an email is replaced by short-lived, narrow, traceable access.\n\n**Install flow.**\n\n- The app registers with a client ID, a secret and exact redirect URLs. Only registered redirect URLs are accepted, compared exactly, so a code cannot be sent to an attacker's site.\n- The merchant clicks Install, sees the requested scopes such as `read_products` and `write_orders`, and approves. Your server redirects with a short-lived, single-use code and the app's `state` value, which the app checks to prevent CSRF; PKCE protects the exchange as well.\n- The app exchanges the code server-to-server for an access token bound to that store and those scopes, plus a refresh token if you issue them.\n\n**Enforcement.** Every API call resolves the token to (app, store, scopes) at the gateway. A token for store A never reads store B, and a write without the matching scope gets a 403. Scopes should match how merchants think about data: separate customer personal data from products, and require extra review for apps that ask for it.\n\n**Revocation and lifecycle.** Uninstall revokes the tokens immediately and sends the app an uninstall webhook; with short-lived access tokens, even a cached token stops working soon. Changing scopes requires the merchant to approve again. Store only hashes of tokens, log every call with app and store, and show merchants which apps accessed what. Per-app rate limits protect your platform from one noisy app.\n\n**Migration.** Give existing partners a deadline, help them build the OAuth flow, then disable the emailed admin keys and rotate them.\n\n**Trade-offs.** Fine-grained scopes are safer but make apps harder to build and installs scarier, so start with a small set that maps to real features. Short-lived tokens mean more refresh traffic and more ways for apps to fail. Reviewing apps before listing them slows the marketplace, but one malicious app with customer data access is far more expensive.",
+      "answer_zh": "**核心思路。** 为你们自己的 API 充当 OAuth 授权服务器。每个应用都有自己的凭证，每次安装都会生成一个只限于一个店铺、只包含商家批准的权限的 token，而商家可以随时撤销它。邮件里的管理员 key 被替换为短期的、范围窄的、可追踪的访问权限。\n\n**安装流程。**\n\n- 应用注册时获得一个 client ID、一个 secret 以及精确的重定向 URL。只接受已注册的重定向 URL，并做精确比较，这样授权码就不会被发送到攻击者的网站。\n- 商家点击“安装”，看到应用请求的权限范围，例如 `read_products` 和 `write_orders`，然后批准。你们的服务器带着一个短期有效、只能使用一次的授权码以及应用的 `state` 值进行重定向，应用会检查 `state` 以防止 CSRF；PKCE 也会保护这次交换。\n- 应用在服务器之间用授权码换取一个绑定到该店铺和这些权限范围的 access token，如果你们签发的话，还会得到一个 refresh token。\n\n**权限执行。** 每一次 API 调用都在网关处把 token 解析为（应用、店铺、权限范围）。店铺 A 的 token 永远无法读取店铺 B，而没有对应权限范围的写操作会得到 403。权限范围应当符合商家对数据的理解方式：把顾客个人数据和商品数据分开，并对请求个人数据的应用进行额外审核。\n\n**撤销与生命周期。** 卸载会立即撤销 token，并向应用发送卸载 webhook；由于 access token 有效期很短，即使被缓存的 token 也很快会失效。变更权限范围需要商家重新批准。只保存 token 的哈希值，记录每一次调用对应的应用和店铺，并向商家展示哪些应用访问了哪些数据。按应用设置的限流可以防止某一个高调用量的应用拖垮平台。\n\n**迁移。** 给现有合作伙伴一个截止日期，帮助他们实现 OAuth 流程，然后停用通过邮件发送的管理员 key 并进行轮换。\n\n**取舍。** 细粒度的权限范围更安全，但会让应用更难开发、安装界面也更吓人，所以要从一小组对应真实功能的权限开始。短期 token 意味着更多的刷新流量，也意味着应用出错的方式更多。在上架之前审核应用会拖慢应用市场的发展，但一个能访问顾客数据的恶意应用，代价要大得多。",
+      "followups": [
+        "Why must redirect URLs be compared exactly instead of by prefix?",
+        "How would you handle an app that keeps calling the API after it was uninstalled?",
+        "How would you let a merchant see exactly what an app has done in their store?"
+      ],
+      "followups_zh": [
+        "为什么重定向 URL 必须精确比较，而不能按前缀比较？",
+        "对于一个在被卸载后仍然持续调用 API 的应用，你会如何处理？",
+        "你会如何让商家准确地看到某个应用在其店铺里做了什么？"
+      ],
+      "vocab": [
+        {
+          "en": "authorization server",
+          "zh": "授权服务器"
+        },
+        {
+          "en": "scope",
+          "zh": "权限范围"
+        },
+        {
+          "en": "redirect URL",
+          "zh": "重定向 URL"
+        },
+        {
+          "en": "revoke",
+          "zh": "撤销"
+        }
+      ]
+    },
+    {
+      "id": "20261102-3",
+      "topic": "Database",
+      "difficulty": "Medium",
+      "title": "The conversion-rate report shows 0% for every campaign, and one campaign crashes it with division by zero",
+      "title_zh": "转化率报表中每个广告活动都显示 0%，还有一个活动让报表因除以零而崩溃",
+      "question": "A PostgreSQL report computes conversion rate as `SELECT conversions / clicks FROM campaign_stats`. Both columns are `integer`. Every campaign shows 0, except that the report fails completely with `division by zero` once a new campaign with zero clicks appears. A developer \"fixes\" it with `conversions * 100 / clicks` and filters out zero clicks; now most campaigns show 3% or 4%, and the account total is computed as the average of the campaign rates.\n\nWhat is wrong, and how should the query be written?",
+      "question_zh": "一个 PostgreSQL 报表用 `SELECT conversions / clicks FROM campaign_stats` 计算转化率，两列都是 `integer`。每个广告活动都显示 0，而一旦出现一个点击量为零的新活动，整个报表就会以 `division by zero` 失败。一位开发者“修复”了它：改为 `conversions * 100 / clicks`，并过滤掉点击为零的行；现在大多数活动显示 3% 或 4%，而账户总体转化率是用各活动转化率的平均值算出来的。\n\n问题出在哪里？查询应该怎么写？",
+      "answer": "**Integer division.** Dividing two integers in PostgreSQL gives an integer, truncated toward zero: in a local PostgreSQL 16 test, `37 / 1000` returned 0 and `7 / 2` returned 3. Multiplying by 100 first only moves the truncation, so 3.7% became 3. And one row with zero clicks makes the whole query fail, not just that row.\n\n**Fix the rate.** Convert to `numeric` before dividing, and turn a zero denominator into `NULL` with `NULLIF`, so that row shows no rate instead of breaking the report. In the test this returned 3.70, 0.00 and an empty value for the campaign without clicks.\n\n```sql\nSELECT id,\n       round(conversions::numeric / NULLIF(clicks, 0) * 100, 2) AS conversion_pct\nFROM campaign_stats;\n```\n\n**Fix the total.** The account rate is total conversions divided by total clicks, not the average of the campaign rates. Averaging gives a tiny campaign the same weight as a huge one. In the test with campaigns of 37/1000 and 0/200, the ratio of sums was 0.0308 while the average of rates was 0.0185.\n\n- Use `numeric` for money and reported rates, and round only at the end; `float` is fine for charts but not for values compared or billed exactly.\n- Show \"no data\" for `NULL` rates in the UI rather than 0%, which is a real and different result.\n- Add tests with zero denominators and small numbers; a report that only ever ran on large campaigns hides both bugs.\n\n**Trade-offs.** `numeric` division is slower than integer or float math, which matters only on very large aggregations; you can aggregate integers first and divide once at the end. Hiding zero-click rows with a filter avoids the error but silently drops campaigns from the report, which is usually worse than showing an empty rate.",
+      "answer_zh": "**整数除法。** 在 PostgreSQL 中两个整数相除得到的是整数，并向零截断：在本地 PostgreSQL 16 的测试中，`37 / 1000` 返回 0，`7 / 2` 返回 3。先乘以 100 只是把截断挪了个位置，所以 3.7% 变成了 3。而只要有一行点击为零，整个查询都会失败，而不只是那一行。\n\n**修正转化率。** 在相除之前转换为 `numeric`，并用 `NULLIF` 把为零的分母变成 `NULL`，这样那一行显示为没有转化率，而不会让报表崩溃。在测试中，这返回了 3.70、0.00，以及没有点击的那个活动的空值。\n\n```sql\nSELECT id,\n       round(conversions::numeric / NULLIF(clicks, 0) * 100, 2) AS conversion_pct\nFROM campaign_stats;\n```\n\n**修正总体转化率。** 账户转化率是总转化数除以总点击数，而不是各活动转化率的平均值。取平均会让一个很小的活动和一个很大的活动拥有相同的权重。在包含 37/1000 和 0/200 两个活动的测试中，总量之比是 0.0308，而转化率的平均值是 0.0185。\n\n- 金额和对外报告的比率使用 `numeric`，只在最后一步取整；`float` 用于图表没有问题，但不适合需要精确比较或计费的数值。\n- 在界面上把为 `NULL` 的转化率显示为“无数据”，而不是 0%，因为 0% 是一个真实存在且含义不同的结果。\n- 加入分母为零和数值很小的测试用例；一个只在大型活动上运行过的报表会同时掩盖这两个 bug。\n\n**取舍。** `numeric` 除法比整数或浮点运算慢，但这只在非常大的聚合中才有影响；你可以先对整数进行聚合，最后只做一次除法。用过滤条件隐藏点击为零的行虽然避免了错误，却会悄悄地把这些活动从报表中去掉，这通常比显示一个空的转化率更糟。",
+      "followups": [
+        "Why is the average of rates misleading for an account total?",
+        "Where else in a reporting codebase would integer division hide?"
+      ],
+      "followups_zh": [
+        "为什么用转化率的平均值来表示账户总体转化率会产生误导？",
+        "在报表相关的代码库中，整数除法还可能藏在哪些地方？"
+      ],
+      "vocab": [
+        {
+          "en": "integer division",
+          "zh": "整数除法"
+        },
+        {
+          "en": "truncate",
+          "zh": "截断"
+        },
+        {
+          "en": "denominator",
+          "zh": "分母"
+        },
+        {
+          "en": "weighted average",
+          "zh": "加权平均"
+        }
+      ]
+    },
+    {
+      "id": "20261102-4",
+      "topic": "Middleware",
+      "difficulty": "Senior",
+      "title": "Order events on Redis Streams: a crashed worker's messages are stuck forever, and trimming loses others",
+      "title_zh": "基于 Redis Streams 的订单事件：崩溃的 worker 手里的消息永远卡住，而裁剪又丢掉了另一些消息",
+      "question": "Order events go into a Redis Stream `orders`, read by a consumer group `conv` that sends conversions to ad platforms. Workers use `XREADGROUP ... STREAMS orders >` and `XACK` after sending. When a worker pod is killed mid-batch, its messages are never processed by anyone. To control memory, the producer uses `XADD orders MAXLEN ~ 100000`, and during a long Meta outage some unprocessed events vanished from the stream entirely.\n\nExplain both problems and design a reliable consumer.",
+      "question_zh": "订单事件写入 Redis Stream `orders`，由消费者组 `conv` 读取，并把转化事件发送到各广告平台。worker 使用 `XREADGROUP ... STREAMS orders >` 读取，发送成功后执行 `XACK`。当一个 worker pod 在处理一批消息的中途被杀掉时，它手上的消息再也没有被任何人处理。为了控制内存，生产者使用 `XADD orders MAXLEN ~ 100000`，而在一次较长的 Meta 故障期间，一些尚未处理的事件从 stream 中彻底消失了。\n\n解释这两个问题，并设计一个可靠的消费者。",
+      "answer": "**Problem one: the pending entries list.** Reading with `>` delivers only new messages and records each one in the group's pending entries list (PEL) under that consumer until it is acknowledged. If the consumer dies, the entries stay pending under its name forever; other consumers reading with `>` never see them. In a local Redis 7 test, after one consumer read three messages and stopped, `XPENDING` still showed them under it, and another consumer's `>` read returned nothing for them.\n\n**Problem two: trimming ignores consumers.** `MAXLEN` and `XTRIM` remove the oldest entries whether or not a group has processed them. In the test, trimming to two entries deleted messages that were still pending. A backlog during an outage is exactly when the oldest entries are unprocessed, so a length cap turns an outage into data loss.\n\n**A reliable consumer.**\n\n- **Reclaim stuck work.** Each worker periodically runs `XAUTOCLAIM orders conv <me> <min-idle-ms> 0-0` to take over entries idle longer than a timeout. In the test it returned the pending messages, increased their delivery count, and also listed IDs that had been trimmed away, removing them from the PEL; log those as lost.\n- **Restart safely.** A restarted worker with a stable name first reads its own history with ID `0` instead of `>`, finishing what it had before the crash.\n- **Poison messages.** If the delivery count passes a limit, move the entry to a dead-letter stream with the error and acknowledge it, so one bad event cannot block a worker forever.\n- **Idempotent sends.** Reclaiming means a message can be processed twice, so send the order ID as the platform's event ID for deduplication.\n- **Trim by progress, not length.** Trim only entries older than the group's last acknowledged position, for example with `XTRIM orders MINID <id>` computed from the oldest pending entry, and alert on lag and on pending count.\n\n```text\nXREADGROUP GROUP conv worker-7 COUNT 100 STREAMS orders 0     # my own unacked first\nXAUTOCLAIM orders conv worker-7 60000 0-0 COUNT 100          # then others' stuck work\nXREADGROUP GROUP conv worker-7 COUNT 100 BLOCK 5000 STREAMS orders >\nXACK orders conv <id>                                          # only after a successful send\n```\n\n**Trade-offs.** Redis Streams keep everything in memory, so a long outage still forces a choice between memory and data. If backlogs of hours are normal, the durable source of truth should be an outbox table or Kafka, with Redis as a fast buffer. Reclaim timeouts that are too short cause duplicate work while a slow worker is still busy; too long, and recovery is slow.",
+      "answer_zh": "**问题一：待处理条目列表。** 用 `>` 读取只会投递新消息，并把每条消息记录在消费者组的待处理条目列表（PEL）中、归属于该消费者，直到它被确认为止。如果这个消费者挂掉了，这些条目会以它的名义永远处于待处理状态；其他用 `>` 读取的消费者永远看不到它们。在本地 Redis 7 的测试中，一个消费者读取了三条消息后停止，`XPENDING` 仍然显示它们归属于该消费者，而另一个消费者用 `>` 读取时，拿不到这些消息。\n\n**问题二：裁剪不考虑消费者。** `MAXLEN` 和 `XTRIM` 会删除最旧的条目，不管消费者组是否处理过它们。在测试中，把 stream 裁剪到两条时，删掉了仍处于待处理状态的消息。故障期间出现积压时，恰恰是最旧的条目还没有被处理，所以长度上限会把一次故障变成数据丢失。\n\n**一个可靠的消费者。**\n\n- **回收卡住的工作。** 每个 worker 定期执行 `XAUTOCLAIM orders conv <me> <min-idle-ms> 0-0`，接管空闲时间超过某个超时的条目。在测试中，它返回了这些待处理消息，增加了它们的投递次数，同时还列出了已被裁剪掉的 ID，并把它们从 PEL 中移除；要把这些记录为丢失。\n- **安全地重启。** 名称固定的 worker 重启后，先用 ID `0` 而不是 `>` 读取自己的历史，把崩溃前手上的消息处理完。\n- **毒消息。** 如果投递次数超过上限，就把该条目连同错误信息移到一个死信 stream，并对它执行确认，这样一条有问题的事件就不会永远卡住某个 worker。\n- **幂等发送。** 回收意味着一条消息可能被处理两次，所以要把订单 ID 作为平台的事件 ID 发送，以便去重。\n- **按进度而不是按长度裁剪。** 只裁剪比消费者组最后确认位置更早的条目，例如根据最旧的待处理条目计算出 ID，再执行 `XTRIM orders MINID <id>`，并对延迟和待处理数量设置告警。\n\n```text\nXREADGROUP GROUP conv worker-7 COUNT 100 STREAMS orders 0     # my own unacked first\nXAUTOCLAIM orders conv worker-7 60000 0-0 COUNT 100          # then others' stuck work\nXREADGROUP GROUP conv worker-7 COUNT 100 BLOCK 5000 STREAMS orders >\nXACK orders conv <id>                                          # only after a successful send\n```\n\n**取舍。** Redis Streams 把所有数据都保存在内存中，所以一次较长的故障仍然会迫使你在内存和数据之间做选择。如果数小时的积压是常态，那么持久化的事实来源应该是 outbox 表或 Kafka，而 Redis 只作为快速缓冲。回收超时设置得太短，会在慢 worker 仍在处理时造成重复工作；设置得太长，恢复又会很慢。",
+      "followups": [
+        "How would you choose the min-idle time for XAUTOCLAIM?",
+        "How would you compute a safe MINID for trimming?",
+        "When would you move this pipeline from Redis Streams to Kafka?"
+      ],
+      "followups_zh": [
+        "你会如何选择 XAUTOCLAIM 的最小空闲时间？",
+        "你会如何计算一个安全的、用于裁剪的 MINID？",
+        "在什么情况下你会把这条流水线从 Redis Streams 迁移到 Kafka？"
+      ],
+      "vocab": [
+        {
+          "en": "pending entries list",
+          "zh": "待处理条目列表"
+        },
+        {
+          "en": "consumer group",
+          "zh": "消费者组"
+        },
+        {
+          "en": "dead-letter",
+          "zh": "死信"
+        },
+        {
+          "en": "trim",
+          "zh": "裁剪"
+        }
+      ]
+    },
+    {
+      "id": "20261102-5",
+      "topic": "Java & CS",
+      "difficulty": "Hard",
+      "title": "Moving budget between two campaigns occasionally freezes both campaigns forever",
+      "title_zh": "在两个广告活动之间调拨预算，偶尔会让两个活动永远卡住",
+      "question": "A Java service lets merchants move daily budget from one campaign to another. `moveBudget(from, to, amount)` does `synchronized (from) { synchronized (to) { ... } }`. Under normal use it works, but a few times a week, after a merchant runs an automation that moves budget back and forth between two campaigns, every request touching either campaign hangs until the pod is restarted. CPU stays low.\n\nDiagnose it and fix it.",
+      "question_zh": "一个 Java 服务允许商家把每日预算从一个广告活动调拨到另一个。`moveBudget(from, to, amount)` 的实现是 `synchronized (from) { synchronized (to) { ... } }`。正常使用时没有问题，但每周会有几次，在某个商家运行一个在两个活动之间来回调拨预算的自动化任务之后，所有涉及这两个活动中任意一个的请求都会挂起，直到 pod 重启为止。CPU 使用率一直很低。\n\n诊断并修复这个问题。",
+      "answer": "**Diagnosis: lock-ordering deadlock.** One thread moves A to B and locks A, then waits for B; at the same moment another moves B to A and locks B, then waits for A. Neither can continue, and neither ever gives up, which is why CPU stays low. In a local test with a short pause between the two locks, `ThreadMXBean.findDeadlockedThreads()` reported both threads, each waiting for a lock owned by the other. A thread dump from `jstack` shows the same thing.\n\n**Fix: a global lock order.** Always lock the campaign with the lower ID first, whatever the direction of the move. In the test, opposite moves with ordered locking both completed and the budgets were correct.\n\n```java\nstatic void moveBudget(Campaign from, Campaign to, long amount) {\n    Campaign first = from.id < to.id ? from : to;\n    Campaign second = first == from ? to : from;\n    synchronized (first) {\n        synchronized (second) {\n            from.budget -= amount;\n            to.budget += amount;\n        }\n    }\n}\n```\n\n- **Timeouts as a second line.** `ReentrantLock.tryLock(timeout)` lets a thread give up instead of waiting forever. But in the test, two opposite moves with timeouts both failed at the same time, so you need retry with random backoff, or it becomes a livelock.\n- **Detect it in production.** Run a periodic `findDeadlockedThreads()` check that logs thread names and raises an alert, so the next one is diagnosed in minutes instead of fixed by a restart.\n- **Usually the real answer is the database.** Budgets live in a database shared by many pods, where JVM locks do not help at all. Do the move in one transaction that updates both rows in a fixed order, for example ordered by ID.\n\n**Trade-offs.** A global lock order is simple and has no runtime cost, but every code path that takes more than one lock must follow it, so keep multi-lock code in one place. Timeouts and retries make deadlocks recoverable but add latency and complexity. Moving the invariant into a single database transaction removes the JVM problem but brings database lock ordering and retry on serialization failures with it.",
+      "answer_zh": "**诊断：加锁顺序导致的死锁。** 一个线程把 A 调拨到 B，它锁住 A，然后等待 B；同一时刻另一个线程把 B 调拨到 A，它锁住 B，然后等待 A。两者都无法继续，也都永远不会放弃，这就是 CPU 使用率很低的原因。在本地测试中，在两次加锁之间加入短暂的停顿后，`ThreadMXBean.findDeadlockedThreads()` 报告了这两个线程，每个都在等待对方持有的锁。`jstack` 生成的线程转储也会显示同样的情况。\n\n**修复：全局统一的加锁顺序。** 无论调拨方向如何，总是先锁 ID 较小的那个活动。在测试中，使用有序加锁后，两个方向相反的调拨都完成了，预算也是正确的。\n\n```java\nstatic void moveBudget(Campaign from, Campaign to, long amount) {\n    Campaign first = from.id < to.id ? from : to;\n    Campaign second = first == from ? to : from;\n    synchronized (first) {\n        synchronized (second) {\n            from.budget -= amount;\n            to.budget += amount;\n        }\n    }\n}\n```\n\n- **用超时作为第二道防线。** `ReentrantLock.tryLock(timeout)` 让线程可以放弃，而不是永远等待。但在测试中，两个方向相反、带超时的调拨同时失败了，所以需要配合随机退避进行重试，否则就会变成活锁。\n- **在生产环境中检测它。** 定期运行 `findDeadlockedThreads()` 检查，记录线程名并发出告警，这样下一次死锁可以在几分钟内被诊断出来，而不是靠重启来解决。\n- **通常真正的答案在数据库里。** 预算保存在被许多 pod 共享的数据库中，JVM 锁在那里完全不起作用。在一个事务中完成调拨，并按固定顺序（例如按 ID 排序）更新这两行。\n\n**取舍。** 全局加锁顺序简单，也没有运行时开销，但所有获取多把锁的代码路径都必须遵守它，所以要把多锁代码集中在一处。超时和重试让死锁可以恢复，但会增加延迟和复杂度。把这个不变量移到单个数据库事务中，可以消除 JVM 层面的问题，但也会带来数据库层面的加锁顺序问题，以及在序列化失败时需要重试的问题。",
+      "followups": [
+        "Why does a deadlock keep CPU low while a livelock keeps it high?",
+        "How would you enforce a lock order across a large codebase?"
+      ],
+      "followups_zh": [
+        "为什么死锁时 CPU 使用率很低，而活锁时 CPU 使用率很高？",
+        "你会如何在一个大型代码库中强制执行统一的加锁顺序？"
+      ],
+      "vocab": [
+        {
+          "en": "deadlock",
+          "zh": "死锁"
+        },
+        {
+          "en": "lock ordering",
+          "zh": "加锁顺序"
+        },
+        {
+          "en": "livelock",
+          "zh": "活锁"
+        },
+        {
+          "en": "thread dump",
+          "zh": "线程转储"
+        }
+      ]
+    }
+  ]
+}
