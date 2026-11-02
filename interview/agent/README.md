@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 26 个模块、114 道题。
+共 27 个模块、119 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -355,3 +355,17 @@ Five new agent questions: raising effort mid-conversation without losing the cac
 | 3 | Production | Medium | [Merchants pause for 20 minutes in a planning chat, and every reply after a pause is slow and expensive](modules/daily-2026-11-02.md#q3) | 商家在规划对话中停顿 20 分钟，之后的每次回复都又慢又贵 |
 | 4 | RAG | Hard | ["What were my top 10 products by refund rate last quarter?" RAG over the order export gives confident wrong numbers](modules/daily-2026-11-02.md#q4) | “上个季度退款率最高的 10 个商品是哪些？”基于订单导出数据的 RAG 给出了自信却错误的数字 |
 | 5 | Evals & Observability | Senior | [The prompt was tuned from 71% to 94% on the eval, and production did not improve at all](modules/daily-2026-11-02.md#q5) | 提示在评测上从 71% 调到了 94%，而生产环境却毫无改善 |
+
+## [Daily set · Nov 3 · 每日新题 · 11 月 3 日](modules/daily-2026-11-03.md)
+
+Five new agent questions: keeping critical state through compaction with custom instructions, building a memory tool backend that cannot leak across merchants, locking down web access for an agent and its helpers, setting timeouts and retries for calls in the request path, and deciding a model switch on cost per completed task.
+
+> 五道新的 Agent 题：在使用自定义 instructions 的压缩中保留关键状态、构建不会在商家之间泄漏的记忆工具后端、为 Agent 及其助手锁定网络访问、为请求路径上的调用设置超时与重试，以及根据每个完成任务的成本来决定是否更换模型。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Context & Memory | Hard | [After compaction with a custom summary prompt, a long campaign session forgets the merchant's approved budget cap](modules/daily-2026-11-03.md#q1) | 使用自定义摘要提示进行压缩之后，一段很长的广告活动会话忘记了商家批准的预算上限 |
+| 2 | Tools & MCP | Hard | [You implement the memory tool's file backend, and a crafted path reads another merchant's notes](modules/daily-2026-11-03.md#q2) | 你们实现了记忆工具的文件后端，而一个精心构造的路径读到了另一个商家的笔记 |
+| 3 | Safety & Security | Medium | [A competitor-research agent can browse anywhere: locking down web access for an agent and its helpers](modules/daily-2026-11-03.md#q3) | 一个竞品调研 Agent 可以访问任何网站：为 Agent 及其助手锁定网络访问 |
+| 4 | Production | Medium | [A storefront request waits half an hour for an AI call: SDK timeouts and retries stacked on your own](modules/daily-2026-11-03.md#q4) | 一个店铺前台请求为一次 AI 调用等了半个小时：SDK 的超时和重试叠加在你们自己的之上 |
+| 5 | Evals & Observability | Senior | [Finance wants the support agent on a cheaper model: design the comparison that decides](modules/daily-2026-11-03.md#q5) | 财务希望把客服 Agent 换到更便宜的模型上：设计用来做决定的对比方案 |

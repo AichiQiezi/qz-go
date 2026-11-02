@@ -1,0 +1,205 @@
+{
+  "id": "daily-2026-11-03",
+  "order": 20261103,
+  "kind": "daily",
+  "title": "Daily set · Nov 3",
+  "title_zh": "每日新题 · 11 月 3 日",
+  "summary": "Five new agent questions: keeping critical state through compaction with custom instructions, building a memory tool backend that cannot leak across merchants, locking down web access for an agent and its helpers, setting timeouts and retries for calls in the request path, and deciding a model switch on cost per completed task.",
+  "summary_zh": "五道新的 Agent 题：在使用自定义 instructions 的压缩中保留关键状态、构建不会在商家之间泄漏的记忆工具后端、为 Agent 及其助手锁定网络访问、为请求路径上的调用设置超时与重试，以及根据每个完成任务的成本来决定是否更换模型。",
+  "generatedAt": "2026-11-03T06:55:42+08:00",
+  "questions": [
+    {
+      "id": "agent-daily-20261103-1",
+      "topic": "Context & Memory",
+      "difficulty": "Hard",
+      "title": "After compaction with a custom summary prompt, a long campaign session forgets the merchant's approved budget cap",
+      "title_zh": "使用自定义摘要提示进行压缩之后，一段很长的广告活动会话忘记了商家批准的预算上限",
+      "question": "A campaign-optimization agent runs sessions that last for hours and can grow past the context window, so the team enabled server-side compaction. To make summaries shorter they passed their own `instructions`: \"Summarize the conversation in 10 bullet points focused on campaign performance.\" Since then, some sessions raise budgets above the cap the merchant approved at the start, and a few re-run analyses they had already finished. Separately, a teammate's client sometimes appends only the reply text to the history.\n\nExplain what went wrong and how to make long sessions keep what matters.",
+      "question_zh": "一个广告活动优化 Agent 运行的会话会持续好几个小时，并可能超出上下文窗口，所以团队开启了服务端压缩（compaction）。为了让摘要更短，他们传入了自己的 `instructions`：“用 10 个要点总结对话，重点关注广告活动的表现。”从那以后，有些会话会把预算提高到商家在一开始批准的上限之上，还有一些会重新运行已经完成过的分析。另外，一位同事的客户端有时只把回复文本追加到历史中。\n\n解释哪里出了问题，以及如何让长会话保留重要的信息。",
+      "answer": "**The core idea.** Compaction replaces old turns with a summary, so anything the summary leaves out is gone for the model. A summary is a lossy copy chosen by a prompt; anything that must never be lost, such as limits and approvals, should not depend on that prompt at all.\n\n**What went wrong.** Server-side compaction (beta `compact-2026-01-12`, a `compact_20260112` edit in `context_management`) summarizes earlier context when the conversation approaches its trigger threshold. A custom `instructions` string replaces the default summarization prompt rather than adding to it. The team's prompt asked only for performance, so the summary dropped the approved cap and the list of finished analyses. The second bug is separate: the API returns a `compaction` block in `response.content`, and the client must append the full content, not only the text, or the compaction state is silently lost.\n\n**Fixes.**\n\n- **Write instructions that keep task-critical state.** If you replace the default prompt, the new one must explicitly keep what the default would have kept: the goal, constraints and approvals, decisions made, work completed and open items, not only a theme you care about.\n- **Do not keep limits only in the conversation.** Store the approved cap in your database and enforce it in the `update_budget` tool on the server. The model can then forget it without causing harm, and you can re-state it in a `role: \"system\"` message when needed.\n- **Keep progress outside the context too.** Record finished analyses in a task table or memory store and expose them through a tool, so the agent checks before re-running work.\n- **Round-trip the full content.** Fix the client to append `response.content` every turn, and add a test that a compaction block survives into the next request.\n\n```json\n{\"context_management\": {\"edits\": [{\n  \"type\": \"compact_20260112\",\n  \"instructions\": \"Summarize for continuing this task. Always keep: the goal, every limit and approval the merchant gave (with values), decisions made, analyses completed with their results, and open next steps.\"\n}]}}\n```\n\n**Test compaction like any other change.** Run long synthetic sessions that cross the threshold, with a cap and finished work set early, and check after compaction that the agent still respects the cap and does not repeat work. The summarization call is billed like any other request and shows up under `usage.iterations`, so include it in cost tracking. Compaction pays off only in sessions long enough to need it; on short sessions it saves nothing.\n\n**Trade-offs.** A shorter summary saves tokens on every later turn but loses more; a fuller summary costs more and keeps the agent coherent. Moving critical state into tools and storage adds engineering work but makes correctness independent of what any summary keeps, which is the only robust choice for limits that cost merchants money.",
+      "answer_zh": "**核心思路。** 压缩会用一份摘要替换旧的轮次，所以摘要遗漏的任何内容，对模型来说就都不存在了。摘要是由提示决定的有损副本；任何绝不能丢失的东西，比如上限和审批，根本就不应该依赖于这个提示。\n\n**哪里出了问题。** 服务端压缩（beta `compact-2026-01-12`，在 `context_management` 中加入一个 `compact_20260112` 编辑）会在对话接近触发阈值时总结之前的上下文。自定义的 `instructions` 字符串会替换默认的摘要提示，而不是在其基础上追加。团队的提示只要求关注表现，所以摘要丢掉了批准的上限和已完成分析的列表。第二个 bug 是另一回事：API 会在 `response.content` 中返回一个 `compaction` 块，客户端必须追加完整的内容，而不是只追加文本，否则压缩状态就会悄悄丢失。\n\n**修复方法。**\n\n- **编写能保留任务关键状态的 instructions。** 如果你替换了默认提示，新的提示就必须明确保留默认提示会保留的内容：目标、约束与审批、已做出的决定、已完成的工作以及未完成的事项，而不只是你关心的某个主题。\n- **不要只把上限保存在对话里。** 把批准的上限保存在你们的数据库中，并在服务端的 `update_budget` 工具里强制执行。这样即使模型忘了它，也不会造成损害，而且需要时你可以在一条 `role: \"system\"` 消息中重新声明它。\n- **同样把进度保存在上下文之外。** 把已完成的分析记录在任务表或记忆存储中，并通过工具提供给 Agent，让它在重新运行工作之前先检查一下。\n- **完整地往返回传内容。** 修复客户端，让它每一轮都追加 `response.content`，并加一个测试，确认压缩块能保留到下一个请求中。\n\n```json\n{\"context_management\": {\"edits\": [{\n  \"type\": \"compact_20260112\",\n  \"instructions\": \"Summarize for continuing this task. Always keep: the goal, every limit and approval the merchant gave (with values), decisions made, analyses completed with their results, and open next steps.\"\n}]}}\n```\n\n**像测试其他改动一样测试压缩。** 运行超过阈值的长时间模拟会话，在早期设置一个上限和一些已完成的工作，并在压缩后检查 Agent 是否仍然遵守上限、是否没有重复工作。摘要调用和其他请求一样计费，并会出现在 `usage.iterations` 中，所以要把它纳入成本跟踪。只有在足够长、确实需要压缩的会话中，压缩才划算；在短会话中它什么也省不了。\n\n**取舍。** 更短的摘要能在之后的每一轮节省 token，但丢失的内容更多；更完整的摘要成本更高，但能让 Agent 保持连贯。把关键状态移到工具和存储中会增加工程工作量，但能让正确性不依赖于任何摘要保留了什么，对于会让商家花钱的上限来说，这是唯一可靠的选择。",
+      "followups": [
+        "Why is a limit enforced in a tool safer than one written in the prompt?",
+        "How would you test that compaction keeps what matters?"
+      ],
+      "followups_zh": [
+        "为什么在工具中强制执行的上限，比写在提示里的上限更安全？",
+        "你会如何测试压缩是否保留了重要的内容？"
+      ],
+      "vocab": [
+        {
+          "en": "compaction",
+          "zh": "压缩"
+        },
+        {
+          "en": "lossy",
+          "zh": "有损的"
+        },
+        {
+          "en": "task-critical state",
+          "zh": "任务关键状态"
+        },
+        {
+          "en": "round-trip",
+          "zh": "往返回传"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261103-2",
+      "topic": "Tools & MCP",
+      "difficulty": "Hard",
+      "title": "You implement the memory tool's file backend, and a crafted path reads another merchant's notes",
+      "title_zh": "你们实现了记忆工具的文件后端，而一个精心构造的路径读到了另一个商家的笔记",
+      "question": "The support agent uses the client-side memory tool so it can remember each merchant's preferences across sessions. The team's Go backend maps `/memories/...` to `data/<merchant>/memories/...` with `filepath.Join`, and checks that the result starts with the merchant's directory. A penetration test shows two leaks: a path containing `..` and, after the first fix, a symlink placed inside a merchant's directory. Both read another merchant's notes.\n\nExplain the risk and design a safe memory backend.",
+      "question_zh": "客服 Agent 使用客户端记忆工具，以便跨会话记住每个商家的偏好。团队的 Go 后端用 `filepath.Join` 把 `/memories/...` 映射到 `data/<merchant>/memories/...`，并检查结果是否以该商家的目录开头。一次渗透测试发现了两处泄漏：一个包含 `..` 的路径，以及在第一次修复之后，一个被放在商家目录里的符号链接。两者都读到了另一个商家的笔记。\n\n解释其中的风险，并设计一个安全的记忆后端。",
+      "answer": "**The core idea.** The memory tool is a client-side tool: the model sends commands with paths, and your code decides what those paths mean. Every path is untrusted input, possibly shaped by a prompt injection, so the backend must make it impossible to leave the current merchant's directory, not merely unlikely.\n\n**Mechanism.** The tool (`memory_20250818`) supports `view`, `create`, `str_replace`, `insert`, `delete` and `rename` on files under `/memories`. The reference implementations have no built-in access control, so multi-tenant systems must add per-user directories and authentication in the handlers. In a local test, a naive `filepath.Join` read `/memories/../../m2/memories/notes.md` from another merchant. A string prefix check blocked the `..` path, but a symlink inside the merchant's directory still read the other merchant's file, because the check looks at the path string, not where the file really is.\n\n**Fix: resolve every path inside a root the OS enforces.** Go 1.24's `os.Root` opens files relative to a directory and refuses anything that resolves outside it. In the same test it rejected both the `..` path and the symlink with \"path escapes from parent\".\n\n```go\n// readMemory reads a memory file for one merchant. The model's path must start\n// with /memories; os.Root refuses anything that resolves outside the\n// merchant's own directory, including \"..\" and symlinks.\nfunc readMemory(base, merchantID, path string) (string, error) {\n\trel, ok := strings.CutPrefix(path, \"/memories\")\n\tif !ok {\n\t\treturn \"\", fmt.Errorf(\"path %q is outside /memories\", path)\n\t}\n\troot, err := os.OpenRoot(filepath.Join(base, merchantID, \"memories\"))\n\tif err != nil {\n\t\treturn \"\", err\n\t}\n\tdefer root.Close()\n\tf, err := root.Open(strings.TrimPrefix(rel, \"/\"))\n\tif err != nil {\n\t\treturn \"\", err\n\t}\n\tdefer f.Close()\n\tb, err := io.ReadAll(f)\n\treturn string(b), err\n}\n```\n\n- **The merchant comes from your session, never from the model.** `merchantID` is taken from the authenticated request, not from anything in the tool input.\n- **Check both paths of `rename`**, and apply the same root to every command, including `view` on directories.\n- **Limit what can be stored.** Cap file count and size per merchant, and never store API keys, tokens or other secrets in memory files; be careful with customer personal data and your privacy obligations.\n- **Treat memory content as untrusted on the way back.** A note can contain injected instructions written in an earlier session; log writes, and review or expire notes that look like instructions.\n\n**Trade-offs.** A filesystem backend is simple but makes isolation your job; a database backend keyed by merchant ID removes path problems entirely at the cost of reimplementing the commands. On Managed Agents, memory stores are a managed alternative. Whatever you choose, run the traversal and symlink cases as permanent security tests, because a later refactor can quietly reintroduce the hole.",
+      "answer_zh": "**核心思路。** 记忆工具是一个客户端工具：模型发送带有路径的命令，由你们的代码决定这些路径意味着什么。每一个路径都是不可信的输入，可能是被提示注入塑造出来的，所以后端必须让离开当前商家的目录变得不可能，而不仅仅是不太可能。\n\n**机制。** 这个工具（`memory_20250818`）支持对 `/memories` 下的文件执行 `view`、`create`、`str_replace`、`insert`、`delete` 和 `rename`。参考实现没有内置的访问控制，所以多租户系统必须在处理函数中加入按用户划分的目录和身份认证。在本地测试中，一个朴素的 `filepath.Join` 读到了另一个商家的 `/memories/../../m2/memories/notes.md`。字符串前缀检查拦住了 `..` 路径，但商家目录里的符号链接仍然读到了另一个商家的文件，因为这个检查看的是路径字符串，而不是文件实际所在的位置。\n\n**修复方法：在由操作系统强制约束的根目录内解析每一个路径。** Go 1.24 的 `os.Root` 相对于某个目录打开文件，并拒绝任何解析到该目录之外的内容。在同一个测试中，它以 “path escapes from parent” 拒绝了 `..` 路径和符号链接。\n\n```go\n// readMemory reads a memory file for one merchant. The model's path must start\n// with /memories; os.Root refuses anything that resolves outside the\n// merchant's own directory, including \"..\" and symlinks.\nfunc readMemory(base, merchantID, path string) (string, error) {\n\trel, ok := strings.CutPrefix(path, \"/memories\")\n\tif !ok {\n\t\treturn \"\", fmt.Errorf(\"path %q is outside /memories\", path)\n\t}\n\troot, err := os.OpenRoot(filepath.Join(base, merchantID, \"memories\"))\n\tif err != nil {\n\t\treturn \"\", err\n\t}\n\tdefer root.Close()\n\tf, err := root.Open(strings.TrimPrefix(rel, \"/\"))\n\tif err != nil {\n\t\treturn \"\", err\n\t}\n\tdefer f.Close()\n\tb, err := io.ReadAll(f)\n\treturn string(b), err\n}\n```\n\n- **商家身份来自你们的会话，而绝不来自模型。** `merchantID` 取自经过认证的请求，而不是工具输入中的任何内容。\n- **检查 `rename` 的两个路径**，并对每一个命令都使用同一个根目录，包括对目录执行的 `view`。\n- **限制可以存储的内容。** 为每个商家限制文件数量和大小，并且绝不在记忆文件中存储 API key、token 或其他机密；对顾客的个人数据以及你们的隐私义务要格外小心。\n- **读回来的记忆内容同样不可信。** 一条笔记可能包含之前某次会话中写入的注入指令；记录写入操作，并复核或让那些看起来像指令的笔记过期。\n\n**取舍。** 文件系统后端很简单，但隔离就成了你们的责任；以商家 ID 为键的数据库后端可以彻底消除路径问题，代价是要重新实现这些命令。在 Managed Agents 上，记忆存储是一种托管的替代方案。无论选择哪种方式，都要把路径穿越和符号链接的用例作为长期的安全测试来运行，因为之后的一次重构可能会悄无声息地重新引入这个漏洞。",
+      "followups": [
+        "Why does a string prefix check not stop a symlink escape?",
+        "How could a prompt injection turn the memory tool into an exfiltration channel?",
+        "Would you choose a filesystem or database backend here, and why?"
+      ],
+      "followups_zh": [
+        "为什么字符串前缀检查无法阻止符号链接逃逸？",
+        "提示注入如何能把记忆工具变成一个数据外泄的通道？",
+        "在这里你会选择文件系统后端还是数据库后端？为什么？"
+      ],
+      "vocab": [
+        {
+          "en": "path traversal",
+          "zh": "路径穿越"
+        },
+        {
+          "en": "symlink",
+          "zh": "符号链接"
+        },
+        {
+          "en": "multi-tenant",
+          "zh": "多租户"
+        },
+        {
+          "en": "exfiltration",
+          "zh": "数据外泄"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261103-3",
+      "topic": "Safety & Security",
+      "difficulty": "Medium",
+      "title": "A competitor-research agent can browse anywhere: locking down web access for an agent and its helpers",
+      "title_zh": "一个竞品调研 Agent 可以访问任何网站：为 Agent 及其助手锁定网络访问",
+      "question": "A Managed Agents agent researches competitors' prices for merchants. It uses the built-in toolset with defaults, so web search and web fetch are on, and its environment has unrestricted networking. Security asks three things: can it be steered by a malicious page to fetch internal or unexpected URLs, can its helper agents reach sites the coordinator cannot, and how do you restrict all of this to a known list of marketplaces?",
+      "question_zh": "一个 Managed Agents 上的 Agent 为商家调研竞争对手的价格。它使用默认配置的内置工具集，所以网页搜索和网页抓取都是开启的，它的环境也使用不受限制的网络。安全团队提出了三个问题：它是否可能被恶意页面引导去抓取内部或意料之外的 URL？它的助手 Agent 能否访问协调者无法访问的网站？以及如何把这一切都限制在一份已知的电商平台清单之内？",
+      "answer": "**The core idea.** Start with the web tools off, turn on only what the job needs, and give each tool a list of sites. Web access is the main path by which untrusted content enters an agent, so it should be as narrow as the task allows.\n\n**Mechanism.** A bare `agent_toolset_20260401` enables all of its tools, including `web_search` and `web_fetch`. These two run on Anthropic's servers, so the environment's `networking` setting limits them only when it is `limited`: then `web_fetch` returns an error for a host not in `allowed_hosts`, and `web_search` omits results from such hosts. Unrestricted networking does not limit them at all. Web fetch only fetches URLs already present in the conversation, but a fetched page can put new URLs there, which is how a malicious page can steer it.\n\n**Lock it down.**\n\n- **Per-tool domain lists.** On each tool's `configs` entry set `allowed_domains` (only these hosts) or `blocked_domains` (never these), never both on one entry. For price research, an allow-list of the marketplaces you support is the right shape.\n- **Only the tools needed.** If the agent only reads known product pages, enable `web_fetch` and leave `web_search` off.\n- **Limited networking as a second layer.** With `limited` networking and the same hosts in `allowed_hosts`, the environment enforces the list too; note that a host added there for the web tools is also open to the sandbox.\n- **Helpers inherit the narrower list.** A roster agent's web calls are bound by its own lists, those of every agent that called it, and the coordinator's: allow-lists intersect and block-lists combine. Keep each helper's allow-list inside the coordinator's, because disjoint lists leave the tool present but every call fails.\n\n```json\n{\"type\": \"agent_toolset_20260401\",\n \"configs\": [\n   {\"type\": \"web_fetch\", \"name\": \"web_fetch\", \"enabled\": true,\n    \"allowed_domains\": [\"amazon.com\", \"ebay.com\", \"etsy.com\"]},\n   {\"type\": \"web_search\", \"name\": \"web_search\", \"enabled\": false}\n ]}\n```\n\n**Treat page content as data.** Even on allowed sites, product pages and reviews can contain injected instructions. Keep write tools and credentials away from this agent, have it return structured price data, and let your own code, not the agent, decide what to do with it.\n\n**Trade-offs.** Allow-lists block useful sources you did not think of, so research quality can drop; review fetch errors to decide which domains to add. Block-lists are easier to maintain but leave everything else open, which is rarely acceptable for an agent that reads untrusted content.",
+      "answer_zh": "**核心思路。** 先把网络工具关掉，只开启工作真正需要的那些，并给每个工具一份网站清单。网络访问是不可信内容进入 Agent 的主要途径，所以它应当在任务允许的范围内尽可能窄。\n\n**机制。** 一个不加配置的 `agent_toolset_20260401` 会开启其中所有的工具，包括 `web_search` 和 `web_fetch`。这两个工具运行在 Anthropic 的服务器上，所以只有当环境的 `networking` 设置为 `limited` 时才会限制它们：此时 `web_fetch` 对不在 `allowed_hosts` 中的主机返回错误，而 `web_search` 会略去来自这类主机的结果。不受限制的网络则完全不会限制它们。网页抓取只会抓取对话中已经出现过的 URL，但被抓取的页面可以把新的 URL 放进对话，这正是恶意页面引导它的方式。\n\n**把它锁定。**\n\n- **为每个工具设置域名清单。** 在每个工具的 `configs` 条目上设置 `allowed_domains`（只允许这些主机）或 `blocked_domains`（绝不允许这些主机），同一个条目上二者不能同时设置。对于价格调研，你们支持的电商平台的白名单是合适的形式。\n- **只开启需要的工具。** 如果 Agent 只读取已知的商品页面，就开启 `web_fetch`，把 `web_search` 关掉。\n- **把受限网络作为第二层防护。** 使用 `limited` 网络并在 `allowed_hosts` 中列出同样的主机，环境也会强制执行这份清单；要注意，为网络工具添加到这里的主机，同样会对沙箱开放。\n- **助手继承更窄的清单。** 名册中 Agent 的网络调用受它自己的清单、调用它的每个 Agent 的清单以及协调者的清单共同约束：白名单取交集，黑名单取并集。让每个助手的白名单都落在协调者的白名单之内，因为互不相交的清单会让工具虽然存在，但每次调用都会失败。\n\n```json\n{\"type\": \"agent_toolset_20260401\",\n \"configs\": [\n   {\"type\": \"web_fetch\", \"name\": \"web_fetch\", \"enabled\": true,\n    \"allowed_domains\": [\"amazon.com\", \"ebay.com\", \"etsy.com\"]},\n   {\"type\": \"web_search\", \"name\": \"web_search\", \"enabled\": false}\n ]}\n```\n\n**把页面内容当作数据。** 即使是在允许的网站上，商品页面和评论也可能包含注入的指令。让这个 Agent 远离写操作工具和凭证，让它返回结构化的价格数据，并由你们自己的代码而不是 Agent 来决定如何使用这些数据。\n\n**取舍。** 白名单会挡住一些你没想到的有用来源，所以调研质量可能下降；复查抓取错误，来决定要添加哪些域名。黑名单更容易维护，但会让其他所有网站都保持开放，对于一个读取不可信内容的 Agent 来说，这很少是可以接受的。",
+      "followups": [
+        "Why does unrestricted networking not limit the web tools?",
+        "What happens if a helper's allow-list does not overlap the coordinator's?"
+      ],
+      "followups_zh": [
+        "为什么不受限制的网络不会限制网络工具？",
+        "如果某个助手的白名单与协调者的白名单没有交集，会发生什么？"
+      ],
+      "vocab": [
+        {
+          "en": "allow-list",
+          "zh": "白名单"
+        },
+        {
+          "en": "block-list",
+          "zh": "黑名单"
+        },
+        {
+          "en": "networking",
+          "zh": "网络配置"
+        },
+        {
+          "en": "intersect",
+          "zh": "取交集"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261103-4",
+      "topic": "Production",
+      "difficulty": "Medium",
+      "title": "A storefront request waits half an hour for an AI call: SDK timeouts and retries stacked on your own",
+      "title_zh": "一个店铺前台请求为一次 AI 调用等了半个小时：SDK 的超时和重试叠加在你们自己的之上",
+      "question": "A product-page service calls Claude to generate a short size recommendation while the shopper waits. During a provider slowdown, some page requests hung for close to 30 minutes, worker threads ran out, and the whole storefront slowed down. The service wraps each SDK call in its own retry loop of three attempts and uses the SDK client with its default settings.\n\nExplain the numbers and design the call path.",
+      "question_zh": "一个商品页服务在顾客等待时调用 Claude 生成一段简短的尺码建议。在一次服务商响应变慢期间，有些页面请求挂起了将近 30 分钟，工作线程被耗尽，整个店铺前台都变慢了。这个服务把每次 SDK 调用都包在自己的三次重试循环里，并且使用默认设置的 SDK 客户端。\n\n解释这些数字，并设计这条调用路径。",
+      "answer": "**The core idea.** A call in the request path needs a deadline that matches what the shopper will tolerate, and exactly one layer that retries. Defaults are designed for long background generations, not for a page that must load in seconds.\n\n**Mechanism.** The SDK's default timeout is 10 minutes, and by default it retries twice on 408, 409, 429, 5xx and connection errors, including timeouts. So one SDK call can take up to the timeout times three, about 30 minutes, which matches the hangs. The team's own loop of three attempts on top multiplies that again, up to nine attempts per page view, which also adds load to a provider that is already slow.\n\n**Fix.**\n\n- **Set a per-request deadline.** Give the call a timeout that fits the page, for example a few seconds, with `option.WithRequestTimeout` in Go or a context deadline passed as the call's first argument.\n- **One retry layer.** Either rely on the SDK's retries, lowered for this route, or turn them off and retry in your code, never both. Total time across all attempts must stay inside the page's budget.\n- **Branch on the error type.** In Go, unwrap with `errors.As` into `*anthropic.Error` and switch on `StatusCode`: back off on 429, do not retry a 400 or 404, and treat transport errors separately. Log `RequestID` for support cases.\n- **Degrade gracefully.** If the deadline passes, render the page without the recommendation, or with a cached one, and let a background job refresh it.\n\n```go\n_, err := client.Messages.New(ctx, params)\nif err != nil {\n    var apierr *anthropic.Error\n    if errors.As(err, &apierr) {\n        switch apierr.StatusCode {\n        case 404:\n            // bad model ID / resource\n        case 429:\n            // back off and retry\n        default:\n            // other API error - apierr.StatusCode, apierr.RequestID\n        }\n    } else {\n        // transport-level error (*url.Error wrapping *net.OpError, etc.)\n    }\n}\n```\n\n**Better still, take it off the critical path.** Size recommendations change rarely, so generate them ahead of time per product and size chart, store them, and serve them like any other content. Use the synchronous call only for cases that are truly per-shopper, and bound its concurrency so a slowdown cannot exhaust the storefront's workers.\n\n**Trade-offs.** Short timeouts make some requests fail that would have succeeded with patience, so measure the latency distribution and set the deadline above the normal tail. Precomputing costs tokens for products nobody views, but turns an outage into stale content instead of a slow storefront.",
+      "answer_zh": "**核心思路。** 处于请求路径上的调用需要一个与顾客的容忍程度相匹配的截止时间，并且只能有一层负责重试。默认值是为长时间的后台生成设计的，而不是为必须在几秒内加载完成的页面设计的。\n\n**机制。** SDK 的默认超时是 10 分钟，并且默认会在 408、409、429、5xx 和连接错误（包括超时）时重试两次。所以一次 SDK 调用最长可能耗时超时时间的三倍，也就是大约 30 分钟，这正好对应那些挂起。团队自己在其上再加的三次重试循环又把它翻了几倍，每次页面访问最多会有九次尝试，这也给本已变慢的服务商增加了负载。\n\n**修复方法。**\n\n- **为每个请求设置截止时间。** 给这次调用设置一个适合页面的超时，例如几秒钟，在 Go 中可以使用 `option.WithRequestTimeout`，或者把带截止时间的 context 作为调用的第一个参数传入。\n- **只保留一层重试。** 要么依赖 SDK 的重试（并针对这条路由调低次数），要么关闭它、在你们的代码中重试，绝不能两者同时使用。所有尝试加起来的总时间必须保持在页面的时间预算之内。\n- **按错误类型分支处理。** 在 Go 中，用 `errors.As` 解包到 `*anthropic.Error`，再按 `StatusCode` 分支：遇到 429 就退避，不要重试 400 或 404，并单独处理传输层错误。为了排查支持工单，记录 `RequestID`。\n- **优雅降级。** 如果超过了截止时间，就在没有推荐内容的情况下渲染页面，或者使用缓存的推荐，再让后台任务去刷新它。\n\n```go\n_, err := client.Messages.New(ctx, params)\nif err != nil {\n    var apierr *anthropic.Error\n    if errors.As(err, &apierr) {\n        switch apierr.StatusCode {\n        case 404:\n            // bad model ID / resource\n        case 429:\n            // back off and retry\n        default:\n            // other API error - apierr.StatusCode, apierr.RequestID\n        }\n    } else {\n        // transport-level error (*url.Error wrapping *net.OpError, etc.)\n    }\n}\n```\n\n**更好的做法是，把它移出关键路径。** 尺码建议很少变化，所以可以按商品和尺码表提前生成、存储起来，并像其他内容一样提供。只在真正因人而异的场景中使用同步调用，并限制其并发数，这样一次服务变慢就不会耗尽店铺前台的工作线程。\n\n**取舍。** 短超时会让一些本来耐心等待就能成功的请求失败，所以要测量延迟分布，并把截止时间设在正常长尾之上。提前计算会为没人浏览的商品花费 token，但能把一次故障变成内容稍旧，而不是店铺前台变慢。",
+      "followups": [
+        "Why is retrying at two layers worse than retrying at one?",
+        "How would you choose the deadline for this call?"
+      ],
+      "followups_zh": [
+        "为什么在两层都重试比只在一层重试更糟？",
+        "你会如何为这次调用选择截止时间？"
+      ],
+      "vocab": [
+        {
+          "en": "deadline",
+          "zh": "截止时间"
+        },
+        {
+          "en": "critical path",
+          "zh": "关键路径"
+        },
+        {
+          "en": "graceful degradation",
+          "zh": "优雅降级"
+        },
+        {
+          "en": "retry amplification",
+          "zh": "重试放大"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261103-5",
+      "topic": "Evals & Observability",
+      "difficulty": "Senior",
+      "title": "Finance wants the support agent on a cheaper model: design the comparison that decides",
+      "title_zh": "财务希望把客服 Agent 换到更便宜的模型上：设计用来做决定的对比方案",
+      "question": "The merchant-support agent runs on Claude Opus 5.5. Finance points out that a smaller model has a much lower price per token and asks for a switch next week. A quick test on 20 conversations looked similar. You are asked whether to switch, and how to know.\n\nDesign the comparison.",
+      "question_zh": "商家客服 Agent 运行在 Claude Opus 5.5 上。财务指出，一个更小的模型每个 token 的价格要低得多，并要求下周就切换。在 20 段对话上做的一次快速测试看起来差不多。现在要你判断是否应该切换，以及如何确定。\n\n设计这次对比。",
+      "answer": "**The core idea.** What matters is cost per completed task at the quality you require, not price per token. A cheaper model that fails more often still pays for its tokens, then for the retry or the human who fixes it. And a comparison on 20 cases cannot see the differences that decide the bill.\n\n**Set up the comparison.**\n\n- **Include the strong model at lower effort.** Lower effort on the current model is often cheaper than expected and keeps one cache namespace; price candidates on your own traffic, because published price lists do not predict the ranking.\n- **Use a real, stratified case set**, sampled from production conversations by category, with enough hard cases: compare the tail, not just the median, since the hardest tenth often carries a large share of the spend and of the failures.\n- **Pair the runs.** Run every candidate on the same cases, several times each, and compare per-case differences. For a pass rate the noise floor is roughly `1/sqrt(n·reps)`: about ±14 points for 25 cases at 2 reps, ±7 for 100.\n- **Migrate properly.** A different model can reject parameters your code sends and may need different prompting; use the migration checklist and reset effort to the target's default before sweeping.\n\n```go\n// pairedDiff compares two configurations on the same cases. a and b hold each\n// case's score (for example the pass rate over reps); the result is the mean\n// difference b-a and the half-width of its 95% confidence interval.\nfunc pairedDiff(a, b []float64) (mean, half float64) {\n\tn := float64(len(a))\n\td := make([]float64, len(a))\n\tfor i := range a {\n\t\td[i] = b[i] - a[i]\n\t\tmean += d[i]\n\t}\n\tmean /= n\n\tvar ss float64\n\tfor _, x := range d {\n\t\tss += (x - mean) * (x - mean)\n\t}\n\tsd := math.Sqrt(ss / (n - 1))\n\treturn mean, 1.96 * sd / math.Sqrt(n)\n}\n```\n\n**Decide on cost per solved task.** Divide each candidate's total spend, including retries and escalations, by the number of conversations it actually resolved. For example, $42 for 80 resolved conversations is $0.525 each, while a cheaper run of $30 that resolves only 50 costs $0.60 each. Add the cost of a human handling each failure, which usually dominates.\n\n**Roll out like a migration.** If the cheaper option wins within noise, ship it to a slice of traffic and watch production signals such as escalation rate and merchant ratings before going wider. Switch models between conversations, not inside one, since caches and thinking blocks are tied to a model.\n\n**Trade-offs.** A proper comparison costs money and a week of work, which is small next to a silent quality drop across all merchants. Sometimes the answer is a mix: the cheaper model for simple categories, the strong model for hard ones, routed by a classifier, at the cost of two cache namespaces and a router to maintain.",
+      "answer_zh": "**核心思路。** 真正重要的是在你要求的质量下每个完成任务的成本，而不是每个 token 的价格。一个更便宜但更常失败的模型，仍然要为它消耗的 token 付费，然后还要为重试或修复问题的人工付费。而只有 20 个用例的对比，是看不到决定账单的那些差异的。\n\n**搭建这次对比。**\n\n- **把强模型的低 effort 档位也纳入对比。** 在当前模型上降低 effort 往往比预想的更便宜，而且能保持同一个缓存命名空间；要在你们自己的流量上为各个候选方案定价，因为公开的价目表无法预测它们的排名。\n- **使用真实的、分层抽样的用例集**，按类别从生产环境的对话中抽取，并包含足够多的难题：要比较长尾，而不只是中位数，因为最难的那十分之一往往承担了很大一部分花费和失败。\n- **成对运行。** 每个候选方案都在相同的用例上各运行几次，比较每个用例上的差异。对于通过率，噪声下限大约是 `1/sqrt(n·reps)`：25 个用例各运行 2 次约为 ±14 个百分点，100 个用例约为 ±7 个百分点。\n- **正确地迁移。** 不同的模型可能会拒绝你们代码发送的参数，也可能需要不同的提示方式；按照迁移清单进行，并在扫描 effort 之前，先把 effort 重置为目标模型的默认值。\n\n```go\n// pairedDiff compares two configurations on the same cases. a and b hold each\n// case's score (for example the pass rate over reps); the result is the mean\n// difference b-a and the half-width of its 95% confidence interval.\nfunc pairedDiff(a, b []float64) (mean, half float64) {\n\tn := float64(len(a))\n\td := make([]float64, len(a))\n\tfor i := range a {\n\t\td[i] = b[i] - a[i]\n\t\tmean += d[i]\n\t}\n\tmean /= n\n\tvar ss float64\n\tfor _, x := range d {\n\t\tss += (x - mean) * (x - mean)\n\t}\n\tsd := math.Sqrt(ss / (n - 1))\n\treturn mean, 1.96 * sd / math.Sqrt(n)\n}\n```\n\n**根据每个解决任务的成本来决定。** 用每个候选方案的总花费（包括重试和转人工）除以它真正解决的对话数量。例如，花 $42 解决 80 段对话，每段 $0.525；而一次更便宜的运行花 $30，却只解决了 50 段，每段要 $0.60。再加上人工处理每次失败的成本，这部分通常占大头。\n\n**像迁移一样推进上线。** 如果更便宜的方案在噪声范围内胜出，就先把它上线到一部分流量，观察升级人工的比例、商家评分等生产指标，再逐步扩大范围。要在对话之间切换模型，而不是在一段对话中途切换，因为缓存和思考块都与特定模型绑定。\n\n**取舍。** 一次严谨的对比要花钱，也要花一周的工作量，但与在所有商家中悄无声息地出现质量下降相比，这点代价很小。有时答案是一种组合：简单类别用更便宜的模型，困难类别用强模型，由分类器来路由，代价是两个缓存命名空间以及一个需要维护的路由器。",
+      "followups": [
+        "Why can a cheaper model cost more per completed task?",
+        "How many cases and reps would you need to see a 5-point difference?",
+        "When would routing by category beat a single model?"
+      ],
+      "followups_zh": [
+        "为什么一个更便宜的模型，每个完成任务的成本反而可能更高？",
+        "要看出 5 个百分点的差异，你需要多少用例和重复运行次数？",
+        "在什么情况下，按类别路由会优于只用单一模型？"
+      ],
+      "vocab": [
+        {
+          "en": "cost per completed task",
+          "zh": "每个完成任务的成本"
+        },
+        {
+          "en": "paired comparison",
+          "zh": "成对比较"
+        },
+        {
+          "en": "noise floor",
+          "zh": "噪声下限"
+        },
+        {
+          "en": "tail",
+          "zh": "长尾"
+        },
+        {
+          "en": "Price the tail, not the median.",
+          "zh": "按长尾而不是中位数来定价。"
+        }
+      ]
+    }
+  ]
+}
