@@ -1,0 +1,197 @@
+{
+  "date": "2026-11-03",
+  "generatedAt": "2026-11-03T06:44:54+08:00",
+  "questions": [
+    {
+      "id": "20261103-1",
+      "topic": "Go",
+      "difficulty": "Hard",
+      "title": "A catalog push reports \"done\" while products are still being sent, and sometimes misses the error",
+      "title_zh": "商品目录推送已经报告“完成”，而商品还在发送中，有时还会漏掉错误",
+      "question": "A Go job pushes a merchant's 5,000 products to TikTok Shop concurrently. Each push runs in a goroutine that calls `wg.Add(1)` at its start and `defer wg.Done()`, and the main goroutine calls `wg.Wait()` before marking the sync complete. Merchants see \"sync complete\" while products are still updating, and when one push fails the job sometimes reports success. TikTok also returns rate-limit errors whenever a large catalog is synced.\n\nFind the bugs and rewrite the fan-out.",
+      "question_zh": "一个 Go 任务把某个商家的 5,000 个商品并发推送到 TikTok Shop。每次推送都在一个 goroutine 中运行，这个 goroutine 在开头调用 `wg.Add(1)`，并 `defer wg.Done()`，而主 goroutine 在把同步标记为完成之前调用 `wg.Wait()`。商家看到“同步完成”时，商品还在更新；而当某一次推送失败时，任务有时会报告成功。每当同步一个大型商品目录时，TikTok 还会返回限流错误。\n\n找出这些 bug，并重写这段扇出（fan-out）代码。",
+      "answer": "**Bug one: `Add` inside the goroutine.** `wg.Wait()` returns as soon as the counter is zero. If the main goroutine reaches `Wait` before some goroutines have run their `Add`, the counter is still low and `Wait` returns early. In a local test with 50 pushes, `Wait` returned before every push had finished in 11 of 20 runs, and `go run -race` reported a data race. `go vet` in Go 1.24 did not flag it. The rule: call `Add` in the goroutine that will call `Wait`, before starting the goroutine.\n\n**Bug two: errors are lost.** The goroutines ignore the result or write it to a shared variable without synchronization, so a failure can be dropped or overwritten. **Bug three: no limit.** 5,000 goroutines start at once, which is what triggers the rate limits.\n\n```go\nvar (\n\twg       sync.WaitGroup\n\tmu       sync.Mutex\n\tfirstErr error\n)\nsem := make(chan struct{}, 4) // at most 4 pushes in flight\nfor _, p := range products {\n\twg.Add(1) // before the goroutine starts\n\tsem <- struct{}{}\n\tgo func() {\n\t\tdefer wg.Done()\n\t\tdefer func() { <-sem }()\n\t\tif err := push(ctx, p); err != nil {\n\t\t\tmu.Lock()\n\t\t\tif firstErr == nil {\n\t\t\t\tfirstErr = err\n\t\t\t}\n\t\t\tmu.Unlock()\n\t\t}\n\t}()\n}\nwg.Wait()\n```\n\nIn the same test, this version waited for every push and reported the failing product's error, and the semaphore keeps at most four pushes running at once.\n\n- **Prefer `errgroup`** from `golang.org/x/sync`: `g.SetLimit(n)` bounds concurrency, `g.Wait()` returns the first error, and `errgroup.WithContext` cancels the others when one fails, if that is what you want.\n- **Report per item.** For a catalog sync, one failure should usually not stop the rest; collect each product's result and show the merchant which ones failed and why.\n- **Run tests with `-race` in CI.** It is the tool that caught this bug.\n\n**Trade-offs.** A concurrency limit trades speed for staying under the platform's rate limit; derive it from the platform's quota rather than guessing, and back off on rate-limit responses. Cancelling on first error is right for all-or-nothing work but wrong for a catalog sync, where partial progress is valuable.",
+      "answer_zh": "**bug 一：在 goroutine 内部调用 `Add`。** 计数器一归零，`wg.Wait()` 就会返回。如果主 goroutine 在某些 goroutine 执行 `Add` 之前就到达了 `Wait`，计数器仍然偏低，`Wait` 就会提前返回。在本地用 50 次推送做的测试中，20 次运行里有 11 次 `Wait` 在所有推送完成之前就返回了，而 `go run -race` 报告了数据竞争。Go 1.24 的 `go vet` 没有标记出这个问题。规则是：在将要调用 `Wait` 的那个 goroutine 里、在启动新 goroutine 之前调用 `Add`。\n\n**bug 二：错误丢失了。** 这些 goroutine 忽略了返回结果，或者在没有同步的情况下把它写进共享变量，所以一次失败可能被丢掉或被覆盖。**bug 三：没有上限。** 5,000 个 goroutine 同时启动，这正是触发限流的原因。\n\n```go\nvar (\n\twg       sync.WaitGroup\n\tmu       sync.Mutex\n\tfirstErr error\n)\nsem := make(chan struct{}, 4) // at most 4 pushes in flight\nfor _, p := range products {\n\twg.Add(1) // before the goroutine starts\n\tsem <- struct{}{}\n\tgo func() {\n\t\tdefer wg.Done()\n\t\tdefer func() { <-sem }()\n\t\tif err := push(ctx, p); err != nil {\n\t\t\tmu.Lock()\n\t\t\tif firstErr == nil {\n\t\t\t\tfirstErr = err\n\t\t\t}\n\t\t\tmu.Unlock()\n\t\t}\n\t}()\n}\nwg.Wait()\n```\n\n在同一个测试中，这个版本等待了每一次推送完成，并报告了出错商品的错误，而信号量保证同时进行的推送最多只有四个。\n\n- **优先使用 `golang.org/x/sync` 中的 `errgroup`**：`g.SetLimit(n)` 限制并发数，`g.Wait()` 返回第一个错误，而 `errgroup.WithContext` 会在某一个失败时取消其他的，如果这正是你想要的话。\n- **按条目报告。** 对于商品目录同步，一次失败通常不应该让其余的停下来；收集每个商品的结果，并向商家展示哪些失败了以及原因。\n- **在 CI 中用 `-race` 运行测试。** 正是这个工具发现了这个 bug。\n\n**取舍。** 并发上限是用速度换取不超过平台的限流额度；要根据平台的配额来确定它，而不是靠猜，并在收到限流响应时退避。出现第一个错误就取消，适合“要么全部成功、要么全部不做”的工作，但不适合商品目录同步，因为在这种场景下，部分完成的进度是有价值的。",
+      "followups": [
+        "Why does the race detector catch this bug when tests usually pass?",
+        "When would you cancel the remaining pushes after the first error?"
+      ],
+      "followups_zh": [
+        "为什么在测试通常都能通过的情况下，竞争检测器却能发现这个 bug？",
+        "什么时候你会在出现第一个错误后取消剩余的推送？"
+      ],
+      "vocab": [
+        {
+          "en": "fan-out",
+          "zh": "扇出"
+        },
+        {
+          "en": "data race",
+          "zh": "数据竞争"
+        },
+        {
+          "en": "concurrency limit",
+          "zh": "并发上限"
+        },
+        {
+          "en": "in flight",
+          "zh": "处理中"
+        }
+      ]
+    },
+    {
+      "id": "20261103-2",
+      "topic": "System Design",
+      "difficulty": "Medium",
+      "title": "\"Export all my orders\": designing large exports that do not time out or overload the database",
+      "title_zh": "“导出我的全部订单”：设计不会超时、也不会压垮数据库的大型导出",
+      "question": "Merchants can click \"Export orders\" in the admin. Today the endpoint runs one query, builds a CSV in memory and streams it back in the same HTTP request. Large merchants hit gateway timeouts, a few concurrent exports slow the primary database for everyone, and some merchants click the button five times when it seems stuck. Design a better export feature.",
+      "question_zh": "商家可以在后台点击“导出订单”。目前这个接口执行一条查询，在内存中生成 CSV，然后在同一个 HTTP 请求中以流的方式返回。大商家会遇到网关超时，几个并发的导出就会拖慢所有人的主库，而且有些商家在看起来卡住时会连点五次按钮。请设计一个更好的导出功能。",
+      "answer": "**The core idea.** Turn a long request into a job. The click creates an export job and returns at once; a worker produces the file in the background, stores it, and the merchant downloads it when it is ready. The request no longer has to outlive the gateway timeout, and the work runs where you can control it.\n\n**Design.**\n\n- **Job record.** `export_jobs(id, merchant_id, filters, status, progress, file_key, error, created_at, expires_at)`. The API returns the job ID; the UI polls it or receives a notification.\n- **Deduplicate clicks.** If the same merchant already has a pending job with the same filters, return that job instead of creating another, and show its progress.\n- **Read from a replica, in pages.** Workers read from a read replica or the warehouse, using keyset pagination on `(created_at, id)`, and write rows to the file as they go, so memory stays flat and the primary is untouched.\n- **Limit concurrency.** A per-merchant limit of one or two running exports and a global worker pool size keep a burst of exports from slowing everyone.\n- **Store and share safely.** Write the file to object storage, give the merchant a short-lived signed download URL, and delete files after a retention period. Exports contain customer personal data, so log who downloaded what.\n\n**Consistency.** Fix the export's time range when the job starts, for example orders created before the job's start time, so rows created during the export do not appear halfway through and the file has a clear meaning.\n\n**Trade-offs.** Async exports add a job table, workers, storage and notifications, and the merchant waits instead of getting the file immediately; small exports can still be served directly if they are guaranteed to be small. Reading from a replica means the export can lag slightly behind the primary, which is acceptable for reports but should be stated.",
+      "answer_zh": "**核心思路。** 把一个耗时很长的请求变成一个作业。点击操作创建一个导出作业并立即返回；worker 在后台生成文件并存储起来，等文件就绪后商家再下载。请求不再需要比网关超时活得更久，而工作也在你能控制的地方运行。\n\n**设计。**\n\n- **作业记录。** `export_jobs(id, merchant_id, filters, status, progress, file_key, error, created_at, expires_at)`。API 返回作业 ID；界面轮询它或者接收通知。\n- **对重复点击去重。** 如果同一个商家已经有一个筛选条件相同、尚未完成的作业，就返回那个作业而不是再创建一个，并显示它的进度。\n- **从只读副本分页读取。** worker 从只读副本或数据仓库读取，在 `(created_at, id)` 上使用键集分页，并边读边把行写入文件，这样内存占用保持平稳，主库也不受影响。\n- **限制并发。** 每个商家同时最多运行一到两个导出，再加上全局的 worker 池大小限制，这样一阵集中的导出就不会拖慢所有人。\n- **安全地存储和分享。** 把文件写入对象存储，给商家一个短期有效的签名下载链接，并在保留期结束后删除文件。导出内容包含顾客的个人数据，所以要记录谁下载了什么。\n\n**一致性。** 在作业开始时就固定导出的时间范围，例如只导出作业开始时间之前创建的订单，这样导出过程中新建的行不会中途出现，文件的含义也很清楚。\n\n**取舍。** 异步导出增加了作业表、worker、存储和通知，而且商家需要等待，而不是立即拿到文件；如果能保证导出规模很小，小导出仍然可以直接返回。从只读副本读取意味着导出可能略微落后于主库，这对报表来说可以接受，但应该明确说明。",
+      "followups": [
+        "How would you resume an export when a worker dies halfway through?",
+        "Why is keyset pagination better than OFFSET here?"
+      ],
+      "followups_zh": [
+        "如果 worker 在导出到一半时挂了，你会如何恢复这个导出？",
+        "为什么在这里键集分页比 OFFSET 更好？"
+      ],
+      "vocab": [
+        {
+          "en": "export job",
+          "zh": "导出作业"
+        },
+        {
+          "en": "read replica",
+          "zh": "只读副本"
+        },
+        {
+          "en": "signed URL",
+          "zh": "签名链接"
+        },
+        {
+          "en": "keyset pagination",
+          "zh": "键集分页"
+        }
+      ]
+    },
+    {
+      "id": "20261103-3",
+      "topic": "Database",
+      "difficulty": "Senior",
+      "title": "Partitioning a huge orders table by month: the unique order number breaks, and queries still scan every partition",
+      "title_zh": "按月对超大订单表分区：唯一订单号约束失效，而查询仍然扫描所有分区",
+      "question": "The `orders` table in PostgreSQL has grown to billions of rows. The team plans to partition it by `created_at` per month, so old months can be dropped cheaply and recent queries stay fast. In a trial, creating `UNIQUE (order_no)` and `PRIMARY KEY (id)` fails, the dashboard query `WHERE created_at::date = '2026-10-15'` still touches every partition, and a backfill of next year's orders fails with \"no partition found\".\n\nExplain each problem and design the partitioning.",
+      "question_zh": "PostgreSQL 中的 `orders` 表已经增长到数十亿行。团队计划按 `created_at` 按月分区，这样旧的月份可以低成本地删除，而近期的查询也能保持快速。在试验中，创建 `UNIQUE (order_no)` 和 `PRIMARY KEY (id)` 失败了，看板查询 `WHERE created_at::date = '2026-10-15'` 仍然会访问每一个分区，而回填明年订单的操作则以 “no partition found” 失败。\n\n解释每个问题，并设计分区方案。",
+      "answer": "**Unique constraints must include the partition key.** PostgreSQL enforces uniqueness per partition, so a unique or primary key constraint on a partitioned table must contain every partition column. In a local PostgreSQL 16 test, both `UNIQUE (order_no)` and `PRIMARY KEY (id)` failed with \"unique constraint on partitioned table must include all partitioning columns\", while `PRIMARY KEY (id, created_at)` succeeded. But that key no longer guarantees that `order_no` is unique across months.\n\n**Fix for global uniqueness.** Keep a small, unpartitioned `order_numbers(order_no PRIMARY KEY, order_id, created_at)` table and insert into it in the same transaction as the order; in the test, a duplicate `order_no` across months was rejected there. Alternatively, generate IDs that cannot collide, and treat `order_no` uniqueness as a property of the generator.\n\n**Pruning needs the raw partition key.** The planner can skip partitions only when it can compare the condition with partition bounds. A range on `created_at` touched only the October partition in the test; `created_at::date = '2026-10-15'` and a lookup by `order_no` alone scanned all of them. Rewrite filters as ranges, and route lookups by order number through the `order_numbers` table to get `created_at` first.\n\n```sql\n-- prunes to one partition\nWHERE created_at >= '2026-10-15' AND created_at < '2026-10-16'\n```\n\n- **Create partitions ahead of time.** A job creates the next few months in advance; inserting a row with no matching partition fails, as the backfill did in the test. A `DEFAULT` partition catches stray rows, but large default partitions make later splits expensive, so alert on any row landing there.\n- **Retention becomes cheap.** Dropping or detaching a whole month is far cheaper than deleting billions of rows.\n- **Migration.** Create the partitioned table alongside the old one, dual-write or copy in batches by time range, verify counts per month, then switch reads and writes during a short window.\n\n**Trade-offs.** Partitioning by time helps retention and recent-data queries but makes queries without a time filter slower, since they touch every partition, and it moves global uniqueness out of the table. If most queries are per merchant across all time, partitioning by time alone may be the wrong key; measure the real query mix before choosing.",
+      "answer_zh": "**唯一约束必须包含分区键。** PostgreSQL 按分区来保证唯一性，所以分区表上的唯一约束或主键约束必须包含所有分区列。在本地 PostgreSQL 16 的测试中，`UNIQUE (order_no)` 和 `PRIMARY KEY (id)` 都以 “unique constraint on partitioned table must include all partitioning columns” 失败，而 `PRIMARY KEY (id, created_at)` 成功了。但这个键已经不能保证 `order_no` 在不同月份之间是唯一的。\n\n**保证全局唯一性的修复方法。** 维护一张不分区的小表 `order_numbers(order_no PRIMARY KEY, order_id, created_at)`，并在插入订单的同一个事务中插入它；在测试中，跨月份重复的 `order_no` 在这里被拒绝了。另一种做法是生成不可能冲突的 ID，并把 `order_no` 的唯一性当作 ID 生成器的属性来保证。\n\n**分区裁剪需要原始的分区键。** 只有当规划器能够把条件与分区边界进行比较时，才能跳过分区。在测试中，对 `created_at` 的范围查询只访问了 10 月的分区；而 `created_at::date = '2026-10-15'` 以及只按 `order_no` 查询，都扫描了所有分区。把过滤条件改写成范围查询，并通过 `order_numbers` 表来处理按订单号的查询，先拿到 `created_at`。\n\n```sql\n-- prunes to one partition\nWHERE created_at >= '2026-10-15' AND created_at < '2026-10-16'\n```\n\n- **提前创建分区。** 用一个任务提前创建接下来几个月的分区；插入一行在没有匹配分区时会失败，正如测试中的回填一样。`DEFAULT` 分区可以接住零散的行，但很大的默认分区会让之后的拆分代价很高，所以只要有行落入其中就要告警。\n- **数据保留的成本变低。** 删除或分离整个月份，远比删除数十亿行便宜。\n- **迁移。** 在旧表旁边创建分区表，通过双写或按时间范围分批复制，按月核对行数，然后在一个短暂的时间窗口内切换读写。\n\n**取舍。** 按时间分区有利于数据保留和近期数据的查询，但会让没有时间条件的查询变慢，因为它们要访问每一个分区，而且全局唯一性也被移出了这张表。如果大多数查询是针对某个商家、跨越所有时间的，那么只按时间分区可能就是选错了分区键；在做选择之前，先测量真实的查询构成。",
+      "followups": [
+        "Why can PostgreSQL not enforce a unique column across partitions?",
+        "How would you verify that a copied month matches the original?",
+        "Would you partition by merchant instead? When?"
+      ],
+      "followups_zh": [
+        "为什么 PostgreSQL 无法在多个分区之间保证某一列的唯一性？",
+        "你会如何核实复制过去的某个月份与原表一致？",
+        "你会改为按商家分区吗？在什么情况下？"
+      ],
+      "vocab": [
+        {
+          "en": "partition pruning",
+          "zh": "分区裁剪"
+        },
+        {
+          "en": "partition key",
+          "zh": "分区键"
+        },
+        {
+          "en": "detach",
+          "zh": "分离"
+        },
+        {
+          "en": "global uniqueness",
+          "zh": "全局唯一性"
+        },
+        {
+          "en": "backfill",
+          "zh": "回填"
+        }
+      ]
+    },
+    {
+      "id": "20261103-4",
+      "topic": "Middleware",
+      "difficulty": "Hard",
+      "title": "After a Kafka broker failover, some conversion events are duplicated and some arrive out of order",
+      "title_zh": "Kafka broker 故障切换之后，一些转化事件重复了，一些事件乱序到达",
+      "question": "Order events are produced to Kafka with the order ID as the key, and a consumer sends conversions to Meta and Google. During a broker failover last week, some purchases were reported twice, and for a few orders a \"refunded\" event was processed before the \"paid\" event. The producer uses `retries` with several requests in flight, and the service also retries a send itself when it times out.\n\nExplain where the duplicates and reordering come from and how to fix them end to end.",
+      "question_zh": "订单事件以订单 ID 作为 key 写入 Kafka，由一个消费者把转化事件发送到 Meta 和 Google。上周一次 broker 故障切换期间，有些购买被上报了两次，还有少数订单的“已退款”事件先于“已支付”事件被处理。生产者配置了 `retries`，并允许多个请求同时在途，而服务自身在发送超时时也会再重试一次。\n\n解释重复和乱序是从哪里来的，以及如何从头到尾修复它们。",
+      "answer": "**Where duplicates come from.** A producer sends a batch, the broker writes it, but the acknowledgement is lost during the failover. The producer cannot tell the write succeeded, so it retries and the batch is written again. Separately, the service's own retry after a timeout calls `send` again, which creates a brand-new message that no broker mechanism can recognize as a duplicate.\n\n**Where reordering comes from.** With several requests in flight to the same partition, batch 1 can fail and be retried after batch 2 succeeded, so batch 2's events land first. Same key, same partition, wrong order.\n\n**Fixes on the producer.**\n\n- **Idempotent producer.** With `enable.idempotence=true`, the producer gets a producer ID and numbers each batch per partition; the broker drops duplicate retries and keeps order with up to five requests in flight. It requires `acks=all`. Recent clients enable it by default unless other settings conflict, so check the effective configuration rather than assuming.\n- **No application-level resend.** Idempotence covers the client's own retries within one producer session, not a new `send` from your code or a restarted producer. Raise the producer's delivery timeout instead of resending, and give every event a stable event ID, such as the order ID plus the event type.\n\n**Fixes on the consumer.** Duplicates can still arrive, from producer restarts or consumer redelivery after a rebalance, so the consumer must be idempotent: record processed event IDs, and send the order ID as the ad platform's deduplication key. For ordering, apply state transitions by version: an event carries the order's version or status sequence, and the consumer ignores an event older than what it has already applied, so a late \"paid\" cannot undo \"refunded\".\n\n**Trade-offs.** `acks=all` with idempotence adds some latency per batch, which is almost always worth it for business events. Kafka transactions go further for read-process-write pipelines inside Kafka, but they do not make an external call to Meta exactly-once; that still needs idempotent consumers. Versioned state transitions add a column and a check, and they are the only defence that also covers reordering you did not anticipate.",
+      "answer_zh": "**重复从哪里来。** 生产者发送一批消息，broker 写入了，但确认在故障切换期间丢失了。生产者无法判断写入是否成功，于是重试，这批消息就被写入了第二次。另外，服务自身在超时后的重试会再次调用 `send`，这会产生一条全新的消息，任何 broker 机制都无法把它识别为重复。\n\n**乱序从哪里来。** 当对同一个分区有多个请求在途时，第 1 批可能失败，并在第 2 批成功之后才被重试，于是第 2 批的事件先落地。同一个 key、同一个分区，顺序却错了。\n\n**生产者一侧的修复。**\n\n- **幂等生产者。** 设置 `enable.idempotence=true` 后，生产者会获得一个生产者 ID，并对每个分区的每一批消息编号；broker 会丢弃重复的重试，并在最多五个在途请求的情况下保持顺序。它要求 `acks=all`。较新的客户端默认启用它，除非其他设置与之冲突，所以要检查实际生效的配置，而不是想当然。\n- **不要在应用层重发。** 幂等性覆盖的是同一个生产者会话内客户端自身的重试，而不是你们代码发起的新 `send`，也不包括重启后的生产者。应当调大生产者的投递超时，而不是重发，并给每个事件一个稳定的事件 ID，例如订单 ID 加上事件类型。\n\n**消费者一侧的修复。** 重复仍然可能出现，比如来自生产者重启，或者重平衡之后消费者的重复投递，所以消费者必须是幂等的：记录已处理的事件 ID，并把订单 ID 作为广告平台的去重键发送。对于顺序，按版本应用状态变更：事件携带订单的版本号或状态序号，消费者忽略比它已经应用过的版本更旧的事件，这样迟到的“已支付”就无法覆盖“已退款”。\n\n**取舍。** `acks=all` 加幂等性会给每一批增加一些延迟，对于业务事件来说这几乎总是值得的。Kafka 事务对 Kafka 内部的读取-处理-写入流水线能做得更多，但它不能让一次调用 Meta 的外部请求变成恰好一次；这仍然需要幂等的消费者。带版本的状态变更会增加一列和一次检查，而它是唯一一种也能覆盖你未曾预料到的乱序的防线。",
+      "followups": [
+        "Why can the broker not deduplicate a resend from your own code?",
+        "How would you test producer behaviour during a broker failover?"
+      ],
+      "followups_zh": [
+        "为什么 broker 无法对你们代码发起的重发进行去重？",
+        "你会如何测试 broker 故障切换期间生产者的行为？"
+      ],
+      "vocab": [
+        {
+          "en": "idempotent producer",
+          "zh": "幂等生产者"
+        },
+        {
+          "en": "in-flight requests",
+          "zh": "在途请求"
+        },
+        {
+          "en": "acknowledgement",
+          "zh": "确认"
+        },
+        {
+          "en": "deduplication key",
+          "zh": "去重键"
+        }
+      ]
+    },
+    {
+      "id": "20261103-5",
+      "topic": "Java & CS",
+      "difficulty": "Medium",
+      "title": "Building a SKU-to-price map crashes on duplicate SKUs and on products without a price",
+      "title_zh": "构建 SKU 到价格的映射时，遇到重复 SKU 和没有价格的商品就会崩溃",
+      "question": "A Java price sync builds `Map<String, BigDecimal>` from a supplier feed with `products.stream().collect(Collectors.toMap(Product::sku, Product::price))`. It worked for months, then failed twice in one week: once with `IllegalStateException: Duplicate key A1`, after the supplier sent two rows for one SKU, and once with a `NullPointerException` for a product with no price. A colleague's quick fix, `(a, b) -> b`, keeps whichever row comes last.\n\nExplain both failures and what the right fix is.",
+      "question_zh": "一个 Java 价格同步程序用 `products.stream().collect(Collectors.toMap(Product::sku, Product::price))` 从供应商 feed 构建 `Map<String, BigDecimal>`。它正常运行了好几个月，然后在一周内失败了两次：一次是在供应商为同一个 SKU 发送了两行数据之后，抛出了 `IllegalStateException: Duplicate key A1`；另一次是因为一个没有价格的商品，抛出了 `NullPointerException`。一位同事的快速修复 `(a, b) -> b` 会保留排在最后的那一行。\n\n解释这两种失败，以及正确的修复方法是什么。",
+      "answer": "**Duplicates.** The two-argument `toMap` throws on a duplicate key. In a local test on Java 21 the message was `Duplicate key A1 (attempted merging values 9.90 and 8.90)`. Failing is reasonable: the code had no rule for which price wins, and the data broke an assumption.\n\n**Nulls.** `toMap` rejects null values with a `NullPointerException`, even though a plain `HashMap.put` accepts them; the test confirmed both behaviours. This is by design: the version that takes a merge function is built on `Map.merge`, which does not accept null values either.\n\n**Why `(a, b) -> b` is not a fix.** It keeps the row that happens to come later in the list. For an ordered stream that is the encounter order, even in parallel: in the test it consistently kept the last element. But the supplier's row order is not a business rule. Decide what should win, such as the most recently updated row, and write that down in code.\n\n```java\nMap<String, Product> latest = products.stream()\n    .filter(p -> p.price() != null)            // or route to a review list\n    .collect(Collectors.toMap(Product::sku, p -> p,\n        (a, b) -> a.updatedAt().compareTo(b.updatedAt()) >= 0 ? a : b));\n```\n\n- **Make bad data visible.** Count and log duplicate SKUs and missing prices, and send them to a review list instead of silently dropping or overwriting them.\n- **Keep \"no price\" explicit.** If a missing price has a meaning, such as \"do not change\", model it with `Optional` or a separate set rather than null.\n- **Use `groupingBy`** when you need to see all rows for a SKU, for example to report conflicting prices.\n\n**Trade-offs.** Failing on duplicates stops a sync that might otherwise publish wrong prices, which is safe but blocks every other product. Filtering bad rows and continuing keeps the catalog moving but needs monitoring, or the problems pile up unseen. For prices, which merchants care about, continuing with a visible review queue is usually the best balance.",
+      "answer_zh": "**重复。** 只有两个参数的 `toMap` 在遇到重复 key 时会抛出异常。在 Java 21 上的本地测试中，消息是 `Duplicate key A1 (attempted merging values 9.90 and 8.90)`。失败是合理的：代码没有规定哪个价格胜出，而数据打破了一个假设。\n\n**null 值。** `toMap` 会以 `NullPointerException` 拒绝 null 值，尽管普通的 `HashMap.put` 接受 null；测试证实了这两种行为。这是有意为之：带合并函数的版本是基于 `Map.merge` 实现的，而 `Map.merge` 同样不接受 null 值。\n\n**为什么 `(a, b) -> b` 不算修复。** 它保留的是列表中碰巧排在后面的那一行。对于有序的流，即使是并行流，这也是遇到顺序：在测试中它始终保留了最后一个元素。但供应商的行顺序并不是业务规则。要决定哪一行应该胜出，比如最近更新的那一行，并把这条规则写进代码。\n\n```java\nMap<String, Product> latest = products.stream()\n    .filter(p -> p.price() != null)            // or route to a review list\n    .collect(Collectors.toMap(Product::sku, p -> p,\n        (a, b) -> a.updatedAt().compareTo(b.updatedAt()) >= 0 ? a : b));\n```\n\n- **让有问题的数据可见。** 对重复 SKU 和缺失价格进行计数并记录日志，把它们放进待复核列表，而不是悄悄地丢弃或覆盖。\n- **让“没有价格”保持显式。** 如果缺失价格有特定含义，比如“不要修改”，就用 `Optional` 或一个单独的集合来表达它，而不是用 null。\n- **当你需要看到某个 SKU 的所有行时，使用 `groupingBy`**，例如用来报告相互冲突的价格。\n\n**取舍。** 遇到重复就失败，可以阻止一次可能发布错误价格的同步，这样很安全，但会阻塞其他所有商品。过滤掉有问题的行并继续执行，可以让商品目录持续更新，但需要监控，否则问题会在无人察觉的情况下越积越多。对于商家非常在意的价格来说，继续执行并配合一个可见的复核队列，通常是最好的平衡。",
+      "followups": [
+        "Why does `toMap` reject null values when `HashMap` accepts them?",
+        "How would you decide which duplicate row wins?"
+      ],
+      "followups_zh": [
+        "为什么 `HashMap` 接受 null 值，而 `toMap` 却拒绝？",
+        "你会如何决定重复的行中哪一行胜出？"
+      ],
+      "vocab": [
+        {
+          "en": "merge function",
+          "zh": "合并函数"
+        },
+        {
+          "en": "encounter order",
+          "zh": "遇到顺序"
+        },
+        {
+          "en": "duplicate key",
+          "zh": "重复键"
+        },
+        {
+          "en": "review list",
+          "zh": "待复核列表"
+        }
+      ]
+    }
+  ]
+}

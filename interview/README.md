@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 22 天、110 道题。
+共 23 天、115 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-03](days/2026-11-03.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Hard | [A catalog push reports "done" while products are still being sent, and sometimes misses the error](days/2026-11-03.md#q1) | 商品目录推送已经报告“完成”，而商品还在发送中，有时还会漏掉错误 |
+| 2 | System Design | Medium | ["Export all my orders": designing large exports that do not time out or overload the database](days/2026-11-03.md#q2) | “导出我的全部订单”：设计不会超时、也不会压垮数据库的大型导出 |
+| 3 | Database | Senior | [Partitioning a huge orders table by month: the unique order number breaks, and queries still scan every partition](days/2026-11-03.md#q3) | 按月对超大订单表分区：唯一订单号约束失效，而查询仍然扫描所有分区 |
+| 4 | Middleware | Hard | [After a Kafka broker failover, some conversion events are duplicated and some arrive out of order](days/2026-11-03.md#q4) | Kafka broker 故障切换之后，一些转化事件重复了，一些事件乱序到达 |
+| 5 | Java & CS | Medium | [Building a SKU-to-price map crashes on duplicate SKUs and on products without a price](days/2026-11-03.md#q5) | 构建 SKU 到价格的映射时，遇到重复 SKU 和没有价格的商品就会崩溃 |
 
 ## [2026-11-02](days/2026-11-02.md)
 
