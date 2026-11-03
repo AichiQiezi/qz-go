@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 23 天、115 道题。
+共 24 天、120 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-04](days/2026-11-04.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Senior | [One malformed webhook takes down the whole webhook service, although net/http recovers handler panics](days/2026-11-04.md#q1) | 一个格式错误的 webhook 让整个 webhook 服务崩溃，尽管 net/http 会恢复 handler 中的 panic |
+| 2 | System Design | Medium | [Order alerts to merchants by email, SMS and app push: no duplicates, quiet hours, and per-channel failures](days/2026-11-04.md#q2) | 通过邮件、短信和应用推送向商家发送订单提醒：不重复、免打扰时段，以及单个渠道的故障 |
+| 3 | Database | Hard | [A Postgres-backed job table: workers process the same sync job twice, or all wait behind one slow job](days/2026-11-04.md#q3) | 基于 Postgres 的作业表：worker 把同一个同步作业处理了两次，或者全都排在一个慢作业后面等待 |
+| 4 | Middleware | Hard | [Merchants cannot page past result 10,000 in product search, and the "export results" button times out](days/2026-11-04.md#q4) | 商家在商品搜索中无法翻到第 10,000 条之后，而“导出结果”按钮会超时 |
+| 5 | Java & CS | Medium | [Sorting products by price into a TreeSet silently drops products that share a price](days/2026-11-04.md#q5) | 把商品按价格放进 TreeSet 排序时，价格相同的商品被悄悄丢掉了 |
 
 ## [2026-11-03](days/2026-11-03.md)
 
