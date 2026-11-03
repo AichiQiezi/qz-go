@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 27 个模块、119 道题。
+共 28 个模块、124 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -369,3 +369,17 @@ Five new agent questions: keeping critical state through compaction with custom 
 | 3 | Safety & Security | Medium | [A competitor-research agent can browse anywhere: locking down web access for an agent and its helpers](modules/daily-2026-11-03.md#q3) | 一个竞品调研 Agent 可以访问任何网站：为 Agent 及其助手锁定网络访问 |
 | 4 | Production | Medium | [A storefront request waits half an hour for an AI call: SDK timeouts and retries stacked on your own](modules/daily-2026-11-03.md#q4) | 一个店铺前台请求为一次 AI 调用等了半个小时：SDK 的超时和重试叠加在你们自己的之上 |
 | 5 | Evals & Observability | Senior | [Finance wants the support agent on a cheaper model: design the comparison that decides](modules/daily-2026-11-03.md#q5) | 财务希望把客服 Agent 换到更便宜的模型上：设计用来做决定的对比方案 |
+
+## [Daily set · Nov 4 · 每日新题 · 11 月 4 日](modules/daily-2026-11-04.md)
+
+Five new agent questions: why message threads rule out compaction and mid-thread tool changes, running a threaded tool loop in production with a replay path, handling approvals from helper agents, classifying session outcomes by stop reason, and answering from very large PDFs with page-accurate citations.
+
+> 五道新的 Agent 题：为什么消息线程排除了压缩和线程中途的工具变更、在生产环境中运行带重放路径的线程化工具循环、处理来自助手 Agent 的审批、按停止原因对会话结果分类，以及根据超大 PDF 给出精确到页码的引用回答。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Context & Memory | Hard | [After moving long support chats to message threads, compaction stops working and adding a tool returns 400](modules/daily-2026-11-04.md#q1) | 把长客服对话迁移到消息线程之后，压缩不再生效，添加一个工具也返回 400 |
+| 2 | Production | Senior | [Rolling out message threads in the catalog agent's tool loop: occasional 404s, lost turns and a ZDR question](modules/daily-2026-11-04.md#q2) | 在商品目录 Agent 的工具循环中推广消息线程：偶发的 404、丢失的轮次，以及一个关于 ZDR 的问题 |
+| 3 | Multi-agent | Medium | [A helper agent's budget change waits forever for approval, while another is silently denied](modules/daily-2026-11-04.md#q3) | 一个助手 Agent 的预算修改永远在等待审批，而另一个则被悄无声息地拒绝了 |
+| 4 | Evals & Observability | Medium | [The nightly dashboard marks agent sessions "completed" that actually failed, ran out of budget, or were waiting for approval](modules/daily-2026-11-04.md#q4) | 夜间看板把一些 Agent 会话标记为“已完成”，而它们实际上是失败了、用完了预算，或者在等待审批 |
+| 5 | RAG | Hard | [Answering compliance questions from 900-page supplier PDFs with page-accurate citations](modules/daily-2026-11-04.md#q5) | 根据 900 页的供应商 PDF 回答合规问题，并给出精确到页码的引用 |

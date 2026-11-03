@@ -1,0 +1,205 @@
+{
+  "id": "daily-2026-11-04",
+  "order": 20261104,
+  "kind": "daily",
+  "title": "Daily set · Nov 4",
+  "title_zh": "每日新题 · 11 月 4 日",
+  "summary": "Five new agent questions: why message threads rule out compaction and mid-thread tool changes, running a threaded tool loop in production with a replay path, handling approvals from helper agents, classifying session outcomes by stop reason, and answering from very large PDFs with page-accurate citations.",
+  "summary_zh": "五道新的 Agent 题：为什么消息线程排除了压缩和线程中途的工具变更、在生产环境中运行带重放路径的线程化工具循环、处理来自助手 Agent 的审批、按停止原因对会话结果分类，以及根据超大 PDF 给出精确到页码的引用回答。",
+  "generatedAt": "2026-11-04T06:55:24+08:00",
+  "questions": [
+    {
+      "id": "agent-daily-20261104-1",
+      "topic": "Context & Memory",
+      "difficulty": "Hard",
+      "title": "After moving long support chats to message threads, compaction stops working and adding a tool returns 400",
+      "title_zh": "把长客服对话迁移到消息线程之后，压缩不再生效，添加一个工具也返回 400",
+      "question": "The support agent's chats can run for hours. The team adopted message threads (beta `message-threads-2026-08-12`), so each request sends only the new messages. Two things broke. Server-side compaction, which used to keep long chats inside the context window, is now rejected. And when a merchant connects TikTok mid-chat, the harness adds TikTok tools to the next request and gets a 400 that mentions `thread_fingerprint_mismatch`, or a 400 for sending `tools` at all.\n\nExplain the model behind threads and how to handle long conversations and tool changes with them.",
+      "question_zh": "客服 Agent 的对话可能持续好几个小时。团队采用了消息线程（beta `message-threads-2026-08-12`），这样每个请求只发送新的消息。随后有两件事出了问题。以前让长对话保持在上下文窗口之内的服务端压缩，现在会被拒绝。而当商家在对话中途连接 TikTok 时，harness 会在下一个请求中加入 TikTok 工具，结果收到一个提到 `thread_fingerprint_mismatch` 的 400，或者仅仅因为发送了 `tools` 就收到 400。\n\n解释消息线程背后的模型，以及在使用线程时如何处理长对话和工具变更。",
+      "answer": "**The core idea.** A message thread is a short-lived, append-only copy of your conversation kept by the API so you can send only what is new. Anything that rewrites the past, such as replacing old turns with a summary or changing the system prompt or tools, does not fit that model. For those, you start a new thread from your own copy of the conversation.\n\n**Mechanism.** The first request creates the thread with the full `messages`, `system` and `tools`. Continue requests send only new messages and must leave `system` and `tools` out; sending either, even as null, is a 400. Fields such as `model`, `thinking`, `tool_choice`, `context_management` and `output_config` are fixed for the thread, and changing one returns `thread_fingerprint_mismatch`. Threads do not support compaction or most context editing, because a thread is append-only and cannot replace earlier turns.\n\n**Handling the two cases.**\n\n- **Long conversations: compact by starting a new thread.** When the conversation gets too long, write a summary in your code, then send it as an ordinary message in a new create request with `system` and `tools`, and continue from that response.\n- **Tool changes: a new thread with the full conversation.** Send the whole history from your own copy in a create request with the new tool list. On Claude Opus 5.5, Claude Sonnet 5.5 and the other newest models, that change invalidates the earlier thinking blocks and the create request can return a 400, so leave every `thinking` and `redacted_thinking` block out of the conversation you send.\n- **Better: avoid the change.** If merchants often connect platforms mid-chat, register the possible tools at creation and let your tool handlers refuse calls for platforms that are not connected yet, so the tool list never changes during a thread.\n\n```json\n{\"model\": \"claude-opus-5-5\", \"max_tokens\": 16000,\n \"system\": \"...\", \"tools\": [...],\n \"thread\": {\"type\": \"create\"},\n \"messages\": [\n   {\"role\": \"user\", \"content\": [\n     {\"type\": \"text\", \"text\": \"Summary of the conversation so far: ...\"},\n     {\"type\": \"text\", \"text\": \"<the merchant's new message>\"}]}\n ]}\n```\n\n**Keep your own copy.** Every case above depends on the full conversation, which the API does not give back: there is no API to list or read a thread. Your application must keep every message it sends and receives, and decide when to summarize, based on its own token counts. Note that token counting does not support threads either, so count the full conversation with `system` and `tools`.\n\n**Trade-offs.** Threads make long loops cheaper to send and lower time to first token, but they move responsibility for summaries and tool changes into your code. Summarizing yourself loses the server's built-in compaction, and dropping thinking blocks on a new thread means the model answers without its earlier reasoning. For conversations that change tools often or need compaction regularly, sending without threads may simply be the better fit.",
+      "answer_zh": "**核心思路。** 消息线程是 API 为你保存的一份短期、只追加的对话副本，这样你就可以只发送新的内容。任何改写过去的操作，比如用摘要替换旧的轮次，或者修改 system prompt 和工具，都不符合这个模型。对于这些操作，你要从自己保存的那份对话副本出发，开启一个新的线程。\n\n**机制。** 第一个请求用完整的 `messages`、`system` 和 `tools` 创建线程。后续的继续请求只发送新消息，并且必须省略 `system` 和 `tools`；发送其中任何一个，即使是 null，都会返回 400。`model`、`thinking`、`tool_choice`、`context_management` 和 `output_config` 等字段在线程中是固定的，修改其中任何一个都会返回 `thread_fingerprint_mismatch`。线程不支持压缩，也不支持大部分上下文编辑，因为线程是只追加的，不能替换之前的轮次。\n\n**处理这两种情况。**\n\n- **长对话：通过开启新线程来压缩。** 当对话变得太长时，在你们的代码中写一份摘要，然后把它作为一条普通消息，连同 `system` 和 `tools` 一起在一个新的创建请求中发送，并从那次响应继续。\n- **工具变更：用完整的对话开启新线程。** 从你们自己的副本中取出整段历史，连同新的工具列表一起放进一个创建请求。在 Claude Opus 5.5、Claude Sonnet 5.5 以及其他最新的模型上，这种变更会让之前的思考块失效，创建请求可能返回 400，所以要把所有 `thinking` 和 `redacted_thinking` 块都从你发送的对话中去掉。\n- **更好的做法：避免发生变更。** 如果商家经常在对话中途连接平台，就在创建时注册所有可能用到的工具，并让工具处理函数拒绝那些尚未连接的平台的调用，这样在一个线程的生命周期内，工具列表永远不会变化。\n\n```json\n{\"model\": \"claude-opus-5-5\", \"max_tokens\": 16000,\n \"system\": \"...\", \"tools\": [...],\n \"thread\": {\"type\": \"create\"},\n \"messages\": [\n   {\"role\": \"user\", \"content\": [\n     {\"type\": \"text\", \"text\": \"Summary of the conversation so far: ...\"},\n     {\"type\": \"text\", \"text\": \"<the merchant's new message>\"}]}\n ]}\n```\n\n**保留你们自己的副本。** 上面的每一种情况都依赖于完整的对话，而 API 不会把它还给你：没有任何 API 可以列出或读取一个线程。你们的应用必须保存它发送和接收的每一条消息，并根据自己的 token 计数来决定何时生成摘要。注意 token 计数同样不支持线程，所以要连同 `system` 和 `tools` 一起计算完整对话的 token 数。\n\n**取舍。** 线程让长循环的请求发送成本更低，首个 token 时间也更短，但它把生成摘要和处理工具变更的责任转移到了你们的代码中。自己生成摘要就失去了服务端内置的压缩，而在新线程中丢弃思考块，意味着模型在回答时没有之前的推理。对于经常变更工具或需要定期压缩的对话来说，不使用线程可能反而更合适。",
+      "followups": [
+        "Why can a thread not support compaction?",
+        "How would you decide when to summarize and start a new thread?"
+      ],
+      "followups_zh": [
+        "为什么线程无法支持压缩？",
+        "你会如何决定何时生成摘要并开启新线程？"
+      ],
+      "vocab": [
+        {
+          "en": "message thread",
+          "zh": "消息线程"
+        },
+        {
+          "en": "append-only",
+          "zh": "只追加的"
+        },
+        {
+          "en": "fixed field",
+          "zh": "固定字段"
+        },
+        {
+          "en": "source of truth",
+          "zh": "事实来源"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261104-2",
+      "topic": "Production",
+      "difficulty": "Senior",
+      "title": "Rolling out message threads in the catalog agent's tool loop: occasional 404s, lost turns and a ZDR question",
+      "title_zh": "在商品目录 Agent 的工具循环中推广消息线程：偶发的 404、丢失的轮次，以及一个关于 ZDR 的问题",
+      "question": "The catalog agent runs tool loops of 50 to 200 turns. Re-sending the whole conversation each turn made requests large and time to first token climb as runs grew, so the team moved the loop to message threads. In production they see occasional 404s with `thread_not_found`, a few runs that lost a turn after a streamed response was cut off, and a question from legal because one enterprise customer has a zero data retention (ZDR) agreement.\n\nDesign a production-ready threaded loop.",
+      "question_zh": "商品目录 Agent 运行 50 到 200 轮的工具循环。每一轮都重新发送整段对话，让请求越来越大，随着运行变长，首个 token 时间也不断上升，所以团队把这个循环迁移到了消息线程上。在生产环境中，他们看到偶发的、带有 `thread_not_found` 的 404，有少数运行在一次流式响应被中断之后丢掉了一个轮次，而法务部门也提出了一个问题，因为某个企业客户签有零数据保留（ZDR）协议。\n\n设计一个可以上生产的、使用线程的循环。",
+      "answer": "**The core idea.** A thread is a best-effort optimization, not storage. The API may lose it at any time, so your code must always be able to rebuild the conversation from its own copy and carry on as if nothing happened. Design the replay path first and the happy path second.\n\n**Why 404s happen.** A thread expires 5 minutes after its last request and is deleted within an hour of its last use; each stored response restarts the 5 minutes. A continue request also gets `thread_not_found` when the previous turn was not stored, for example because a fallback model wrote it or a tool call was cut off by `max_tokens`, or when the request comes from a different API key, workspace or service account than the one that created the thread. The error does not say which cause applied.\n\n**The loop.**\n\n- **Keep every message yourself** and record a turn only after it succeeded. On `thread_not_found`, `thread_already_continued` or `thread_continue_in_flight`, replay: send the full conversation with `system` and `tools` in a new create request and continue from that response's `id`.\n- **Know when to stop threading.** If a continue right after a replay returns `thread_not_found` again, the API may be unable to store that conversation; send it without `thread`. On `thread_unsupported_request`, do the same.\n- **Streaming.** The response `id` arrives in `message_start`, but continue from it only after `message_stop`. If a continue stream drops, send the same continue request again; on the in-flight or already-continued errors, replay.\n- **Never re-send what the thread has.** A continue request starts with the new `user` message, usually the `tool_result` blocks; starting with the previous assistant reply is an error.\n- **Refusals and pauses.** On `stop_reason: \"refusal\"`, do not continue the thread. On `pause_turn`, continue from that response with an empty `messages` list.\n\n```go\n// onThreadError maps a thread error code to the next step. replayedLast is\n// true when the previous reply itself came from a replay.\nfunc onThreadError(code string, replayedLast bool) Next {\n\tswitch code {\n\tcase \"thread_unsupported_request\":\n\t\treturn Unthreaded\n\tcase \"thread_not_found\":\n\t\tif replayedLast {\n\t\t\treturn Unthreaded // the API may be unable to store this conversation\n\t\t}\n\t\treturn Replay\n\tcase \"thread_already_continued\", \"thread_continue_in_flight\":\n\t\treturn Replay\n\tdefault:\n\t\treturn Fail // includes thread_fingerprint_mismatch: fix the request or start a new thread\n\t}\n}\n```\n\n**Prefer the SDK helper.** Recent SDK releases ship a thread helper (Go v2.2.0 and later has `client.Beta.Messages.NewThread`) that adds the beta header, leaves out `system` and `tools` on continues and replays once on the thread errors above; in releases that have it, the beta tool runner also uses a thread by default. It keeps the conversation only in memory, so a loop that must survive a restart still needs your own copy.\n\n**The ZDR question.** Message threads are not ZDR eligible: the API holds a thread in memory, encrypted, never on durable storage, and deletes it within an hour of last use. Using threads does not affect other ZDR-eligible features, but for the ZDR customer's traffic, route around threads and send full conversations, with caching. Organizations with HIPAA readiness enabled cannot use threads either.\n\n**Trade-offs.** Threads do not change price or rate limits and do not cache anything for you; their benefit is smaller requests and steadier latency in long loops. In exchange you own a replay path and must run every threaded request with the same key and workspace. Measure time to first token and replay rates per route; if replays are frequent, for example because tool calls take longer than five minutes, the benefit may disappear.",
+      "answer_zh": "**核心思路。** 线程是一种尽力而为的优化，而不是存储。API 随时可能丢失它，所以你们的代码必须始终能够根据自己的副本重建对话，并像什么都没发生过一样继续执行。先设计重放路径，再设计正常路径。\n\n**为什么会出现 404。** 线程在最后一次请求 5 分钟后过期，并在最后一次使用后的一小时内被删除；每次被存储的响应都会重新开始计算这 5 分钟。如果上一轮没有被存储，比如它是由 fallback 模型写出的，或者某次工具调用被 `max_tokens` 截断，继续请求也会得到 `thread_not_found`；如果请求来自与创建线程时不同的 API key、工作区或服务账号，同样如此。错误信息不会说明是哪一种原因。\n\n**这个循环。**\n\n- **自己保存每一条消息**，并且只在某一轮成功之后才记录它。遇到 `thread_not_found`、`thread_already_continued` 或 `thread_continue_in_flight` 时进行重放：在一个新的创建请求中连同 `system` 和 `tools` 发送完整对话，并从那次响应的 `id` 继续。\n- **知道何时停止使用线程。** 如果紧接着重放之后的继续请求再次返回 `thread_not_found`，说明 API 可能无法存储这段对话；那就不带 `thread` 发送。遇到 `thread_unsupported_request` 时也这样做。\n- **流式输出。** 响应的 `id` 在 `message_start` 中就会到达，但只有在 `message_stop` 之后才能从它继续。如果一个继续请求的流中断了，就再次发送同样的继续请求；遇到“正在进行中”或“已被继续”的错误时，就进行重放。\n- **绝不重发线程中已有的内容。** 继续请求以新的 `user` 消息开头，通常是 `tool_result` 块；以上一条 assistant 回复开头会报错。\n- **拒答与暂停。** 遇到 `stop_reason: \"refusal\"` 时，不要继续这个线程。遇到 `pause_turn` 时，用空的 `messages` 列表从那次响应继续。\n\n```go\n// onThreadError maps a thread error code to the next step. replayedLast is\n// true when the previous reply itself came from a replay.\nfunc onThreadError(code string, replayedLast bool) Next {\n\tswitch code {\n\tcase \"thread_unsupported_request\":\n\t\treturn Unthreaded\n\tcase \"thread_not_found\":\n\t\tif replayedLast {\n\t\t\treturn Unthreaded // the API may be unable to store this conversation\n\t\t}\n\t\treturn Replay\n\tcase \"thread_already_continued\", \"thread_continue_in_flight\":\n\t\treturn Replay\n\tdefault:\n\t\treturn Fail // includes thread_fingerprint_mismatch: fix the request or start a new thread\n\t}\n}\n```\n\n**优先使用 SDK 辅助工具。** 较新的 SDK 版本提供了线程辅助工具（Go v2.2.0 及以上版本有 `client.Beta.Messages.NewThread`），它会加上 beta 请求头、在继续请求中省略 `system` 和 `tools`，并在遇到上述线程错误时重放一次；在包含它的版本中，beta 工具运行器默认也会使用线程。它只把对话保存在内存中，所以一个必须在重启后继续运行的循环，仍然需要你们自己的副本。\n\n**关于 ZDR 的问题。** 消息线程不符合 ZDR 的条件：API 把线程加密保存在内存中，从不写入持久存储，并在最后一次使用后的一小时内删除它。使用线程不会影响其他符合 ZDR 条件的功能，但对于这位 ZDR 客户的流量，要绕开线程，发送完整的对话，并配合缓存。启用了 HIPAA 就绪功能的组织同样无法使用线程。\n\n**取舍。** 线程不会改变价格或限流额度，也不会替你缓存任何东西；它的好处是在长循环中请求更小、延迟更稳定。作为交换，你们要负责一条重放路径，并且每个使用线程的请求都必须使用相同的 key 和工作区。按路由测量首个 token 时间和重放率；如果重放很频繁，例如因为工具调用的耗时超过五分钟，这个好处就可能消失。",
+      "followups": [
+        "Why must a turn be recorded only after it succeeded?",
+        "What happens to a thread when a tool call takes eight minutes?",
+        "How would you prove threads actually helped this agent?"
+      ],
+      "followups_zh": [
+        "为什么一个轮次只能在成功之后才被记录？",
+        "当一次工具调用耗时八分钟时，线程会发生什么？",
+        "你会如何证明线程确实帮助了这个 Agent？"
+      ],
+      "vocab": [
+        {
+          "en": "best-effort",
+          "zh": "尽力而为的"
+        },
+        {
+          "en": "replay",
+          "zh": "重放"
+        },
+        {
+          "en": "zero data retention (ZDR)",
+          "zh": "零数据保留（ZDR）"
+        },
+        {
+          "en": "time to first token",
+          "zh": "首个 token 时间"
+        },
+        {
+          "en": "Design the replay path first.",
+          "zh": "先设计重放路径。"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261104-3",
+      "topic": "Multi-agent",
+      "difficulty": "Medium",
+      "title": "A helper agent's budget change waits forever for approval, while another is silently denied",
+      "title_zh": "一个助手 Agent 的预算修改永远在等待审批，而另一个则被悄无声息地拒绝了",
+      "question": "A Managed Agents coordinator delegates campaign work to a roster agent, the \"budget tuner\", whose `update_budget` tool is set to `always_ask`. The team's client only listens to the budget tuner's own thread for approval requests, but sometimes it seems to miss them and sessions stall for hours. On another tool with the `auto` policy, some calls never reach the approval UI at all, and the helper simply reports that the change failed.\n\nExplain how approvals work in a team of agents and fix the client.",
+      "question_zh": "一个 Managed Agents 协调者把广告活动工作委派给名册中的一个 Agent，即“预算调优员”，它的 `update_budget` 工具被设置为 `always_ask`。团队的客户端只在预算调优员自己的线程上监听审批请求，但有时似乎会漏掉它们，导致会话停滞好几个小时。另一个使用 `auto` 策略的工具，有些调用根本到不了审批界面，而助手只是报告说修改失败了。\n\n解释在多 Agent 团队中审批是如何工作的，并修复这个客户端。",
+      "answer": "**The core idea.** In a multi-agent session, everything that needs your client is delivered on one channel: the primary thread. Your client watches that stream, answers by event ID, and treats \"waiting on us\" as a normal state, not as finished or stuck.\n\n**Mechanism.** When a subagent's call pauses for approval, under `always_ask` or under `auto` with no determination, the request is cross-posted to the primary thread with `session_thread_id` naming the subagent's thread. You reply with `user.tool_confirmation` using the event's `id` (an event ID, not a `toolu_` ID) and `allow` or `deny`; the server routes it, so you do not send the thread ID back. Calls the server denies under `auto` as high-risk are different: they are not cross-posted, the denial appears only on the subagent's own thread, and the subagent keeps running.\n\n**Fix the client.**\n\n- **Watch the primary thread.** Handle every `agent.tool_use` or `agent.mcp_tool_use` event with `evaluated_permission` equal to `ask`, whichever thread it came from, and answer each one once.\n- **Gate on the evaluated permission, not your policy.** It covers `always_ask` and undecided `auto` alike. Sending a confirmation for a call the server already denied is a 400.\n- **Explain denials.** Use `deny_message` when you deny, so the agent can tell the merchant why instead of retrying blindly.\n- **Do not break on idle alone.** A session goes idle while waiting for a confirmation, with stop reason `requires_action`; keep handling events instead of treating it as done.\n\n```json\n{\"events\": [{\n  \"type\": \"user.tool_confirmation\",\n  \"tool_use_id\": \"sevt_...\",\n  \"result\": \"deny\",\n  \"deny_message\": \"Budget changes above 20% need the merchant's owner to approve.\"\n}]}\n```\n\n**Make denials visible.** For `auto` denials, stream the subagent threads too, or log `event.evaluation` with its `reason_code` for audit, and alert when one tool is denied often; that usually means the policy or the prompt needs work. Only your own `user.message` events on the primary thread can lead the server to allow a call it would otherwise deny; nothing inside a subagent thread carries that weight.\n\n**Dynamic workflows too.** If the coordinator starts a workflow run, the run's threads cross-post their calls to the primary thread as well. Answer those as each event arrives, without waiting for the session to go idle, so one pending approval does not hold up the rest of the run.\n\n**Trade-offs.** `always_ask` on budget changes is safe but needs a person available, so unattended runs should deny by rule rather than wait forever. `auto` reduces interruptions, but its denials are quieter, which is why they need their own monitoring.",
+      "answer_zh": "**核心思路。** 在多 Agent 会话中，所有需要你们客户端处理的事情，都通过同一个通道送达：主线程。你们的客户端监听这个流，按事件 ID 作答，并把“在等我们处理”当作一种正常状态，而不是已完成或卡住了。\n\n**机制。** 当子 Agent 的调用因审批而暂停时，无论是在 `always_ask` 下，还是在 `auto` 下没有得出结论时，这个请求都会被转发到主线程，并用 `session_thread_id` 标明子 Agent 所在的线程。你用 `user.tool_confirmation` 作答，带上事件的 `id`（是事件 ID，而不是 `toolu_` ID）以及 `allow` 或 `deny`；服务端会负责路由，所以你不需要回传线程 ID。服务端在 `auto` 下以高风险为由拒绝的调用则不同：它们不会被转发，拒绝只出现在子 Agent 自己的线程上，而子 Agent 会继续运行。\n\n**修复客户端。**\n\n- **监听主线程。** 处理每一个 `evaluated_permission` 等于 `ask` 的 `agent.tool_use` 或 `agent.mcp_tool_use` 事件，无论它来自哪个线程，并对每一个只作答一次。\n- **根据评估出的权限而不是你们的策略来判断。** 它同时涵盖 `always_ask` 和未得出结论的 `auto`。对服务端已经拒绝的调用发送确认会返回 400。\n- **说明拒绝的原因。** 拒绝时使用 `deny_message`，这样 Agent 就能告诉商家原因，而不是盲目地重试。\n- **不要只因为空闲就结束。** 会话在等待确认时会进入空闲状态，停止原因是 `requires_action`；要继续处理事件，而不是把它当作已经完成。\n\n```json\n{\"events\": [{\n  \"type\": \"user.tool_confirmation\",\n  \"tool_use_id\": \"sevt_...\",\n  \"result\": \"deny\",\n  \"deny_message\": \"Budget changes above 20% need the merchant's owner to approve.\"\n}]}\n```\n\n**让拒绝变得可见。** 对于 `auto` 下的拒绝，也要监听子 Agent 的线程，或者记录 `event.evaluation` 及其 `reason_code` 以便审计，并在某个工具频繁被拒绝时发出告警；这通常意味着策略或提示需要调整。只有你们自己在主线程上发送的 `user.message` 事件，才能让服务端放行一个它原本会拒绝的调用；子 Agent 线程中的任何内容都没有这种分量。\n\n**动态工作流也是如此。** 如果协调者启动了一个工作流运行，运行中的线程同样会把它们的调用转发到主线程。在每个事件到达时就作答，而不要等会话进入空闲状态，这样一个待处理的审批就不会拖住整个运行的其余部分。\n\n**取舍。** 对预算修改使用 `always_ask` 很安全，但需要有人随时处理，所以无人值守的运行应当按规则拒绝，而不是永远等待。`auto` 减少了打断，但它的拒绝更不显眼，这正是它需要单独监控的原因。",
+      "followups": [
+        "Why are `auto` denials not cross-posted to the primary thread?",
+        "What should an unattended nightly run do with approval requests?"
+      ],
+      "followups_zh": [
+        "为什么 `auto` 下的拒绝不会被转发到主线程？",
+        "无人值守的夜间运行应该如何处理审批请求？"
+      ],
+      "vocab": [
+        {
+          "en": "cross-post",
+          "zh": "转发（到主线程）"
+        },
+        {
+          "en": "tool confirmation",
+          "zh": "工具确认"
+        },
+        {
+          "en": "permission policy",
+          "zh": "权限策略"
+        },
+        {
+          "en": "unattended",
+          "zh": "无人值守的"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261104-4",
+      "topic": "Evals & Observability",
+      "difficulty": "Medium",
+      "title": "The nightly dashboard marks agent sessions \"completed\" that actually failed, ran out of budget, or were waiting for approval",
+      "title_zh": "夜间看板把一些 Agent 会话标记为“已完成”，而它们实际上是失败了、用完了预算，或者在等待审批",
+      "question": "A nightly job starts one Managed Agents session per merchant and marks a session \"completed\" when it receives `session.status_idle`. The dashboard shows a 99% success rate, but merchants report missing reports. Investigation finds three kinds of sessions marked complete: some stopped after retries ran out, some hit their spending cap, and some were waiting for a tool approval nobody answered.\n\nFix the status logic and design the metrics.",
+      "question_zh": "一个夜间任务为每个商家启动一个 Managed Agents 会话，并在收到 `session.status_idle` 时把会话标记为“已完成”。看板显示成功率为 99%，但商家反馈缺少报告。调查发现有三类会话被标记为已完成：有些在重试次数耗尽后停止了，有些触到了花费上限，还有一些在等待一个没人回应的工具审批。\n\n修复状态判断逻辑，并设计相应的指标。",
+      "answer": "**The core idea.** \"Idle\" means the agent is not working right now, not that the work succeeded. The reason it stopped is what tells you the outcome, so your observability must be built on the stop reason, and anything you do not recognize must count as a problem, not a success.\n\n**Mechanism.** A session goes idle transiently, for example between parallel tool executions or while waiting for a confirmation or a custom tool result. The `session.status_idle` event carries a `stop_reason`: `requires_action` means it waits for your client; `end_turn` is a normal completion; `retries_exhausted` is a terminal failure; `budget_reached` means the session hit its spending cap and paused, and only changing or removing the budget resumes it. A `session.usage` event with the final cost comes just before a `budget_reached` idle. A `session.status_terminated` event ends the session.\n\n```go\n// classifyIdle turns a session.status_idle stop reason into an outcome.\n// Unknown values are failures to look at, never successes.\nfunc classifyIdle(stopReason string) Outcome {\n\tswitch stopReason {\n\tcase \"requires_action\":\n\t\treturn Waiting\n\tcase \"end_turn\":\n\t\treturn Completed\n\tcase \"budget_reached\":\n\t\treturn OverCap\n\tdefault: // retries_exhausted and anything new\n\t\treturn Failed\n\t}\n}\n```\n\n- **`requires_action` is not an end.** Answer the pending confirmation or tool result; an unattended job should deny by rule rather than leave the session waiting.\n- **Check the deliverable too.** `end_turn` means the agent stopped talking, not that the report exists. Verify the output was written before marking the merchant done.\n- **On failures, read the session.** For `retries_exhausted`, retrieve the session to see the error state, and open the Console session viewer for the trace.\n\n**Metrics.** Report per run: completed with a verified deliverable, failed, over budget, waiting on approval, and unknown, plus cost per completed merchant. Alert when any non-success bucket grows, and show over-budget sessions with their final cost so someone can decide whether to raise the cap. A success rate built only on completed and verified sessions is the number to trust.\n\n**Budget pauses are decisions, not failures.** A session at its budget is not terminated: its history and sandbox are kept, and changing or removing the budget resumes the paused work automatically. Route these to a person with the final cost and the merchant, and let them raise the cap or close the session.\n\n**Trade-offs.** Strict classification makes the dashboard look worse at first, which is the point: the 99% was hiding real failures. Verifying each deliverable adds a check per merchant, but it catches the most expensive failure of all, a report the merchant never receives while the system says everything is fine.",
+      "answer_zh": "**核心思路。** “空闲”的意思是 Agent 此刻没有在工作，而不是工作成功了。它停下来的原因才说明了结果，所以你们的可观测性必须建立在停止原因之上，而且任何你们不认识的情况都必须算作问题，而不是成功。\n\n**机制。** 会话会短暂地进入空闲状态，例如在并行工具执行之间，或者在等待确认或自定义工具结果的时候。`session.status_idle` 事件带有一个 `stop_reason`：`requires_action` 表示它在等待你们的客户端；`end_turn` 是正常完成；`retries_exhausted` 是终止性的失败；`budget_reached` 表示会话触到了花费上限并已暂停，只有修改或移除预算才能让它继续。在 `budget_reached` 的空闲之前，会先有一个带有最终成本的 `session.usage` 事件。`session.status_terminated` 事件则表示会话结束。\n\n```go\n// classifyIdle turns a session.status_idle stop reason into an outcome.\n// Unknown values are failures to look at, never successes.\nfunc classifyIdle(stopReason string) Outcome {\n\tswitch stopReason {\n\tcase \"requires_action\":\n\t\treturn Waiting\n\tcase \"end_turn\":\n\t\treturn Completed\n\tcase \"budget_reached\":\n\t\treturn OverCap\n\tdefault: // retries_exhausted and anything new\n\t\treturn Failed\n\t}\n}\n```\n\n- **`requires_action` 不是终点。** 回应待处理的确认或工具结果；无人值守的任务应该按规则拒绝，而不是让会话一直等待。\n- **也要检查交付物。** `end_turn` 意味着 Agent 停止了发言，而不是报告已经存在。在把这个商家标记为完成之前，要先核实输出确实已经写入。\n- **失败时要读取会话详情。** 对于 `retries_exhausted`，获取会话以查看错误状态，并打开 Console 的会话查看器查看追踪。\n\n**指标。** 每次运行报告：已完成且交付物经过核实、失败、超出预算、等待审批和未知这几类，以及每个完成商家的成本。当任何一个非成功类别增长时发出告警，并展示超出预算的会话及其最终成本，以便有人决定是否提高上限。只基于已完成且经过核实的会话计算出来的成功率，才是值得信任的数字。\n\n**预算暂停是需要做决定的时刻，而不是失败。** 达到预算的会话并没有被终止：它的历史和沙箱都被保留了下来，修改或移除预算会自动恢复被暂停的工作。把这些会话连同最终成本和商家信息交给专人处理，让他们决定提高上限还是关闭会话。\n\n**取舍。** 严格的分类一开始会让看板看起来更差，而这正是目的所在：那个 99% 掩盖了真实的失败。核实每一个交付物会给每个商家增加一次检查，但它能抓住所有失败中代价最高的那一种：系统说一切正常，而商家却从未收到报告。",
+      "followups": [
+        "Why should an unknown stop reason count as a failure?",
+        "How would you check that a report really reached the merchant?"
+      ],
+      "followups_zh": [
+        "为什么未知的停止原因应该算作失败？",
+        "你会如何核实一份报告真的送到了商家手中？"
+      ],
+      "vocab": [
+        {
+          "en": "stop reason",
+          "zh": "停止原因"
+        },
+        {
+          "en": "terminal",
+          "zh": "终止性的"
+        },
+        {
+          "en": "deliverable",
+          "zh": "交付物"
+        },
+        {
+          "en": "success rate",
+          "zh": "成功率"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261104-5",
+      "topic": "RAG",
+      "difficulty": "Hard",
+      "title": "Answering compliance questions from 900-page supplier PDFs with page-accurate citations",
+      "title_zh": "根据 900 页的供应商 PDF 回答合规问题，并给出精确到页码的引用",
+      "question": "Merchants upload supplier compliance PDFs, some over 900 pages, and ask questions like \"Is this battery certified for air shipping?\" The answer must cite the exact pages so the merchant can show them to a marketplace. The first version sent the whole PDF as base64 in every request, failed on the largest files, cited no pages, and broke when the team also asked for the answer as JSON.\n\nDesign the pipeline.",
+      "question_zh": "商家会上传供应商的合规 PDF，有些超过 900 页，并提出诸如“这款电池有空运认证吗？”这样的问题。答案必须引用确切的页码，以便商家能把它们出示给电商平台。第一个版本在每个请求中都以 base64 发送整个 PDF，在最大的文件上失败了，没有引用任何页码，而当团队同时要求以 JSON 返回答案时，又出了错。\n\n设计这条处理流水线。",
+      "answer": "**The core idea.** Let the model read the document directly and point to where each claim comes from, instead of paraphrasing chunks. Citations tie each sentence to pages; your job is to fit documents within the request limits, avoid re-sending them, and keep the citations intact on the way to the merchant.\n\n**Limits and why the first version failed.** A PDF sent as a base64 `document` block is limited by request size (32 MB) and page count (600 pages, or 100 for 200K-context models), so a 900-page file does not fit in one request. Without `citations: {\"enabled\": true}` on the document blocks the model cites nothing. And citations are incompatible with structured outputs (`output_config.format`): combining them returns a 400.\n\n**Design.**\n\n- **Split large PDFs by page range** into parts under the limits, keep a table of contents per part, and send only the parts relevant to the question, found by searching the extracted text or the outline.\n- **Upload once with the Files API** and reference each part as `{\"type\": \"document\", \"source\": {\"type\": \"file\", \"file_id\": ...}}`, and put the documents in the cached prefix, so follow-up questions do not re-upload or re-process them.\n- **Enable citations on every document block**, all or none. For PDFs, each citation has `page_location` with 1-indexed start and end pages, plus `cited_text` and the document index. Add your part's starting page to map back to the original page numbers.\n- **Structure without structured outputs.** Build the JSON yourself from the cited text blocks: the answer text, and for each claim the document, pages and quoted text.\n\n```go\n// splitPages cuts a document into parts of at most maxPages pages, so each part\n// stays under the per-request page limit.\nfunc splitPages(total, maxPages int) []Part {\n\tvar parts []Part\n\tfor first := 1; first <= total; first += maxPages {\n\t\tlast := min(first+maxPages-1, total)\n\t\tparts = append(parts, Part{first, last})\n\t}\n\treturn parts\n}\n```\n\n**When the answer travels on.** If another step, such as a checker, reads the answer, send it the answer text and the cited passages, not the cited blocks: on API version `2026-10-21` a `text` block with non-empty `citations` in a `user` message returns a 400.\n\n**Trade-offs.** Sending whole PDF parts gives the model full context and accurate page citations, at a higher token cost than chunked retrieval; caching and sending only relevant parts keep that cost reasonable. Splitting can cut a section in half, so overlap parts by a few pages or split on chapter boundaries from the outline. For a legal answer, page-accurate citations are worth more than the savings of a cheaper pipeline that cannot show its sources.",
+      "answer_zh": "**核心思路。** 让模型直接阅读文档，并为每一个说法指出出处，而不是转述切块后的内容。引用会把每句话与页码关联起来；你们要做的是让文档符合请求的限制、避免重复发送，并在把答案交给商家的过程中保持引用完整。\n\n**限制，以及第一个版本为什么失败。** 以 base64 `document` 块发送的 PDF 受请求大小（32 MB）和页数（600 页，对于 200K 上下文的模型是 100 页）的限制，所以一个 900 页的文件放不进一个请求。如果没有在文档块上设置 `citations: {\"enabled\": true}`，模型就不会引用任何内容。而引用与结构化输出（`output_config.format`）不兼容：两者同时使用会返回 400。\n\n**设计。**\n\n- **按页码范围拆分大型 PDF**，使每一部分都在限制之内，为每一部分保留目录，并通过搜索提取出的文本或文档大纲，只发送与问题相关的部分。\n- **用 Files API 上传一次**，并以 `{\"type\": \"document\", \"source\": {\"type\": \"file\", \"file_id\": ...}}` 的形式引用每一部分，再把这些文档放进缓存前缀中，这样后续的问题就不需要重新上传或重新处理它们。\n- **在每一个文档块上都开启引用**，要么全部开启，要么全部不开。对于 PDF，每条引用都带有 `page_location`，其中包含从 1 开始编号的起止页码，以及 `cited_text` 和文档索引。加上该部分的起始页码，就能映射回原始文档的页码。\n- **不用结构化输出也能得到结构。** 根据带引用的文本块自己构建 JSON：答案文本，以及每个说法对应的文档、页码和引用原文。\n\n```go\n// splitPages cuts a document into parts of at most maxPages pages, so each part\n// stays under the per-request page limit.\nfunc splitPages(total, maxPages int) []Part {\n\tvar parts []Part\n\tfor first := 1; first <= total; first += maxPages {\n\t\tlast := min(first+maxPages-1, total)\n\t\tparts = append(parts, Part{first, last})\n\t}\n\treturn parts\n}\n```\n\n**当答案被继续传递时。** 如果另一个步骤（比如检查器）要读取这个答案，就把答案文本和被引用的段落发给它，而不是带引用的块：在 API 版本 `2026-10-21` 上，`user` 消息中带有非空 `citations` 的 `text` 块会返回 400。\n\n**取舍。** 发送完整的 PDF 部分能让模型拥有完整的上下文和准确的页码引用，但 token 成本比切块检索更高；缓存以及只发送相关部分能把这个成本控制在合理范围内。拆分可能会把一个章节切成两半，所以要让各部分重叠几页，或者按照文档大纲中的章节边界拆分。对于具有法律意义的答案来说，精确到页码的引用，比一条无法展示来源的廉价流水线所节省的成本更有价值。",
+      "followups": [
+        "Why are citations incompatible with structured outputs, and how do you get JSON anyway?",
+        "How would you map a citation in a split part back to the original page?",
+        "When would chunked retrieval still be the better choice?"
+      ],
+      "followups_zh": [
+        "为什么引用与结构化输出不兼容？你又如何仍然得到 JSON？",
+        "你会如何把拆分后某一部分中的引用映射回原始页码？",
+        "在什么情况下切块检索仍然是更好的选择？"
+      ],
+      "vocab": [
+        {
+          "en": "citation",
+          "zh": "引用"
+        },
+        {
+          "en": "page range",
+          "zh": "页码范围"
+        },
+        {
+          "en": "Files API",
+          "zh": "Files API（文件接口）"
+        },
+        {
+          "en": "overlap",
+          "zh": "重叠"
+        }
+      ]
+    }
+  ]
+}
