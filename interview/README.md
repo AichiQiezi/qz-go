@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 24 天、120 道题。
+共 25 天、125 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-05](days/2026-11-05.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Medium | [Webhook signatures fail at random: the signed string is built by ranging over a map](days/2026-11-05.md#q1) | webhook 签名随机失败：被签名的字符串是通过遍历 map 拼出来的 |
+| 2 | System Design | Senior | [Changing the product search mapping for hundreds of millions of products without downtime](days/2026-11-05.md#q2) | 在不停机的情况下修改数亿商品的搜索映射 |
+| 3 | Database | Hard | [Filtering products by a JSONB attribute is slow, even after adding a GIN index](days/2026-11-05.md#q3) | 按 JSONB 属性筛选商品很慢，即使已经加了 GIN 索引 |
+| 4 | Middleware | Medium | [Deleting one merchant's cache freezes Redis for half a second: big keys, DEL and UNLINK](days/2026-11-05.md#q4) | 删除一个商家的缓存会让 Redis 卡住半秒：大 key、DEL 与 UNLINK |
+| 5 | Java & CS | Hard | [A parallel stream builds the product export list, and on large catalogs products go missing or the job crashes](days/2026-11-05.md#q5) | 用并行流构建商品导出列表，在大型商品目录上会丢失商品，或者任务直接崩溃 |
 
 ## [2026-11-04](days/2026-11-04.md)
 
