@@ -1,0 +1,203 @@
+{
+  "id": "daily-2026-11-05",
+  "order": 20261105,
+  "kind": "daily",
+  "title": "Daily set · Nov 5",
+  "title_zh": "每日新题 · 11 月 5 日",
+  "summary": "Five new agent questions: replacing leaked API keys with workload identity federation, auditing a prompt written for older models, cleaning a secret out of a shared memory store and fixing lost updates, reusing code-execution containers safely across merchants, and deciding when a team of agents beats a single agent.",
+  "summary_zh": "五道新的 Agent 题：用工作负载身份联合替换泄漏的 API key、审查一份为旧模型编写的提示、从共享记忆存储中清理机密并修复丢失的更新、在商家之间安全地复用代码执行容器，以及判断多 Agent 团队何时优于单个 Agent。",
+  "generatedAt": "2026-11-05T06:56:10+08:00",
+  "questions": [
+    {
+      "id": "agent-daily-20261105-1",
+      "topic": "Safety & Security",
+      "difficulty": "Hard",
+      "title": "An API key leaked from a CI log: replacing long-lived keys with workload identity federation",
+      "title_zh": "一个 API key 从 CI 日志中泄漏了：用工作负载身份联合替换长期有效的 key",
+      "question": "Your agent services run on Kubernetes and in CI, each with an Anthropic API key in an environment variable. A key appeared in a public CI log and was used by someone else before it was revoked. Security asks for no long-lived Anthropic keys anywhere. A first attempt at workload identity federation (WIF) seemed to work, but logs show some pods still authenticating with an old key.\n\nExplain how WIF works with the SDKs, why some pods kept the old key, and design the rollout.",
+      "question_zh": "你们的 Agent 服务运行在 Kubernetes 和 CI 中，每个都在环境变量里放着一个 Anthropic API key。有一个 key 出现在了公开的 CI 日志中，并且在被吊销之前已经被别人用过了。安全团队要求任何地方都不能再有长期有效的 Anthropic key。第一次尝试工作负载身份联合（WIF）看起来成功了，但日志显示有些 pod 仍然在用一个旧 key 进行认证。\n\n解释 WIF 如何与 SDK 配合工作、为什么有些 pod 还在用旧 key，并设计推广方案。",
+      "answer": "**The core idea.** Instead of a secret that works forever for whoever holds it, each workload proves who it is with a short-lived identity token from its own platform, such as a Kubernetes service account token, and exchanges it for a short-lived Anthropic token. Nothing long-lived is stored, so a leaked log line is worth little.\n\n**Mechanism.** WIF is GA and needs no beta header. You construct the normal zero-argument client, and the SDK detects WIF when all of `ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID`, `ANTHROPIC_SERVICE_ACCOUNT_ID` and `ANTHROPIC_IDENTITY_TOKEN_FILE` (or `ANTHROPIC_IDENTITY_TOKEN`) are set. It exchanges the token at `/v1/oauth/token` and refreshes automatically. `ANTHROPIC_WORKSPACE_ID` is needed only when the federation rule spans several workspaces; otherwise such a request gets a 400 `workspace_id_required`.\n\n**Why some pods kept the old key.** Credential resolution has an order, and the first match wins: `ANTHROPIC_API_KEY`, then `ANTHROPIC_AUTH_TOKEN`, then a selected or active profile, then WIF. Pods whose deployment still set `ANTHROPIC_API_KEY`, from an old secret mount, kept using it; on some older SDK releases even an empty value outranks WIF. A set `ANTHROPIC_PROFILE` also wins over the federation variables.\n\n```go\n// checkCredentialEnv fails startup when a long-lived credential would shadow\n// workload identity federation: these variables win over the federation ones.\nfunc checkCredentialEnv() error {\n\tfor _, name := range []string{\"ANTHROPIC_API_KEY\", \"ANTHROPIC_AUTH_TOKEN\", \"ANTHROPIC_PROFILE\"} {\n\t\tif _, set := os.LookupEnv(name); set {\n\t\t\treturn fmt.Errorf(\"%s is set; unset it so the federation credentials are used\", name)\n\t\t}\n\t}\n\tfor _, name := range []string{\"ANTHROPIC_FEDERATION_RULE_ID\", \"ANTHROPIC_ORGANIZATION_ID\",\n\t\t\"ANTHROPIC_SERVICE_ACCOUNT_ID\", \"ANTHROPIC_IDENTITY_TOKEN_FILE\"} {\n\t\tif os.Getenv(name) == \"\" {\n\t\t\treturn fmt.Errorf(\"%s is missing\", name)\n\t\t}\n\t}\n\treturn nil\n}\n```\n\n**Rollout.**\n\n- **One service account per workload.** Create service accounts, federation issuers and rules through the Admin API; these endpoints require an `org:admin` OAuth token, not an API key. Scope each rule narrowly, for example one Kubernetes namespace and service account per rule.\n- **Fail fast on shadowing.** A startup check like the one above refuses to run when an old credential variable is present, so a forgotten secret cannot silently win.\n- **Remove and revoke.** Delete key secrets from deployments and CI settings, then revoke the old keys and watch for any request still using them.\n- **CI too.** Interactive login is for development machines; CI and servers should use WIF with their platform's identity token.\n\n**Trade-offs.** WIF adds setup in two systems, your identity provider and the Anthropic organization, and a dependency on token exchange at startup, but it removes the most common leak path entirely. Keep a documented break-glass procedure, such as a short-lived key created by an admin, for when the identity provider itself is down.",
+      "answer_zh": "**核心思路。** 不再使用一个谁拿到都能永久使用的秘密，而是让每个工作负载用自己平台签发的短期身份令牌（例如 Kubernetes 服务账号令牌）证明自己是谁，再把它换成一个短期的 Anthropic 令牌。没有任何长期有效的东西被存储下来，所以即使日志中泄漏了一行，也几乎没有价值。\n\n**机制。** WIF 已正式发布（GA），不需要 beta 请求头。你构造普通的无参数客户端，当 `ANTHROPIC_FEDERATION_RULE_ID`、`ANTHROPIC_ORGANIZATION_ID`、`ANTHROPIC_SERVICE_ACCOUNT_ID` 和 `ANTHROPIC_IDENTITY_TOKEN_FILE`（或 `ANTHROPIC_IDENTITY_TOKEN`）全部设置时，SDK 就会识别出 WIF。它在 `/v1/oauth/token` 交换令牌，并自动刷新。只有当联合规则跨越多个工作区时才需要 `ANTHROPIC_WORKSPACE_ID`；否则这类请求会得到一个 400 `workspace_id_required`。\n\n**为什么有些 pod 还在用旧 key。** 凭证解析是有顺序的，第一个匹配的胜出：`ANTHROPIC_API_KEY`，然后是 `ANTHROPIC_AUTH_TOKEN`，然后是被选中或处于活动状态的 profile，最后才是 WIF。那些部署配置中仍然设置了 `ANTHROPIC_API_KEY`（来自旧的 secret 挂载）的 pod 就继续用它；在一些较旧的 SDK 版本上，即使是空值也会优先于 WIF。设置了 `ANTHROPIC_PROFILE` 同样会压过联合相关的变量。\n\n```go\n// checkCredentialEnv fails startup when a long-lived credential would shadow\n// workload identity federation: these variables win over the federation ones.\nfunc checkCredentialEnv() error {\n\tfor _, name := range []string{\"ANTHROPIC_API_KEY\", \"ANTHROPIC_AUTH_TOKEN\", \"ANTHROPIC_PROFILE\"} {\n\t\tif _, set := os.LookupEnv(name); set {\n\t\t\treturn fmt.Errorf(\"%s is set; unset it so the federation credentials are used\", name)\n\t\t}\n\t}\n\tfor _, name := range []string{\"ANTHROPIC_FEDERATION_RULE_ID\", \"ANTHROPIC_ORGANIZATION_ID\",\n\t\t\"ANTHROPIC_SERVICE_ACCOUNT_ID\", \"ANTHROPIC_IDENTITY_TOKEN_FILE\"} {\n\t\tif os.Getenv(name) == \"\" {\n\t\t\treturn fmt.Errorf(\"%s is missing\", name)\n\t\t}\n\t}\n\treturn nil\n}\n```\n\n**推广方案。**\n\n- **每个工作负载一个服务账号。** 通过 Admin API 创建服务账号、联合签发方和规则；这些接口要求使用 `org:admin` OAuth 令牌，而不是 API key。每条规则的范围要尽量窄，例如一条规则只对应一个 Kubernetes 命名空间和服务账号。\n- **遇到被遮蔽的情况立即失败。** 像上面这样的启动检查会在存在旧的凭证变量时拒绝运行，这样被遗忘的 secret 就无法悄无声息地胜出。\n- **删除并吊销。** 从部署配置和 CI 设置中删除 key 的 secret，然后吊销旧 key，并留意是否还有请求在使用它们。\n- **CI 也一样。** 交互式登录只用于开发机器；CI 和服务器应该使用 WIF，配合各自平台的身份令牌。\n\n**取舍。** WIF 需要在两个系统中进行配置，即你们的身份提供方和 Anthropic 组织，并且在启动时依赖令牌交换，但它彻底消除了最常见的泄漏途径。保留一个有文档记录的应急流程，例如由管理员创建一个短期 key，以备身份提供方本身出现故障时使用。",
+      "followups": [
+        "Why does an empty `ANTHROPIC_API_KEY` matter on some SDK releases?",
+        "How would you scope federation rules across many services?"
+      ],
+      "followups_zh": [
+        "为什么在某些 SDK 版本上，一个空的 `ANTHROPIC_API_KEY` 也会造成影响？",
+        "你会如何为许多服务划定联合规则的范围？"
+      ],
+      "vocab": [
+        {
+          "en": "workload identity federation",
+          "zh": "工作负载身份联合"
+        },
+        {
+          "en": "long-lived credential",
+          "zh": "长期有效的凭证"
+        },
+        {
+          "en": "service account",
+          "zh": "服务账号"
+        },
+        {
+          "en": "break-glass",
+          "zh": "应急（破窗）流程"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261105-2",
+      "topic": "Agent Loop",
+      "difficulty": "Medium",
+      "title": "After the model upgrade, the support agent calls tools for everything and its answers feel rigid: auditing a prompt written for older models",
+      "title_zh": "模型升级之后，客服 Agent 什么都要调用工具，回答也显得生硬：审查一份为旧模型编写的提示",
+      "question": "The support agent's system prompt grew over two years: \"CRITICAL: You MUST use the order tool\", \"Think step by step before answering\", \"NEVER use bullet points\", \"After every three tool calls, summarize progress\", and many rules nobody remembers adding. After moving to Claude Opus 5.5, the agent calls tools even for greetings, follows the progress cadence mechanically, and its answers read as stiff. Another rule asks it to \"explain your reasoning in a `reasoning` field\", and some requests now end in a refusal.\n\nHow would you audit and fix the prompt?",
+      "question_zh": "客服 Agent 的 system prompt 在两年里不断膨胀：“CRITICAL：你 MUST 使用订单工具”、“回答前一步一步地思考”、“NEVER 使用项目符号”、“每调用三次工具就总结一次进度”，还有许多没人记得是谁加的规则。迁移到 Claude Opus 5.5 之后，Agent 连打招呼都要调用工具，机械地遵循汇报进度的节奏，回答读起来也很生硬。还有一条规则要求它“在 `reasoning` 字段里解释你的推理”，现在有些请求以拒答结束。\n\n你会如何审查并修复这份提示？",
+      "answer": "**The core idea.** Prompts carry the workarounds of every model they were written for. Current models follow the system prompt closely, so shouting makes rules over-apply, and scaffolds that once helped now fight features the API provides directly. Audit the prompt like code: find each line's reason, keep real constraints, and remove or replace the rest, one change at a time with an eval.\n\n**What to look for.**\n\n- **Pressure language.** `CRITICAL`, `MUST`, `NEVER` and `ALWAYS` in capitals make current models over-trigger. Write \"Use the order tool when the merchant asks about an order\" instead, and keep emphasis only for one tested, underweighted rule.\n- **Scaffolds replaced by API features.** \"Think step by step\" is replaced by adaptive thinking and `effort`; on Claude Opus 5.5 thinking is always on and effort is the only thinking control. A required `reasoning` field asks the model to reproduce its reasoning, which may be declined as a refusal; read thinking blocks or ask for a short explanation instead.\n- **Output choreography.** Fixed progress cadences and anti-formatting rules were written against models that rambled or over-formatted. Remove them together and describe the audience instead, such as \"replies are scannable and answer only what was asked\".\n- **Fossils and prohibition clusters.** Rules tied to an old model or a forgotten incident are removed and re-tested. Prohibitions that encode business rules, such as refund limits or promises the company cannot make, stay, with their reason beside them.\n\n```go\nvar pressure = regexp.MustCompile(`\\b(MUST|NEVER|ALWAYS|CRITICAL|IMPORTANT)\\b|!!`)\n\n// pressureDensity counts shouting markers per 1,000 characters of prompt text,\n// a quick signal for which prompts to audit first.\nfunc pressureDensity(prompt string) float64 {\n\tif len(prompt) == 0 {\n\t\treturn 0\n\t}\n\tn := len(pressure.FindAllStringIndex(prompt, -1))\n\treturn float64(n) * 1000 / float64(len(prompt))\n}\n```\n\n**Process.** Inventory every prompt surface: system prompt, tool descriptions and reminder text in the harness. Classify each line as keep, rewrite or remove, citing its reason. Apply changes in small groups, run the eval each time, and treat each removal as a hypothesis to verify, not a conclusion. Rules that code can enforce, such as refund caps, move into the tools.\n\n**Trade-offs.** Cleaning a prompt can change behaviour merchants rely on, so ship it behind an eval and an A/B rollout. A shorter prompt also lowers token cost and adaptive-thinking spend on every request, which often pays for the audit by itself.",
+      "answer_zh": "**核心思路。** 提示里积累着为每一代模型准备的变通办法。当前的模型会严格遵循 system prompt，所以大喊大叫会让规则被过度执行，而曾经有用的辅助手段，现在反而会和 API 直接提供的功能相冲突。像审查代码一样审查提示：找出每一行存在的理由，保留真正的约束，删除或替换其余部分，每次只改一处，并用评测来验证。\n\n**要找什么。**\n\n- **施压式语言。** 大写的 `CRITICAL`、`MUST`、`NEVER` 和 `ALWAYS` 会让当前模型过度触发。改写为“当商家询问订单时使用订单工具”，只为某一条经过测试、确实被低估的规则保留强调。\n- **已被 API 功能取代的辅助手段。** “一步一步地思考”已被自适应思考和 `effort` 取代；在 Claude Opus 5.5 上思考始终开启，effort 是唯一的思考控制手段。要求填写 `reasoning` 字段相当于要求模型复述它的推理，可能会被以拒答的方式拒绝；改为读取思考块，或者请它给出一段简短的解释。\n- **输出编排。** 固定的进度汇报节奏和禁止格式化的规则，是针对啰嗦或过度格式化的模型写的。把它们一起删掉，转而描述读者，例如“回复要便于快速浏览，只回答被问到的内容”。\n- **历史遗留与成堆的禁令。** 与旧模型或某次已被遗忘的事故相关的规则，要删除后重新测试。体现业务规则的禁令，比如退款上限或公司无法兑现的承诺，要保留，并在旁边写明原因。\n\n```go\nvar pressure = regexp.MustCompile(`\\b(MUST|NEVER|ALWAYS|CRITICAL|IMPORTANT)\\b|!!`)\n\n// pressureDensity counts shouting markers per 1,000 characters of prompt text,\n// a quick signal for which prompts to audit first.\nfunc pressureDensity(prompt string) float64 {\n\tif len(prompt) == 0 {\n\t\treturn 0\n\t}\n\tn := len(pressure.FindAllStringIndex(prompt, -1))\n\treturn float64(n) * 1000 / float64(len(prompt))\n}\n```\n\n**流程。** 清点所有提示所在的地方：system prompt、工具描述，以及 harness 中的提醒文本。把每一行归类为保留、改写或删除，并注明理由。按小组应用修改，每次都运行评测，并把每一次删除都当作需要验证的假设，而不是结论。代码能够强制执行的规则，比如退款上限，要移到工具中去。\n\n**取舍。** 清理提示可能会改变商家所依赖的行为，所以要在评测和 A/B 灰度的保护下上线。更短的提示也会降低每个请求的 token 成本和自适应思考的开销，这部分节省往往就足以抵消这次审查的成本。",
+      "followups": [
+        "Why does shouting in a prompt make current models over-apply a rule?",
+        "Which prohibitions would you always keep, and why?"
+      ],
+      "followups_zh": [
+        "为什么在提示中大喊大叫会让当前模型过度执行某条规则？",
+        "你会始终保留哪些禁令？为什么？"
+      ],
+      "vocab": [
+        {
+          "en": "pressure language",
+          "zh": "施压式语言"
+        },
+        {
+          "en": "scaffold",
+          "zh": "辅助手段（脚手架）"
+        },
+        {
+          "en": "fossil",
+          "zh": "历史遗留"
+        },
+        {
+          "en": "prompt audit",
+          "zh": "提示审查"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261105-3",
+      "topic": "Context & Memory",
+      "difficulty": "Hard",
+      "title": "A merchant's Meta token ended up in the shared memory store, and two writers overwrite each other's notes",
+      "title_zh": "某个商家的 Meta token 被写进了共享的记忆存储，而且两个写入方互相覆盖对方的笔记",
+      "question": "Merchant-success agents on Claude Managed Agents share a memory store per merchant, mounted read-write, to keep notes across sessions. An audit finds that one session saved a Meta access token into `/mnt/memory/merchant-42/integrations.md`, and every later session for that merchant now sees it. Separately, a nightly job updates `preferences.md` through the API while agents also edit it, and changes keep disappearing.\n\nClean up the leak and redesign how memory is written.",
+      "question_zh": "Claude Managed Agents 上的商家成功 Agent 为每个商家共享一个以读写方式挂载的记忆存储，用来跨会话保存笔记。一次审计发现，有一个会话把一个 Meta 访问 token 保存进了 `/mnt/memory/merchant-42/integrations.md`，此后这个商家的每一个会话都能看到它。另外，一个夜间任务通过 API 更新 `preferences.md`，同时 Agent 也在编辑它，结果修改不断丢失。\n\n清理这次泄漏，并重新设计记忆的写入方式。",
+      "answer": "**The core idea.** A memory store is durable context that is replayed into future sessions, so whatever lands there spreads. Treat it like a shared database: control who writes, keep secrets out, use versions for audit and cleanup, and coordinate concurrent writers.\n\n**Mechanism.** A store is mounted at `/mnt/memory/<store-name>/` and the agent uses ordinary file tools on it. Every change, whether from the API or an agent writing to the mount, creates an immutable memory version that records the operation and who made it, such as a session or an API key. Each memory is a small text file of at most 100 KB.\n\n**Clean up the leak.**\n\n- **Rotate the token first**; assume it was exposed to every session that mounted the store.\n- **Delete the memory and redact its versions.** List versions for that memory, newest first, and redact each one that contains the token. Redaction clears the content and path but keeps the actor and timestamps, so the audit trail survives.\n- **Find the source.** Versions can be filtered by session, so you can see which session wrote it and fix the prompt or tool that put a token into the agent's context in the first place.\n\n**Prevent it.** Credentials belong in vault `environment_variable` credentials, which are substituted at egress and never visible in the sandbox, so the agent never sees the token at all. Mount stores the agent only reads as `read_only`. Scan new memory versions host-side for secret-like strings and quarantine matches.\n\n```go\n// secretLike matches strings that look like API keys or OAuth tokens.\nvar secretLike = regexp.MustCompile(`\\b(sk-[A-Za-z0-9_-]{16,}|EAA[A-Za-z0-9]{20,}|ya29\\.[A-Za-z0-9._-]{20,}|shpat_[A-Za-z0-9]{20,})\\b`)\n\n// flagMemory reports whether a memory's content should be quarantined for review.\nfunc flagMemory(content string) bool {\n\treturn secretLike.MatchString(content)\n}\n```\n\n**Fix the lost updates.** The nightly job does read, modify, write without checking whether the file changed in between. `memories.update` accepts a precondition of type `content_sha256`: send the hash you read, and on a mismatch the API returns 409 `memory_precondition_failed_error`, so the job re-reads and retries. Better still, give each writer its own file, for example `preferences.md` owned by the job and `agent-notes.md` owned by agents, so they never contend.\n\n**Trade-offs.** Read-only mounts and separate files reduce what agents can learn on their own, so decide deliberately which knowledge agents may write. Redaction is cleanup, not prevention: the token was already exposed, which is why rotation comes first and keeping secrets out of the context matters most.",
+      "answer_zh": "**核心思路。** 记忆存储是会被重放到未来会话中的持久化上下文，所以落到这里的任何东西都会扩散出去。要像对待共享数据库一样对待它：控制谁可以写入，把机密挡在外面，利用版本进行审计和清理，并协调并发的写入方。\n\n**机制。** 存储被挂载在 `/mnt/memory/<store-name>/`，Agent 使用普通的文件工具来操作它。每一次修改，无论来自 API 还是来自 Agent 对挂载目录的写入，都会生成一个不可变的记忆版本，记录操作类型以及由谁发起（比如某个会话或某个 API key）。每条记忆都是一个最大 100 KB 的小文本文件。\n\n**清理泄漏。**\n\n- **先轮换这个 token**；要假定它已经暴露给了挂载过这个存储的每一个会话。\n- **删除这条记忆，并对它的各个版本进行脱敏。** 列出这条记忆的版本（按从新到旧排序），对每一个包含该 token 的版本执行脱敏。脱敏会清除内容和路径，但保留操作者和时间戳，所以审计记录得以保留。\n- **找到源头。** 版本可以按会话过滤，所以你能看到是哪个会话写入的，并修复最初把 token 放进 Agent 上下文的那个提示或工具。\n\n**防止再次发生。** 凭证应该放在 vault 的 `environment_variable` 凭证中，它们在出口处被替换，在沙箱中永远不可见，这样 Agent 根本就看不到这个 token。对于 Agent 只需读取的存储，以 `read_only` 方式挂载。在主机端扫描新的记忆版本中是否有类似机密的字符串，并隔离匹配的内容。\n\n```go\n// secretLike matches strings that look like API keys or OAuth tokens.\nvar secretLike = regexp.MustCompile(`\\b(sk-[A-Za-z0-9_-]{16,}|EAA[A-Za-z0-9]{20,}|ya29\\.[A-Za-z0-9._-]{20,}|shpat_[A-Za-z0-9]{20,})\\b`)\n\n// flagMemory reports whether a memory's content should be quarantined for review.\nfunc flagMemory(content string) bool {\n\treturn secretLike.MatchString(content)\n}\n```\n\n**修复丢失的更新。** 夜间任务执行“读取、修改、写回”，却没有检查文件在这期间是否被改动过。`memories.update` 接受一个类型为 `content_sha256` 的前置条件：发送你读到时的哈希值，如果不匹配，API 会返回 409 `memory_precondition_failed_error`，于是任务重新读取并重试。更好的做法是让每个写入方拥有自己的文件，例如由任务负责的 `preferences.md` 和由 Agent 负责的 `agent-notes.md`，这样它们就永远不会争抢。\n\n**取舍。** 只读挂载和拆分文件会减少 Agent 能够自行学到的东西，所以要有意识地决定 Agent 可以写入哪些知识。脱敏是善后，而不是预防：token 已经暴露过了，这就是为什么要先轮换，也是为什么让机密远离上下文最为重要。",
+      "followups": [
+        "Why must the token be rotated even after redaction?",
+        "Which memory stores would you mount read-only, and why?"
+      ],
+      "followups_zh": [
+        "为什么即使做了脱敏，仍然必须轮换这个 token？",
+        "你会把哪些记忆存储以只读方式挂载？为什么？"
+      ],
+      "vocab": [
+        {
+          "en": "memory version",
+          "zh": "记忆版本"
+        },
+        {
+          "en": "redact",
+          "zh": "脱敏（抹除）"
+        },
+        {
+          "en": "precondition",
+          "zh": "前置条件"
+        },
+        {
+          "en": "lost update",
+          "zh": "丢失更新"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261105-4",
+      "topic": "Tools & MCP",
+      "difficulty": "Medium",
+      "title": "Reusing code-execution containers to save time: what leaks between merchants, and what it costs",
+      "title_zh": "复用代码执行容器以节省时间：商家之间会泄漏什么，又要花多少钱",
+      "question": "An \"analyze my sales\" feature uses the server-side code execution tool with uploaded merchant files. To make follow-up questions faster, an engineer caches the last `container_id` in a global variable and passes it on every request. Later, one merchant's chart shows another merchant's product names, a script fails trying to download a library from the internet, and finance asks about container charges on the bill.\n\nExplain each issue and design container use safely.",
+      "question_zh": "“分析我的销售数据”功能使用服务端代码执行工具，并配合商家上传的文件。为了让后续提问更快，一位工程师把最近一次的 `container_id` 缓存在一个全局变量中，并在每个请求中都传入它。后来，某个商家的图表里出现了另一个商家的商品名称，有一个脚本在尝试从互联网下载库时失败了，而财务也在问账单上的容器费用。\n\n解释每个问题，并设计安全的容器使用方式。",
+      "answer": "**The core idea.** A code-execution container is a small computer with state: files, installed packages and variables persist across requests that reuse it. Reuse is useful within one merchant's conversation and dangerous across merchants. Treat a container ID like a session that belongs to exactly one tenant.\n\n**Why each problem happened.**\n\n- **Cross-merchant data.** Containers persist for 30 days and keep state across requests that pass their `container_id`. A global variable shared the previous merchant's files with the next one.\n- **Failed downloads.** The sandbox has no internet access, so scripts must rely on the pre-installed libraries, which include pandas, numpy, matplotlib and openpyxl, and on files you upload.\n- **Charges.** Code execution is free when used with the web search or web fetch tools; otherwise it bills per container hour beyond a monthly free allowance per organization. Each container has modest resources: 1 CPU, 5 GiB of memory and 5 GiB of disk.\n\n**Design.**\n\n- **Key containers by merchant and conversation.** Store the `container_id` returned by the first response with the merchant and conversation it belongs to, reuse it only for that pair, and stop reusing it after an age limit you choose.\n- **Treat outputs as untrusted.** Generated files come back with file IDs; sanitize their names with a base-name function before writing them to disk, and serve them only to the owning merchant.\n- **Do not mix it with web tools by accident.** The newer web search and web fetch tools run code execution under the hood; declaring a separate `code_execution` tool alongside them creates a second environment that can confuse the model, so add it only when the feature needs its own analysis.\n\n```go\n// reusable returns a container for this merchant only: never one created for\n// another merchant, and never one older than maxAge.\nfunc reusable(byMerchant map[string]container, merchant string, maxAge time.Duration, now time.Time) (string, bool) {\n\tc, ok := byMerchant[merchant]\n\tif !ok || c.Merchant != merchant || now.Sub(c.Created) > maxAge {\n\t\treturn \"\", false\n\t}\n\treturn c.ID, true\n}\n```\n\n**Files in and out.** Upload each merchant's files once with the Files API and pass them to the tool with a `container_upload` block; generated files come back with file IDs that you download through the Files API. Delete uploaded and generated files when the retention period you promise merchants ends.\n\n**Trade-offs.** Reusing a container within a conversation saves setup time and keeps intermediate results, at the cost of state you must track and isolate. A fresh container per question is simplest and safest but repeats file loading and costs more container time. For sensitive merchants, prefer fresh containers and accept the extra seconds.",
+      "answer_zh": "**核心思路。** 代码执行容器是一台带有状态的小型计算机：文件、已安装的包和变量会在复用它的请求之间持续存在。在同一个商家的对话中复用很有用，但跨商家复用就很危险。要把容器 ID 当作只属于某一个租户的会话来对待。\n\n**每个问题为什么会发生。**\n\n- **跨商家的数据。** 容器会保留 30 天，并在传入其 `container_id` 的请求之间保持状态。一个全局变量把上一个商家的文件分享给了下一个商家。\n- **下载失败。** 沙箱没有互联网访问，所以脚本必须依赖预装的库（包括 pandas、numpy、matplotlib 和 openpyxl）以及你们上传的文件。\n- **费用。** 与网页搜索或网页抓取工具一起使用时，代码执行是免费的；否则，在每个组织每月的免费额度之外，按容器小时计费。每个容器的资源都比较有限：1 个 CPU、5 GiB 内存和 5 GiB 磁盘。\n\n**设计。**\n\n- **按商家和对话来管理容器。** 把第一次响应返回的 `container_id` 与它所属的商家和对话一起保存，只在这一组合中复用它，并在超过你设定的时间上限后停止复用。\n- **把输出当作不可信的。** 生成的文件会带着文件 ID 返回；在写入磁盘之前用取基本文件名的函数清理它们的名称，并且只把它们提供给所属的商家。\n- **不要无意中把它和网络工具混用。** 较新的网页搜索和网页抓取工具在内部会运行代码执行；在它们旁边再单独声明一个 `code_execution` 工具，会创建第二个执行环境，可能让模型感到困惑，所以只有当功能需要它自己的分析时才添加。\n\n```go\n// reusable returns a container for this merchant only: never one created for\n// another merchant, and never one older than maxAge.\nfunc reusable(byMerchant map[string]container, merchant string, maxAge time.Duration, now time.Time) (string, bool) {\n\tc, ok := byMerchant[merchant]\n\tif !ok || c.Merchant != merchant || now.Sub(c.Created) > maxAge {\n\t\treturn \"\", false\n\t}\n\treturn c.ID, true\n}\n```\n\n**文件的输入与输出。** 用 Files API 把每个商家的文件上传一次，并通过 `container_upload` 块把它们交给工具；生成的文件会带着文件 ID 返回，你可以通过 Files API 下载它们。当你们向商家承诺的保留期结束时，删除上传的文件和生成的文件。\n\n**取舍。** 在一段对话中复用容器可以节省准备时间并保留中间结果，代价是你必须跟踪和隔离这些状态。每个问题都用一个新容器最简单、最安全，但会重复加载文件，并消耗更多的容器时间。对于敏感的商家，优先使用新容器，接受多出来的几秒钟。",
+      "followups": [
+        "Why is a container ID effectively a tenant boundary?",
+        "How would you handle a merchant who needs a library that is not pre-installed?"
+      ],
+      "followups_zh": [
+        "为什么容器 ID 实际上就是一条租户边界？",
+        "如果某个商家需要一个没有预装的库，你会如何处理？"
+      ],
+      "vocab": [
+        {
+          "en": "container",
+          "zh": "容器"
+        },
+        {
+          "en": "tenant isolation",
+          "zh": "租户隔离"
+        },
+        {
+          "en": "sandbox",
+          "zh": "沙箱"
+        },
+        {
+          "en": "free allowance",
+          "zh": "免费额度"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261105-5",
+      "topic": "Multi-agent",
+      "difficulty": "Senior",
+      "title": "The team wants to rebuild the catalog agent as a lead plus five specialists: when does a team of agents actually pay off?",
+      "title_zh": "团队想把商品目录 Agent 重构为一个主导者加五个专家：多 Agent 团队究竟在什么时候才划算？",
+      "question": "The catalog agent fixes listing problems for one merchant at a time: it reads the feed errors, checks the products, and edits titles, attributes and images. The team proposes a lead agent on the strongest model that delegates to five specialist agents on a cheaper model: titles, attributes, images, policy and pricing. They expect it to be cheaper and better. You are asked to decide.\n\nHow do you decide, and what would you build?",
+      "question_zh": "商品目录 Agent 一次为一个商家修复商品信息问题：它读取 feed 报错、检查商品，然后编辑标题、属性和图片。团队提议用一个运行在最强模型上的主导 Agent，把工作委派给五个运行在更便宜模型上的专家 Agent：标题、属性、图片、政策和定价。他们期望这样既更便宜又更好。现在要你来做决定。\n\n你会如何做决定，又会构建什么？",
+      "answer": "**The core idea.** A team of agents buys parallelism and room for bulk work, and pays for it with planning, hand-offs and merging. It wins when there is a lot of independent work to hand off; when the work is one dependent chain that fits in one context, a single strong model, often at lower effort, usually comes out ahead.\n\n**What measurements show.** In Anthropic's published runs, an orchestrator that delegated bulk work to cheaper workers cost about half as much as the frontier model alone on work larger than any context window, for a somewhat lower score. On routine search work it paid off as insurance against expensive outliers but reversed on a harder full set. When the work was one dependent chain or fitted in one context, the coordinator's model alone at lower effort did better in every case measured.\n\n**Apply it to this agent.** Fixing one merchant's listing problems is mostly one chain: the title fix depends on the attributes, and the policy check depends on both. Five specialists would each need a briefing, since subagents see none of the coordinator's conversation, and the lead must merge their edits without conflicts. That is cost without a matching gain.\n\n**What to build instead.**\n\n- **First, measure the simple option.** Run the current agent on the strongest model at lower effort against the eval, and price it per completed merchant, not per request.\n- **Fan out where the work really is bulk.** The nightly run across thousands of merchants is independent work: run it as a dynamic workflow that gives each worker a batch of merchants, with a second look for high-risk changes.\n- **Use a specialist only for a different skill or permission.** For example, a read-only policy reviewer with its own narrow prompt and tools, consulted before risky edits, is a separation of concerns, not a cost trick.\n\n**Senior judgement.** Architecture changes like this are migrations: they move caches, permissions, failure modes and observability. Decide with an eval and cost per completed task on real traffic, including the tail of hard merchants, and start with the smallest structure that wins. Revisit when the workload changes, for example if merchants start asking for whole-catalog rewrites that exceed one context window.\n\n**Trade-offs.** A single agent is simpler to debug and keeps one cache and one context, but it cannot parallelize. A team scales to bulk work and allows separation of permissions, at the price of coordination overhead and more ways to fail. Most systems end up with both: one agent for interactive work, a workflow for bulk runs.",
+      "answer_zh": "**核心思路。** 多 Agent 团队换来的是并行能力和处理大批量工作的空间，代价是规划、交接和合并。当有大量相互独立的工作可以分出去时，它才会胜出；当工作是一条能放进一个上下文的、相互依赖的链条时，一个强模型（通常在较低的 effort 下）往往更胜一筹。\n\n**测量结果表明了什么。** 在 Anthropic 公开的运行结果中，一个把大批量工作委派给更便宜 worker 的编排者，在规模超过任何上下文窗口的工作上，成本大约只有单独使用前沿模型的一半，但得分略低。在常规的搜索类工作中，它作为防范昂贵离群任务的保险是值得的，但在更难的完整测试集上则适得其反。当工作是一条相互依赖的链条，或者能放进一个上下文时，在所有被测量的情况下，协调者所用的模型单独以较低的 effort 运行都表现得更好。\n\n**把它应用到这个 Agent 上。** 修复一个商家的商品信息问题，大体上是一条链条：标题的修复依赖于属性，而政策检查又同时依赖于这两者。五个专家每个都需要单独交代任务，因为子 Agent 看不到协调者的任何对话，而主导者还必须在不产生冲突的情况下合并它们的修改。这是付出了成本，却没有相应的收益。\n\n**应该构建什么。**\n\n- **首先，测量最简单的方案。** 在评测上用最强的模型、以较低的 effort 运行当前的 Agent，并按每个完成的商家而不是按每个请求来计算成本。\n- **只在真正是批量工作的地方做扇出。** 覆盖几千个商家的夜间运行是相互独立的工作：把它作为动态工作流来运行，给每个 worker 分配一批商家，并对高风险的修改进行第二次复核。\n- **只在需要不同技能或权限时才使用专家。** 例如，一个只读的政策审核者，拥有自己狭窄的提示和工具，在高风险修改之前被咨询，这是关注点分离，而不是省钱的花招。\n\n**资深工程师的判断。** 这样的架构变更其实就是迁移：它会改变缓存、权限、故障模式和可观测性。要根据评测以及真实流量上每个完成任务的成本来决定，包括那些难处理商家组成的长尾，并从能够胜出的最小结构开始。当工作负载发生变化时再重新评估，例如当商家开始要求重写整个商品目录、超出一个上下文窗口的时候。\n\n**取舍。** 单个 Agent 更容易调试，只有一个缓存和一个上下文，但无法并行。一个团队能够扩展到批量工作，并允许权限分离，代价是协调开销以及更多的失败方式。大多数系统最终会两者兼有：交互式工作用一个 Agent，批量运行用一个工作流。",
+      "followups": [
+        "Why do subagents need a full briefing, and what does that cost?",
+        "What eval result would convince you to adopt the team design?",
+        "Where else in an e-commerce platform would a team of agents clearly pay off?"
+      ],
+      "followups_zh": [
+        "为什么子 Agent 需要完整的任务交代？这会带来什么成本？",
+        "什么样的评测结果能说服你采用团队设计？",
+        "在电商平台的其他哪些地方，多 Agent 团队会明显划算？"
+      ],
+      "vocab": [
+        {
+          "en": "orchestrator",
+          "zh": "编排者"
+        },
+        {
+          "en": "hand-off",
+          "zh": "交接"
+        },
+        {
+          "en": "dependent chain",
+          "zh": "相互依赖的链条"
+        },
+        {
+          "en": "separation of concerns",
+          "zh": "关注点分离"
+        },
+        {
+          "en": "Start with the smallest structure that wins.",
+          "zh": "从能够胜出的最小结构开始。"
+        }
+      ]
+    }
+  ]
+}

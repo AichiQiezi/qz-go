@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 28 个模块、124 道题。
+共 29 个模块、129 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -383,3 +383,17 @@ Five new agent questions: why message threads rule out compaction and mid-thread
 | 3 | Multi-agent | Medium | [A helper agent's budget change waits forever for approval, while another is silently denied](modules/daily-2026-11-04.md#q3) | 一个助手 Agent 的预算修改永远在等待审批，而另一个则被悄无声息地拒绝了 |
 | 4 | Evals & Observability | Medium | [The nightly dashboard marks agent sessions "completed" that actually failed, ran out of budget, or were waiting for approval](modules/daily-2026-11-04.md#q4) | 夜间看板把一些 Agent 会话标记为“已完成”，而它们实际上是失败了、用完了预算，或者在等待审批 |
 | 5 | RAG | Hard | [Answering compliance questions from 900-page supplier PDFs with page-accurate citations](modules/daily-2026-11-04.md#q5) | 根据 900 页的供应商 PDF 回答合规问题，并给出精确到页码的引用 |
+
+## [Daily set · Nov 5 · 每日新题 · 11 月 5 日](modules/daily-2026-11-05.md)
+
+Five new agent questions: replacing leaked API keys with workload identity federation, auditing a prompt written for older models, cleaning a secret out of a shared memory store and fixing lost updates, reusing code-execution containers safely across merchants, and deciding when a team of agents beats a single agent.
+
+> 五道新的 Agent 题：用工作负载身份联合替换泄漏的 API key、审查一份为旧模型编写的提示、从共享记忆存储中清理机密并修复丢失的更新、在商家之间安全地复用代码执行容器，以及判断多 Agent 团队何时优于单个 Agent。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Safety & Security | Hard | [An API key leaked from a CI log: replacing long-lived keys with workload identity federation](modules/daily-2026-11-05.md#q1) | 一个 API key 从 CI 日志中泄漏了：用工作负载身份联合替换长期有效的 key |
+| 2 | Agent Loop | Medium | [After the model upgrade, the support agent calls tools for everything and its answers feel rigid: auditing a prompt written for older models](modules/daily-2026-11-05.md#q2) | 模型升级之后，客服 Agent 什么都要调用工具，回答也显得生硬：审查一份为旧模型编写的提示 |
+| 3 | Context & Memory | Hard | [A merchant's Meta token ended up in the shared memory store, and two writers overwrite each other's notes](modules/daily-2026-11-05.md#q3) | 某个商家的 Meta token 被写进了共享的记忆存储，而且两个写入方互相覆盖对方的笔记 |
+| 4 | Tools & MCP | Medium | [Reusing code-execution containers to save time: what leaks between merchants, and what it costs](modules/daily-2026-11-05.md#q4) | 复用代码执行容器以节省时间：商家之间会泄漏什么，又要花多少钱 |
+| 5 | Multi-agent | Senior | [The team wants to rebuild the catalog agent as a lead plus five specialists: when does a team of agents actually pay off?](modules/daily-2026-11-05.md#q5) | 团队想把商品目录 Agent 重构为一个主导者加五个专家：多 Agent 团队究竟在什么时候才划算？ |
