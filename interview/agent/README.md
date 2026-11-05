@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 29 个模块、129 道题。
+共 30 个模块、134 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -397,3 +397,17 @@ Five new agent questions: replacing leaked API keys with workload identity feder
 | 3 | Context & Memory | Hard | [A merchant's Meta token ended up in the shared memory store, and two writers overwrite each other's notes](modules/daily-2026-11-05.md#q3) | 某个商家的 Meta token 被写进了共享的记忆存储，而且两个写入方互相覆盖对方的笔记 |
 | 4 | Tools & MCP | Medium | [Reusing code-execution containers to save time: what leaks between merchants, and what it costs](modules/daily-2026-11-05.md#q4) | 复用代码执行容器以节省时间：商家之间会泄漏什么，又要花多少钱 |
 | 5 | Multi-agent | Senior | [The team wants to rebuild the catalog agent as a lead plus five specialists: when does a team of agents actually pay off?](modules/daily-2026-11-05.md#q5) | 团队想把商品目录 Agent 重构为一个主导者加五个专家：多 Agent 团队究竟在什么时候才划算？ |
+
+## [Daily set · Nov 6 · 每日新题 · 11 月 6 日](modules/daily-2026-11-06.md)
+
+Five new agent questions: making a Managed Agents chat client reliable across reconnects and idle races, catching scheduled runs that fail without failing sessions, cutting web-page noise with dynamic filtering, observing a self-hosted sandbox's queue and tools, and the security review of a self-hosted deployment.
+
+> 五道新的 Agent 题：让 Managed Agents 聊天客户端在重连和空闲竞态下保持可靠、发现那些不会让会话失败的定时运行失败、用动态过滤减少网页噪音、观测自托管沙箱的队列和工具，以及对自托管部署进行安全评审。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Agent Loop | Hard | [The merchant chat on Managed Agents loses replies after a network blip, shows messages as "sending" forever, and fails to archive finished sessions](modules/daily-2026-11-06.md#q1) | 基于 Managed Agents 的商家聊天在网络抖动后丢失回复、消息一直显示“发送中”，而且无法归档已结束的会话 |
+| 2 | Production | Hard | [The nightly feed audit did not run for three nights, and nothing alerted](modules/daily-2026-11-06.md#q2) | 夜间 feed 审计连续三晚没有运行，却没有任何告警 |
+| 3 | RAG | Medium | [The competitor-price agent fetches 40 product pages per run, and the context fills with menus and cookie banners](modules/daily-2026-11-06.md#q3) | 竞品价格 Agent 每次运行要抓取 40 个商品页面，上下文被导航菜单和 cookie 横幅塞满 |
+| 4 | Evals & Observability | Medium | [Sessions on the self-hosted sandbox sit in a queue, and traces show nothing about tool calls](modules/daily-2026-11-06.md#q4) | 自托管沙箱上的会话一直在队列中等待，而追踪中看不到任何工具调用的信息 |
+| 5 | Safety & Security | Senior | [Security review of a self-hosted agent sandbox: what Anthropic still sees, and what you now own](modules/daily-2026-11-06.md#q5) | 自托管 Agent 沙箱的安全评审：Anthropic 仍然能看到什么，而你们现在要负责什么 |
