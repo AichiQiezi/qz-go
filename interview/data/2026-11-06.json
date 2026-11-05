@@ -1,0 +1,199 @@
+{
+  "date": "2026-11-06",
+  "generatedAt": "2026-11-06T06:45:46+08:00",
+  "questions": [
+    {
+      "id": "20261106-1",
+      "topic": "Go",
+      "difficulty": "Hard",
+      "title": "A config cache guarded by sync.RWMutex: one slow reader and a waiting writer freeze every request",
+      "title_zh": "用 sync.RWMutex 保护的配置缓存：一个慢读者加一个等待中的写者，让所有请求都卡住",
+      "question": "A Go gateway keeps each merchant's ad-platform settings in a map protected by a `sync.RWMutex`. Request handlers take `RLock` to read settings. One code path, building a report, holds `RLock` while it calls the Meta API, which sometimes takes seconds. A background job takes `Lock` every minute to refresh the map. During Meta slowdowns, p99 latency for all requests jumps to several seconds, even for merchants that never touch Meta. The team assumed readers never block each other.\n\nExplain the mechanism and fix it.",
+      "question_zh": "一个 Go 网关把每个商家的广告平台设置保存在一个由 `sync.RWMutex` 保护的 map 中。请求处理函数通过 `RLock` 读取设置。有一条生成报表的代码路径在持有 `RLock` 的同时调用 Meta API，而这个调用有时要花好几秒。一个后台任务每分钟获取一次 `Lock` 来刷新这个 map。在 Meta 变慢期间，所有请求的 p99 延迟都跳到了好几秒，即使是那些从不涉及 Meta 的商家也一样。团队原以为读者之间永远不会互相阻塞。\n\n解释其中的机制并修复它。",
+      "answer": "**Why readers block readers.** `sync.RWMutex` prevents writer starvation: once a goroutine is waiting in `Lock`, new calls to `RLock` block until that writer has acquired and released the lock. So a slow reader holds the lock, the refresh job waits behind it, and every new reader waits behind the writer. In a local test, a reader holding `RLock` for 300 ms plus a waiting writer made an ordinary new reader wait about 280 ms; with no writer waiting, the same reader got the lock immediately.\n\n**The real bug: I/O under a lock.** The lock was meant to protect a map lookup that takes microseconds, but the report path turned it into a network call of seconds. Any lock held across I/O makes the slowest external dependency the latency of everyone who shares the lock.\n\n**Fix.** Copy what you need under the lock, release it, then do the slow work. For read-mostly configuration, swap an immutable snapshot atomically, so readers take no lock at all.\n\n```go\ntype settings map[string]MerchantSettings\n\nvar current atomic.Pointer[settings]\n\n// Get never blocks: it reads whichever snapshot is current.\nfunc Get(merchantID string) (MerchantSettings, bool) {\n\ts, ok := (*current.Load())[merchantID]\n\treturn s, ok\n}\n\n// Refresh builds a new map and swaps it in; old snapshots are never modified.\nfunc Refresh(fresh settings) { current.Store(&fresh) }\n```\n\n- **Never mutate a published snapshot.** Readers may still hold the old map; build a new one for every refresh.\n- **Find lock holders that do I/O.** Mutex and block profiles in `pprof` show where goroutines wait; enable them in staging and look for locks held across network calls.\n- **Add timeouts to the slow call** regardless, so one dependency cannot hold resources for seconds.\n\n**Trade-offs.** Copy-on-write snapshots make reads free but cost a full copy on every refresh, which is fine for configuration and wrong for data that changes on every request. A plain `Mutex` with tiny critical sections is often as fast as `RWMutex` and easier to reason about; reach for `RWMutex` only when profiling shows reader contention.",
+      "answer_zh": "**为什么读者会阻塞读者。** `sync.RWMutex` 会防止写者饥饿：一旦有 goroutine 在 `Lock` 中等待，新的 `RLock` 调用就会阻塞，直到这个写者获取并释放了锁。于是，一个慢读者持有锁，刷新任务排在它后面等待，而每一个新来的读者又排在写者后面等待。在本地测试中，一个持有 `RLock` 300 ms 的读者加上一个等待中的写者，让一个普通的新读者等了大约 280 ms；没有写者等待时，同样的读者立刻就拿到了锁。\n\n**真正的 bug：在持有锁时做 I/O。** 这把锁本来是为了保护一次只需几微秒的 map 查找，但报表路径把它变成了一次耗时数秒的网络调用。任何跨越 I/O 持有的锁，都会让最慢的外部依赖变成所有共享这把锁的调用方的延迟。\n\n**修复方法。** 在锁内复制你需要的数据，释放锁，然后再去做耗时的工作。对于读多写少的配置，原子地替换一个不可变的快照，这样读者就完全不需要加锁。\n\n```go\ntype settings map[string]MerchantSettings\n\nvar current atomic.Pointer[settings]\n\n// Get never blocks: it reads whichever snapshot is current.\nfunc Get(merchantID string) (MerchantSettings, bool) {\n\ts, ok := (*current.Load())[merchantID]\n\treturn s, ok\n}\n\n// Refresh builds a new map and swaps it in; old snapshots are never modified.\nfunc Refresh(fresh settings) { current.Store(&fresh) }\n```\n\n- **绝不修改已发布的快照。** 读者可能还持有旧的 map；每次刷新都要构建一个新的。\n- **找出持有锁时做 I/O 的地方。** `pprof` 中的 mutex 和 block 分析能显示 goroutine 在哪里等待；在预发环境中开启它们，查找跨越网络调用持有的锁。\n- **无论如何都要给慢调用加上超时**，这样某一个依赖就无法占用资源好几秒。\n\n**取舍。** 写时复制的快照让读取没有任何开销，但每次刷新都要完整复制一次，这对于配置来说没问题，但不适用于每个请求都会变化的数据。临界区很小的普通 `Mutex` 往往和 `RWMutex` 一样快，也更容易理解；只有当性能分析显示读者之间存在争用时，才去使用 `RWMutex`。",
+      "followups": [
+        "Why does a waiting writer block new readers?",
+        "When is copy-on-write the wrong choice?"
+      ],
+      "followups_zh": [
+        "为什么一个等待中的写者会阻塞新的读者？",
+        "什么情况下写时复制是错误的选择？"
+      ],
+      "vocab": [
+        {
+          "en": "writer starvation",
+          "zh": "写者饥饿"
+        },
+        {
+          "en": "critical section",
+          "zh": "临界区"
+        },
+        {
+          "en": "copy-on-write",
+          "zh": "写时复制"
+        },
+        {
+          "en": "snapshot",
+          "zh": "快照"
+        }
+      ]
+    },
+    {
+      "id": "20261106-2",
+      "topic": "System Design",
+      "difficulty": "Hard",
+      "title": "Designing an ad click-tracking redirect service: fast redirects, bot filtering and correct attribution",
+      "title_zh": "设计广告点击跟踪重定向服务：快速重定向、过滤机器人流量以及正确归因",
+      "question": "Merchants' ads on Meta, Google and TikTok link to your tracking URL, which records the click and redirects the shopper to the product page. Peak traffic is tens of thousands of clicks per second during sales. Merchants complain that slow redirects lose shoppers, that click counts are inflated by bots, and that conversions are sometimes attributed to the wrong campaign. Design the service.",
+      "question_zh": "商家在 Meta、Google 和 TikTok 上的广告链接到你们的跟踪 URL，它会记录这次点击，然后把顾客重定向到商品页面。在大促期间，高峰流量可达每秒数万次点击。商家抱怨重定向太慢导致顾客流失、点击数被机器人刷高，以及转化有时被归因到了错误的广告活动。请设计这个服务。",
+      "answer": "**The core idea.** The redirect is on the shopper's critical path and must be nearly instant; everything else, such as counting, enrichment, bot detection and attribution, happens after the redirect, from an event log. Separate the fast path from the analysis path.\n\n**Fast path.**\n\n- **Resolve from memory.** The link ID maps to a destination, merchant and campaign. Keep that mapping in a local cache on each redirect server, filled from a durable store and invalidated on change, so a redirect needs no database call.\n- **Write the click asynchronously.** Generate a click ID, append the event to a local buffer or a log such as Kafka without waiting on downstream systems, and return the redirect with the click ID in a first-party cookie or URL parameter.\n- **Deploy close to shoppers** at the edge or in several regions, and fail open: if the event log is unavailable, still redirect and buffer locally.\n\n**Analysis path.** Consumers deduplicate repeated clicks, score bots using user agent, IP reputation, timing patterns and missing JavaScript signals, and store clean and raw counts separately so merchants can see both. Attribution joins conversions to clicks by click ID within each merchant's attribution window, with a defined rule, such as last eligible click, and versioned so recalculations are reproducible.\n\n**Correctness details.** Click IDs must be unique and unguessable, so they cannot be forged to steal attribution. Destination URLs are validated against the merchant's domains to prevent the service from becoming an open redirect. Platform click IDs such as Google's or Meta's are preserved and passed through, because server-side conversion reporting depends on them.\n\n**Trade-offs.** Asynchronous counting means dashboards lag by seconds and a crash can lose a small buffer, which is acceptable for clicks but must be monitored. Aggressive bot filtering removes real clicks, so keep raw data and make filters adjustable. Edge deployment improves latency but complicates cache invalidation when a merchant changes a link's destination.",
+      "answer_zh": "**核心思路。** 重定向处在顾客的关键路径上，必须几乎瞬间完成；其他一切，比如计数、数据补全、机器人识别和归因，都在重定向之后基于事件日志来完成。把快速路径和分析路径分开。\n\n**快速路径。**\n\n- **从内存中解析。** 链接 ID 对应一个目标地址、商家和广告活动。在每台重定向服务器上把这个映射保存在本地缓存中，从持久化存储加载，并在变更时失效，这样一次重定向就不需要访问数据库。\n- **异步写入点击。** 生成一个点击 ID，把事件追加到本地缓冲区或 Kafka 这样的日志中，不等待下游系统，然后返回重定向，并把点击 ID 放进第一方 cookie 或 URL 参数中。\n- **部署在离顾客近的地方**，例如边缘节点或多个地区，并且故障时放行：即使事件日志不可用，仍然完成重定向，并在本地缓冲。\n\n**分析路径。** 消费者对重复点击去重，利用 user agent、IP 信誉、时间模式以及缺失的 JavaScript 信号为机器人打分，并分别保存过滤后和原始的计数，让商家两者都能看到。归因在每个商家的归因窗口内按点击 ID 把转化和点击关联起来，采用明确定义的规则（例如最后一次有效点击），并对规则做版本管理，使重新计算可以复现。\n\n**正确性细节。** 点击 ID 必须唯一且不可猜测，这样才不能被伪造来窃取归因。目标 URL 要按商家的域名进行校验，防止这个服务变成开放重定向。Google 或 Meta 等平台自己的点击 ID 要保留并透传，因为服务端转化回传依赖于它们。\n\n**取舍。** 异步计数意味着看板会延迟几秒，一次崩溃可能丢失一小块缓冲区，这对点击来说可以接受，但必须加以监控。过于激进的机器人过滤会去掉真实的点击，所以要保留原始数据，并让过滤规则可以调整。边缘部署能改善延迟，但当商家修改某个链接的目标地址时，会让缓存失效变得更复杂。",
+      "followups": [
+        "How would you invalidate cached link destinations across regions?",
+        "What makes an open redirect dangerous here?",
+        "How would you show merchants both raw and filtered clicks without confusing them?"
+      ],
+      "followups_zh": [
+        "你会如何在多个地区之间让缓存的链接目标地址失效？",
+        "在这里，开放重定向为什么危险？",
+        "你会如何同时向商家展示原始点击和过滤后的点击，又不让他们感到困惑？"
+      ],
+      "vocab": [
+        {
+          "en": "redirect",
+          "zh": "重定向"
+        },
+        {
+          "en": "attribution window",
+          "zh": "归因窗口"
+        },
+        {
+          "en": "open redirect",
+          "zh": "开放重定向"
+        },
+        {
+          "en": "fail open",
+          "zh": "故障时放行"
+        }
+      ]
+    },
+    {
+      "id": "20261106-3",
+      "topic": "Database",
+      "difficulty": "Senior",
+      "title": "An abandoned CDC replication slot fills the primary's disk overnight",
+      "title_zh": "一个被遗弃的 CDC 复制槽，一夜之间写满了主库的磁盘",
+      "question": "Product changes flow from PostgreSQL to the search index through logical replication: a CDC connector reads from a replication slot. The search team paused the connector for a migration and forgot about it. Two days later the primary's disk filled up and writes stopped. The WAL directory was hundreds of gigabytes, and nothing in the usual dashboards had warned anyone.\n\nExplain what happened, how to recover, and how to design CDC so it cannot take down the primary.",
+      "question_zh": "商品变更通过逻辑复制从 PostgreSQL 流向搜索索引：一个 CDC 连接器从一个复制槽读取数据。搜索团队为了一次迁移暂停了这个连接器，然后就忘了它。两天后，主库的磁盘被写满，写入停止了。WAL 目录有好几百 GB，而常规的看板没有任何告警。\n\n解释发生了什么、如何恢复，以及如何设计 CDC，使它无法拖垮主库。",
+      "answer": "**What happened.** A replication slot guarantees that the server keeps every WAL segment the consumer has not yet confirmed, so the consumer can resume without losing changes. A paused consumer never confirms, so WAL is never recycled. In a local PostgreSQL 16 test with an inactive logical slot, the slot retained about 328 MB of WAL after a few large inserts, growing with every write. `max_slot_wal_keep_size` defaults to `-1`, unlimited, so by default the slot can hold WAL until the disk is full.\n\n**Recovery.** Free space first: if the consumer cannot resume soon, drop the slot with `pg_drop_replication_slot`, which releases the retained WAL at the next checkpoint. In the test, WAL fell from 560 MB to 64 MB after dropping the slot. Then rebuild the consumer from a fresh snapshot, because the changes in between are gone for that slot.\n\n**Design so it cannot happen again.**\n\n- **Cap retention.** Set `max_slot_wal_keep_size` to what the disk can afford. In the test with a 64 MB cap, the slot's `wal_status` became `lost`, and reading from it failed with \"This slot has been invalidated because it exceeded the maximum reserved size\". The primary survives; the consumer must resnapshot.\n- **Monitor every slot.** Alert on retained WAL per slot, computed with `pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)` from `pg_replication_slots`, on inactive slots, and on `wal_status` moving away from `reserved`.\n- **Ownership and process.** Every slot has an owning team and a runbook; pausing a connector means either a time limit or dropping the slot and resnapshotting later.\n- **Make resnapshotting cheap.** A consumer that can rebuild the search index from a snapshot plus the change stream turns a lost slot into an inconvenience, not an incident.\n\n```sql\nSELECT slot_name, active, wal_status,\n       pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) AS retained\nFROM pg_replication_slots;\n```\n\n**Trade-offs.** A cap protects the primary at the cost of sometimes invalidating a slot that a consumer still needed, forcing a full resync. Without a cap, consumers never lose data but any stalled consumer can take down every writer. For a search index that can be rebuilt, protecting the primary is the right priority.",
+      "answer_zh": "**发生了什么。** 复制槽会保证服务器保留消费者尚未确认的每一个 WAL 段，这样消费者就可以在不丢失变更的情况下恢复。暂停的消费者永远不会确认，所以 WAL 永远不会被回收。在本地 PostgreSQL 16 上用一个不活跃的逻辑复制槽做的测试中，几次大批量插入之后，这个槽保留了大约 328 MB 的 WAL，并且随每次写入而增长。`max_slot_wal_keep_size` 默认是 `-1`，即不限制，所以默认情况下这个槽可以一直保留 WAL，直到磁盘被写满。\n\n**恢复。** 先释放空间：如果消费者无法很快恢复，就用 `pg_drop_replication_slot` 删除这个槽，被保留的 WAL 会在下一次检查点时释放。在测试中，删除槽之后 WAL 从 560 MB 降到了 64 MB。然后从一个新的快照重建消费者，因为对这个槽来说，中间的那些变更已经没有了。\n\n**设计成不会再次发生。**\n\n- **限制保留量。** 把 `max_slot_wal_keep_size` 设置为磁盘可以承受的大小。在上限为 64 MB 的测试中，这个槽的 `wal_status` 变成了 `lost`，从它读取时报错 “This slot has been invalidated because it exceeded the maximum reserved size”。主库保住了；消费者则必须重新做快照。\n- **监控每一个槽。** 基于 `pg_replication_slots`，用 `pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)` 计算每个槽保留的 WAL，并对其设置告警；同样对不活跃的槽，以及 `wal_status` 离开 `reserved` 状态的情况设置告警。\n- **归属与流程。** 每个槽都有一个负责的团队和一份操作手册；暂停连接器意味着要么设定时间上限，要么删除这个槽，之后再重新做快照。\n- **让重新做快照的成本变低。** 一个能够通过快照加变更流重建搜索索引的消费者，会把丢失复制槽变成一件麻烦事，而不是一次事故。\n\n```sql\nSELECT slot_name, active, wal_status,\n       pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) AS retained\nFROM pg_replication_slots;\n```\n\n**取舍。** 设置上限能保护主库，代价是有时会让一个消费者仍然需要的槽失效，从而强制进行一次完整的重新同步。不设上限时，消费者永远不会丢数据，但任何一个停滞的消费者都可能拖垮所有的写入。对于一个可以重建的搜索索引来说，保护主库才是正确的优先级。",
+      "followups": [
+        "Why does a replication slot keep WAL even when the consumer is gone?",
+        "How would you size `max_slot_wal_keep_size`?",
+        "How would you rebuild the search index after a slot is lost?"
+      ],
+      "followups_zh": [
+        "为什么即使消费者已经不在了，复制槽仍然会保留 WAL？",
+        "你会如何设定 `max_slot_wal_keep_size` 的大小？",
+        "复制槽丢失之后，你会如何重建搜索索引？"
+      ],
+      "vocab": [
+        {
+          "en": "replication slot",
+          "zh": "复制槽"
+        },
+        {
+          "en": "write-ahead log (WAL)",
+          "zh": "预写日志（WAL）"
+        },
+        {
+          "en": "change data capture",
+          "zh": "变更数据捕获"
+        },
+        {
+          "en": "resnapshot",
+          "zh": "重新做快照"
+        },
+        {
+          "en": "runbook",
+          "zh": "操作手册"
+        }
+      ]
+    },
+    {
+      "id": "20261106-4",
+      "topic": "Middleware",
+      "difficulty": "Medium",
+      "title": "A Redis MULTI block half-applied a stock reservation: transactions without rollback",
+      "title_zh": "一个 Redis MULTI 块只执行了一半的库存预留：没有回滚的事务",
+      "question": "Checkout reserves stock in Redis with `MULTI`, then `DECRBY stock:<sku> 2`, `INCR hold:<order>` and `SET reserved:<order> ...`, then `EXEC`. A bug stored `hold:<order>` as a string like `\"pending\"`. Stock went down and the reservation was recorded, but the counter step failed, and the developer is surprised that Redis did not roll the whole transaction back.\n\nExplain Redis transaction semantics and how to make the reservation safe.",
+      "question_zh": "结账流程在 Redis 中用 `MULTI` 预留库存，接着执行 `DECRBY stock:<sku> 2`、`INCR hold:<order>` 和 `SET reserved:<order> ...`，然后 `EXEC`。由于一个 bug，`hold:<order>` 被存成了 `\"pending\"` 这样的字符串。库存减少了，预留也被记录了，但计数那一步失败了，开发者很惊讶 Redis 没有回滚整个事务。\n\n解释 Redis 事务的语义，以及如何让库存预留变得安全。",
+      "answer": "**Semantics.** `MULTI`/`EXEC` guarantees that the queued commands run one after another without other clients' commands in between. It does not roll back. A command that fails at run time, such as `INCR` on a non-integer, returns an error while the others still apply. In a local Redis 7 test, stock went from 10 to 8 and `reserved:order9` was set even though `INCR` failed. Only errors detected while queuing, such as a wrong number of arguments, abort the whole transaction with `EXECABORT`; in the test nothing was applied in that case.\n\n**Lua does not roll back either.** A script runs atomically with respect to other clients, but if it fails partway, the writes before the failure stay. In the test, a script that decremented stock and then failed on the same bad key still left the stock decremented.\n\n**Make it safe.** Validate everything first, then write, inside one script, and check business conditions, not just types.\n\n```lua\n-- KEYS[1]=stock key, KEYS[2]=reservation key; ARGV[1]=qty, ARGV[2]=value\nif redis.call('EXISTS', KEYS[2]) == 1 then return -1 end -- already reserved\nlocal stock = tonumber(redis.call('GET', KEYS[1]))\nif stock == nil or stock < tonumber(ARGV[1]) then return 0 end\nredis.call('DECRBY', KEYS[1], ARGV[1])\nredis.call('SET', KEYS[2], ARGV[2], 'EX', 900)\nreturn 1\n```\n\n- **Idempotency.** The reservation key doubles as a guard, so a retried checkout cannot reserve twice.\n- **Expiry.** Reservations expire if checkout is abandoned; a sweeper returns expired holds to stock, or stock is computed as available minus active holds.\n- **Same cluster slot.** In Redis Cluster all keys in one script must hash to the same slot; use a hash tag such as `{sku}`.\n\n**Trade-offs.** Redis gives speed and atomic sequencing, not durable transactional guarantees, so the database must remain the source of truth for orders and stock, with Redis as a fast reservation layer that is reconciled. Long scripts block every other client, so keep them short.",
+      "answer_zh": "**语义。** `MULTI`/`EXEC` 保证排队的命令依次执行，中间不会插入其他客户端的命令。它不会回滚。在运行时失败的命令，比如对非整数执行 `INCR`，会返回一个错误，而其他命令仍然会生效。在 Redis 7 上的本地测试中，尽管 `INCR` 失败了，库存仍从 10 变成了 8，`reserved:order9` 也被设置了。只有在排队阶段就能发现的错误，比如参数个数不对，才会以 `EXECABORT` 中止整个事务；在测试中，这种情况下什么都没有被执行。\n\n**Lua 同样不会回滚。** 脚本相对于其他客户端是原子执行的，但如果它中途失败，失败之前的写入仍然会保留。在测试中，一个先减库存、然后在同一个有问题的 key 上失败的脚本，仍然让库存被减掉了。\n\n**让它变得安全。** 在同一个脚本中，先校验所有内容，再进行写入，并且检查业务条件，而不仅仅是类型。\n\n```lua\n-- KEYS[1]=stock key, KEYS[2]=reservation key; ARGV[1]=qty, ARGV[2]=value\nif redis.call('EXISTS', KEYS[2]) == 1 then return -1 end -- already reserved\nlocal stock = tonumber(redis.call('GET', KEYS[1]))\nif stock == nil or stock < tonumber(ARGV[1]) then return 0 end\nredis.call('DECRBY', KEYS[1], ARGV[1])\nredis.call('SET', KEYS[2], ARGV[2], 'EX', 900)\nreturn 1\n```\n\n- **幂等性。** 预留 key 同时充当保护，这样一次重试的结账就不会预留两次。\n- **过期。** 如果结账被放弃，预留就会过期；由一个清理任务把过期的预留归还到库存中，或者把库存计算为可用数量减去仍然有效的预留。\n- **同一个集群槽。** 在 Redis Cluster 中，一个脚本里的所有 key 必须哈希到同一个槽；使用像 `{sku}` 这样的哈希标签。\n\n**取舍。** Redis 提供的是速度和原子的顺序执行，而不是持久化的事务保证，所以数据库必须仍然是订单和库存的事实来源，而 Redis 只作为一个会被定期核对的快速预留层。较长的脚本会阻塞所有其他客户端，所以要让它们保持简短。",
+      "followups": [
+        "Which errors abort a MULTI transaction and which do not?",
+        "How would you reconcile Redis reservations with the database?"
+      ],
+      "followups_zh": [
+        "哪些错误会中止 MULTI 事务，哪些不会？",
+        "你会如何让 Redis 中的预留与数据库保持一致？"
+      ],
+      "vocab": [
+        {
+          "en": "atomic",
+          "zh": "原子的"
+        },
+        {
+          "en": "rollback",
+          "zh": "回滚"
+        },
+        {
+          "en": "reservation",
+          "zh": "预留"
+        },
+        {
+          "en": "hash tag",
+          "zh": "哈希标签"
+        }
+      ]
+    },
+    {
+      "id": "20261106-5",
+      "topic": "Java & CS",
+      "difficulty": "Medium",
+      "title": "Routing merchants to shards with Math.abs(hashCode()) % n crashes for one key, and the fix moves data",
+      "title_zh": "用 Math.abs(hashCode()) % n 把商家路由到分片，某个 key 会导致崩溃，而修复它又会让数据搬家",
+      "question": "A Java service picks a cache shard with `shards[Math.abs(merchantKey.hashCode()) % shards.length]`. It worked for years, then one new merchant's requests started failing with `ArrayIndexOutOfBoundsException: Index -8 out of bounds for length 10`. A teammate changes the formula to `Math.floorMod(...)`, and right after deploying, the cache hit rate drops sharply.\n\nExplain both effects and how to fix sharding safely.",
+      "question_zh": "一个 Java 服务用 `shards[Math.abs(merchantKey.hashCode()) % shards.length]` 来选择缓存分片。它正常运行了好几年，然后某个新商家的请求开始以 `ArrayIndexOutOfBoundsException: Index -8 out of bounds for length 10` 失败。一位同事把公式改成了 `Math.floorMod(...)`，而部署之后，缓存命中率立刻大幅下降。\n\n解释这两种现象，以及如何安全地修复分片逻辑。",
+      "answer": "**The crash.** `hashCode()` can be `Integer.MIN_VALUE`, and `Math.abs(Integer.MIN_VALUE)` is still `Integer.MIN_VALUE`, because its positive value does not fit in an `int`. In a local test on Java 21, the string `\"polygenelubricants\"` hashes to exactly `Integer.MIN_VALUE`; `Math.abs` returned it unchanged, `% 10` gave -8, and the array access threw. `Math.absExact` throws an `ArithmeticException` instead, which at least makes the problem loud.\n\n**Correct formulas.** `Math.floorMod(h, n)` always returns a value from 0 to n - 1; in the test it returned 2 for that key. Masking the sign bit, `(h & 0x7fffffff) % n`, is also safe and returned 0. Plain `h % n` is negative for every negative hash, which in the test was most of 100,000 generated keys.\n\n**Why the hit rate dropped.** The formulas map negative hashes to different shards: in the test, `abs` and `floorMod` disagreed for 72,000 of the 90,000 negative hashes, so deploying the fix silently moved a large share of keys to new shards, where the cache was empty. Changing a routing function is a data migration, not a bug fix.\n\n```java\n// keeps the old mapping for every key that never crashed, fixes only MIN_VALUE\nstatic int shardFor(String key, int n) {\n    int h = key.hashCode();\n    return h == Integer.MIN_VALUE ? 0 : Math.abs(h) % n;\n}\n```\n\n- **Fix without moving data** as above for an existing deployment, or plan a migration window if you change the formula.\n- **For new systems, use a stable hash and consistent hashing.** `String.hashCode` is weak for distribution; a stable hash like MurmurHash plus consistent hashing or rendezvous hashing moves only a small fraction of keys when shards are added.\n- **Test edge values.** Include `Integer.MIN_VALUE` hashes and negative hashes in routing tests.\n\n**Trade-offs.** Keeping a quirky formula for compatibility is ugly but avoids a cache stampede or data move; document it. Consistent hashing costs a little complexity and is worth it as soon as shard counts can change.",
+      "answer_zh": "**崩溃。** `hashCode()` 可能等于 `Integer.MIN_VALUE`，而 `Math.abs(Integer.MIN_VALUE)` 仍然是 `Integer.MIN_VALUE`，因为它对应的正数放不进一个 `int`。在 Java 21 上的本地测试中，字符串 `\"polygenelubricants\"` 的哈希值恰好是 `Integer.MIN_VALUE`；`Math.abs` 原样返回了它，`% 10` 得到 -8，于是数组访问抛出了异常。`Math.absExact` 则会抛出 `ArithmeticException`，至少能让问题暴露得更明显。\n\n**正确的公式。** `Math.floorMod(h, n)` 总是返回 0 到 n - 1 之间的值；在测试中，对这个 key 它返回了 2。屏蔽符号位的 `(h & 0x7fffffff) % n` 同样是安全的，返回了 0。直接用 `h % n` 时，所有负的哈希值都会得到负数，而在测试中，100,000 个生成的 key 里大部分都是负的哈希值。\n\n**为什么命中率下降了。** 不同的公式会把负的哈希值映射到不同的分片：在测试中，90,000 个负的哈希值里有 72,000 个在 `abs` 和 `floorMod` 下结果不同，所以部署这个修复，悄悄地把很大一部分 key 挪到了新的分片上，而那些分片里的缓存是空的。修改路由函数是一次数据迁移，而不是一次 bug 修复。\n\n```java\n// keeps the old mapping for every key that never crashed, fixes only MIN_VALUE\nstatic int shardFor(String key, int n) {\n    int h = key.hashCode();\n    return h == Integer.MIN_VALUE ? 0 : Math.abs(h) % n;\n}\n```\n\n- **对于已有的部署，像上面这样在不搬动数据的前提下修复**；如果要更换公式，就规划一个迁移窗口。\n- **对于新系统，使用稳定的哈希和一致性哈希。** `String.hashCode` 的分布性较差；像 MurmurHash 这样的稳定哈希，加上一致性哈希或 rendezvous 哈希，在增加分片时只会移动一小部分 key。\n- **测试边界值。** 在路由测试中加入哈希值为 `Integer.MIN_VALUE` 的情况以及负的哈希值。\n\n**取舍。** 为了兼容而保留一个有怪癖的公式虽然不好看，但能避免缓存击穿或数据搬迁；要把它写进文档。一致性哈希会带来一点复杂度，但一旦分片数量可能变化，它就是值得的。",
+      "followups": [
+        "Why does Math.abs return a negative number for one int value?",
+        "How would you change the shard count without moving most keys?"
+      ],
+      "followups_zh": [
+        "为什么 Math.abs 对某一个 int 值会返回负数？",
+        "你会如何在不移动大部分 key 的前提下修改分片数量？"
+      ],
+      "vocab": [
+        {
+          "en": "two's complement",
+          "zh": "补码"
+        },
+        {
+          "en": "consistent hashing",
+          "zh": "一致性哈希"
+        },
+        {
+          "en": "routing function",
+          "zh": "路由函数"
+        },
+        {
+          "en": "cache stampede",
+          "zh": "缓存击穿"
+        }
+      ]
+    }
+  ]
+}

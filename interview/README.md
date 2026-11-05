@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 25 天、125 道题。
+共 26 天、130 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-06](days/2026-11-06.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Hard | [A config cache guarded by sync.RWMutex: one slow reader and a waiting writer freeze every request](days/2026-11-06.md#q1) | 用 sync.RWMutex 保护的配置缓存：一个慢读者加一个等待中的写者，让所有请求都卡住 |
+| 2 | System Design | Hard | [Designing an ad click-tracking redirect service: fast redirects, bot filtering and correct attribution](days/2026-11-06.md#q2) | 设计广告点击跟踪重定向服务：快速重定向、过滤机器人流量以及正确归因 |
+| 3 | Database | Senior | [An abandoned CDC replication slot fills the primary's disk overnight](days/2026-11-06.md#q3) | 一个被遗弃的 CDC 复制槽，一夜之间写满了主库的磁盘 |
+| 4 | Middleware | Medium | [A Redis MULTI block half-applied a stock reservation: transactions without rollback](days/2026-11-06.md#q4) | 一个 Redis MULTI 块只执行了一半的库存预留：没有回滚的事务 |
+| 5 | Java & CS | Medium | [Routing merchants to shards with Math.abs(hashCode()) % n crashes for one key, and the fix moves data](days/2026-11-06.md#q5) | 用 Math.abs(hashCode()) % n 把商家路由到分片，某个 key 会导致崩溃，而修复它又会让数据搬家 |
 
 ## [2026-11-05](days/2026-11-05.md)
 
