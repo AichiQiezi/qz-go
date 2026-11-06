@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 26 天、130 道题。
+共 27 天、135 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-07](days/2026-11-07.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Medium | [An exchange-rate loader wrapped in sync.Once fails once at startup, and the service never recovers](days/2026-11-07.md#q1) | 用 sync.Once 包装的汇率加载器在启动时失败了一次，服务就再也恢复不了 |
+| 2 | System Design | Medium | [Ad-spend reports that keep changing for days: importing restated numbers from Meta, Google and TikTok](days/2026-11-07.md#q2) | 过了好几天还在变的广告花费报表：从 Meta、Google 和 TikTok 导入会被修正的数据 |
+| 3 | Database | Senior | [Moving tenant isolation into Postgres row-level security: the owner sees every row, and pooled connections leak the tenant](days/2026-11-07.md#q3) | 把租户隔离移到 Postgres 行级安全中：表的所有者能看到所有行，连接池中的连接还会泄漏租户 |
+| 4 | Middleware | Hard | [A delayed-job queue on a Redis sorted set runs jobs twice under load and loses them when a worker crashes](days/2026-11-07.md#q4) | 基于 Redis 有序集合的延迟任务队列：高负载时任务执行两次，worker 崩溃时任务丢失 |
+| 5 | Java & CS | Hard | [Truncating product titles to an ad platform's limit turns emoji into '?' and some feeds are rejected](days/2026-11-07.md#q5) | 按广告平台的长度限制截断商品标题，表情符号变成了 '?'，部分 feed 还被拒绝 |
 
 ## [2026-11-06](days/2026-11-06.md)
 
