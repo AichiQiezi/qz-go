@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 30 个模块、134 道题。
+共 31 个模块、139 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -411,3 +411,17 @@ Five new agent questions: making a Managed Agents chat client reliable across re
 | 3 | RAG | Medium | [The competitor-price agent fetches 40 product pages per run, and the context fills with menus and cookie banners](modules/daily-2026-11-06.md#q3) | 竞品价格 Agent 每次运行要抓取 40 个商品页面，上下文被导航菜单和 cookie 横幅塞满 |
 | 4 | Evals & Observability | Medium | [Sessions on the self-hosted sandbox sit in a queue, and traces show nothing about tool calls](modules/daily-2026-11-06.md#q4) | 自托管沙箱上的会话一直在队列中等待，而追踪中看不到任何工具调用的信息 |
 | 5 | Safety & Security | Senior | [Security review of a self-hosted agent sandbox: what Anthropic still sees, and what you now own](modules/daily-2026-11-06.md#q5) | 自托管 Agent 沙箱的安全评审：Anthropic 仍然能看到什么，而你们现在要负责什么 |
+
+## [Daily set · Nov 7 · 每日新题 · 11 月 7 日](modules/daily-2026-11-07.md)
+
+Five new agent questions: starting read-only tools while a response is still streaming, using the Anthropic-defined bash and text editor tools safely, clearing old tool results without breaking the cache or preserved thinking, gating a subagent fan-out so the cache is read, and a content-provenance policy for AI-generated ad creatives.
+
+> 五道新的 Agent 题：在响应仍在流式输出时提前启动只读工具、安全地使用 Anthropic 定义的 bash 和文本编辑器工具、在不破坏缓存和 preserved thinking 的前提下清理旧的工具结果、给子 Agent 扇出加上闸门以便读到缓存，以及为 AI 生成的广告素材制定内容来源政策。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Agent Loop | Hard | [Starting tools before the model finishes its turn: which calls may run early, and what to throw away when the response ends in max_tokens or refusal](modules/daily-2026-11-07.md#q1) | 在模型说完之前就开始执行工具：哪些调用可以提前跑，以及响应以 max_tokens 或 refusal 结束时要丢弃什么 |
+| 2 | Tools & MCP | Medium | [The feed-debugging agent got a hand-written tool named "bash": using the Anthropic-defined bash and text editor tools, and what your handler must do](modules/daily-2026-11-07.md#q2) | 给 feed 排查 Agent 手写了一个名为 "bash" 的工具：改用 Anthropic 定义的 bash 和文本编辑器工具，以及处理函数必须做些什么 |
+| 3 | Context & Memory | Medium | [Trimming old tool results by hand breaks the cache, and after a model upgrade requests fail with "bound to a different conversation"](modules/daily-2026-11-07.md#q3) | 手动裁剪旧的工具结果破坏了缓存，升级模型后请求还报错 "bound to a different conversation" |
+| 4 | Multi-agent | Hard | [Twenty subagents start at the same moment with the same 30K-token brief, and none of them reads the cache](modules/daily-2026-11-07.md#q4) | 二十个子 Agent 在同一时刻启动，带着同一份 3 万 token 的说明，却没有一个读到缓存 |
+| 5 | Safety & Security | Senior | [AI-generated ad creatives: what content provenance marks, why downloaded image checksums changed, and what you can promise merchants](modules/daily-2026-11-07.md#q5) | AI 生成的广告素材：内容来源标记了什么，为什么下载的图片校验和变了，以及可以向商家承诺什么 |
