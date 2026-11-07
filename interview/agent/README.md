@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 31 个模块、139 道题。
+共 32 个模块、144 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -425,3 +425,17 @@ Five new agent questions: starting read-only tools while a response is still str
 | 3 | Context & Memory | Medium | [Trimming old tool results by hand breaks the cache, and after a model upgrade requests fail with "bound to a different conversation"](modules/daily-2026-11-07.md#q3) | 手动裁剪旧的工具结果破坏了缓存，升级模型后请求还报错 "bound to a different conversation" |
 | 4 | Multi-agent | Hard | [Twenty subagents start at the same moment with the same 30K-token brief, and none of them reads the cache](modules/daily-2026-11-07.md#q4) | 二十个子 Agent 在同一时刻启动，带着同一份 3 万 token 的说明，却没有一个读到缓存 |
 | 5 | Safety & Security | Senior | [AI-generated ad creatives: what content provenance marks, why downloaded image checksums changed, and what you can promise merchants](modules/daily-2026-11-07.md#q5) | AI 生成的广告素材：内容来源标记了什么，为什么下载的图片校验和变了，以及可以向商家承诺什么 |
+
+## [Daily set · Nov 8 · 每日新题 · 11 月 8 日](modules/daily-2026-11-08.md)
+
+Five new agent questions: localizing web search for a merchant's market, silent Admin API field changes after an SDK upgrade, fitting campaign tools to strict tool use, grading an agent by end state instead of its transcript, and configuring a team of agents so cheap workers do the reading.
+
+> 五道新的 Agent 题：按商家所在市场让网页搜索本地化、SDK 升级后 Admin API 悄然变化的字段、让广告系列工具适配严格工具调用、按最终状态而不是对话记录来评判 Agent，以及配置 Agent 团队让廉价的 worker 承担阅读工作。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | RAG | Medium | [A German merchant's market-research agent compares prices from US retailers: localizing web search and choosing its sources](modules/daily-2026-11-08.md#q1) | 德国商家的市场调研 Agent 拿美国零售商的价格做比较：让网页搜索本地化，并选择它的信息来源 |
+| 2 | Production | Medium | [After an SDK upgrade, the cost dashboard shows every API key as "all workspaces" and the rate-limit page goes blank, with no errors](modules/daily-2026-11-08.md#q2) | SDK 升级之后，成本看板把所有 API key 都显示为「所有工作区」，限流页面一片空白，却没有任何报错 |
+| 3 | Tools & MCP | Hard | [Turning on strict tool use for the campaign tools: budget limits, title lengths and a nested category tree do not fit the schema rules](modules/daily-2026-11-08.md#q3) | 为广告系列工具开启 strict 工具调用：预算上下限、标题长度和嵌套的类目树都不符合 schema 规则 |
+| 4 | Evals & Observability | Hard | [The catalog-fix agent scores 95%, but the judge reads the transcript, the answer key sits in the sandbox, and an empty answer passes](modules/daily-2026-11-08.md#q4) | 商品目录修复 Agent 拿到 95 分，但评审读的是对话记录，答案就放在沙箱里，而且空答案也能通过 |
+| 5 | Multi-agent | Senior | [The audit team was meant to run on cheap workers, but the bill shows almost everything on the coordinator's model, and EU sessions fail to start](modules/daily-2026-11-08.md#q5) | 审核团队本应由廉价的 worker 完成工作，但账单显示几乎全部跑在协调者的模型上，而欧盟的会话还无法启动 |
