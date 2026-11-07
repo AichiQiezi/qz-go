@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 27 天、135 道题。
+共 28 天、140 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-08](days/2026-11-08.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Hard | [Webhook bodies sometimes contain another merchant's order after adding a sync.Pool for buffers](days/2026-11-08.md#q1) | 为缓冲区加上 sync.Pool 之后，webhook 请求体里偶尔出现另一个商家的订单 |
+| 2 | System Design | Medium | [Custom domains for 100,000 storefronts: verifying ownership, issuing TLS certificates and renewing them on time](days/2026-11-08.md#q2) | 为 10 万个店铺提供自定义域名：验证所有权、签发 TLS 证书并按时续期 |
+| 3 | Database | Medium | [Removing a churned store takes minutes and stalls that store's order writes: ON DELETE CASCADE without an index](days/2026-11-08.md#q3) | 删除一个已流失的店铺要好几分钟，期间该店铺的订单写入都被卡住：没有索引的 ON DELETE CASCADE |
+| 4 | Middleware | Hard | [A Redis idempotency key says a conversion was already sent, until a failover makes Meta receive it twice](days/2026-11-08.md#q4) | Redis 幂等键表明一次转化已经发送过，直到一次故障转移让 Meta 收到了两次 |
+| 5 | Java & CS | Senior | [A Java service with -Xmx2g is OOMKilled at 3 GB: finding the memory outside the heap](days/2026-11-08.md#q5) | 一个设置了 -Xmx2g 的 Java 服务在 3 GB 时被 OOMKilled：找出堆之外的内存 |
 
 ## [2026-11-07](days/2026-11-07.md)
 
