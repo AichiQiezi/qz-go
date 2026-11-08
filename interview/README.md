@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 28 天、140 道题。
+共 29 天、145 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-09](days/2026-11-09.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Medium | [Calls to an ad platform start failing with 401 after the platform moves its API to a new host behind a redirect](days/2026-11-09.md#q1) | 广告平台把 API 迁到一个新主机并加上重定向之后，调用开始返回 401 |
+| 2 | System Design | Hard | [Merchants want custom reports over two years of orders and ad spend: designing analytics that never touch the OLTP database](days/2026-11-09.md#q2) | 商家想基于两年的订单和广告花费自定义报表：设计一套完全不碰 OLTP 数据库的分析系统 |
+| 3 | Database | Medium | [Two accounts for the same email, and login lookups scan the whole table: case-insensitive emails in Postgres](days/2026-11-09.md#q3) | 同一个邮箱出现了两个账户，登录查询还在扫全表：Postgres 中不区分大小写的邮箱 |
+| 4 | Middleware | Hard | [A Redis cleanup job stops after the first empty SCAN page and leaves most expired sessions behind](days/2026-11-09.md#q4) | Redis 清理任务在 SCAN 第一次返回空页后就停了，留下了大部分过期会话 |
+| 5 | Java & CS | Senior | [A Bloom filter deduplicates conversion events, and some real purchases are silently dropped](days/2026-11-09.md#q5) | 用布隆过滤器给转化事件去重，结果有些真实的购买被悄悄丢掉了 |
 
 ## [2026-11-08](days/2026-11-08.md)
 
