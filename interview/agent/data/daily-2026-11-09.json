@@ -1,0 +1,213 @@
+{
+  "id": "daily-2026-11-09",
+  "order": 20261109,
+  "kind": "daily",
+  "title": "Daily set · Nov 9",
+  "title_zh": "每日新题 · 11 月 9 日",
+  "summary": "Five new agent questions: a low-effort agent that stops early and skips verification, getting an assistant to search only when facts may have changed, migrating off a retiring model, why mid-task user input inside tool results gets ignored, and routing between models without losing reasoning or cache.",
+  "summary_zh": "五道新的 Agent 题：低 effort 的 Agent 提前停止并跳过验证、让助手只在事实可能变化时才去搜索、从即将退役的模型迁移出来、为什么放进工具结果里的任务中途用户输入会被忽略，以及在不丢失推理和缓存的前提下在模型之间路由。",
+  "generatedAt": "2026-11-09T06:55:42+08:00",
+  "questions": [
+    {
+      "id": "agent-daily-20261109-1",
+      "topic": "Agent Loop",
+      "difficulty": "Medium",
+      "title": "The feed-fix agent on low effort hands the task back halfway and reports fixes as done without running the validator",
+      "title_zh": "低 effort 下的 feed 修复 Agent 做到一半就把任务交回，还在没运行校验器的情况下报告已修复",
+      "question": "To cut cost, the team moved a feed-fixing agent to Claude Haiku 5.5 at `low` effort. Its system prompt is long: tool rules, merchant policies, examples. Two complaints follow. Some runs stop after fixing a few items and ask the merchant \"Shall I continue?\", although the task said to fix the whole feed. And the agent sometimes says \"all errors fixed\" without calling the `validate_feed` tool, so broken feeds reach Google Merchant Center.\n\nExplain the behavior and how you would fix it without simply raising effort everywhere.",
+      "question_zh": "为了降低成本，团队把一个修复 feed 的 Agent 迁到了 `low` effort 的 Claude Haiku 5.5 上。它的系统提示很长：工具规则、商家政策、示例。随之而来的是两类投诉。有些运行只修了几个商品就停下来问商家「要继续吗？」，尽管任务明确要求修复整个 feed。而且 Agent 有时没有调用 `validate_feed` 工具就宣称「所有错误都已修复」，于是有问题的 feed 被提交到了 Google Merchant Center。\n\n解释这种行为，并说明在不一律提高 effort 的前提下，你会如何修复。",
+      "answer": "**The core idea.** Effort controls how much work the model puts into a turn. At low effort, with a long prompt competing for attention, it may end early or skip a check it considers optional. Tell it plainly when to stop and what counts as done, and make verification something the loop can see.\n\n**What the docs observed.** The migration guide notes that with a short system prompt the model rarely stops before the work is done, but with a long agent system prompt at `low` effort it sometimes stops early and hands the task back. Separately, at `low` and `medium` effort it sometimes reports a change as done without running a check.\n\n**Fix 1: say when to stop.** The guide suggests adding this text, and reports that raising effort also reduces early stops, at a higher cost: without the text, moving from `low` to `medium` roughly halved early stopping and more than doubled output tokens per attempt.\n\n```text\nKeep working until everything the user asked for is done, and only stop to ask\nwhen you can't go on without the user or before a risky step. When the work the\nuser asked for is done and checked, stop and report.\n```\n\n**Fix 2: make verification real.** Prompt for it, as the guide suggests for low-effort agents, and also enforce it in the loop, because a prompt can be skipped and the loop cannot.\n\n```go\n// Called when the model ends its turn without asking for more tools.\nfunc acceptFinal(run *Run) (done bool, followUp string) {\n\tif run.ChangedItems > 0 && !run.ValidatedAfterLastChange {\n\t\treturn false, \"You changed items after the last validate_feed call. \" +\n\t\t\t\"Run validate_feed now and report its result before finishing.\"\n\t}\n\tif run.RemainingErrors > 0 && !run.AskedForInput {\n\t\treturn false, fmt.Sprintf(\"%d items still have errors. Continue fixing them.\",\n\t\t\trun.RemainingErrors)\n\t}\n\treturn true, \"\"\n}\n```\n\n- **Shorten the prompt.** Move examples and rarely used policies into tool descriptions or retrieved documents; a shorter prompt helps on its own.\n- **Send the follow-up as a new user turn,** appended after the model's reply, so the history stays append-only and the model treats it as an instruction.\n- **Measure per completed feed,** not per request: count early stops, unverified finishes and tokens per feed before and after the change.\n\n**Trade-offs.** The prompt text and the loop check cost little and keep low effort viable; raising effort fixes more cases at a clear token cost, which may still be cheaper than a larger model. Per-message effort lets you raise it only for the final verification turn if needed. Do not overcorrect with \"never stop\" rules: the agent should still pause before risky steps, such as deleting products.",
+      "answer_zh": "**核心思想。** effort 控制模型在一轮中投入多少工作量。在低 effort 下，再加上一个冗长的提示分散注意力，它可能会提前结束，或者跳过一个它认为可有可无的检查。要明确告诉它什么时候停、什么才算完成，并且让验证成为循环能够看到的东西。\n\n**文档观察到的现象。** 迁移指南指出，系统提示很短时，模型很少在工作完成前停下；但在 `low` effort 下配合冗长的 Agent 系统提示，它有时会提前停止并把任务交回。另外，在 `low` 和 `medium` effort 下，它有时会在没有运行检查的情况下就报告改动已完成。\n\n**修复 1：说明何时停止。** 指南建议加入下面这段文字，并指出提高 effort 也能减少提前停止，但成本更高：在不加这段文字的情况下，从 `low` 提到 `medium` 大约让提前停止减少一半，而每次尝试的输出 token 增加到两倍多。\n\n```text\nKeep working until everything the user asked for is done, and only stop to ask\nwhen you can't go on without the user or before a risky step. When the work the\nuser asked for is done and checked, stop and report.\n```\n\n**修复 2：让验证成为真正的步骤。** 一方面像指南对低 effort Agent 所建议的那样在提示中要求验证，另一方面也要在循环中强制执行，因为提示可能被跳过，而循环不会。\n\n```go\n// Called when the model ends its turn without asking for more tools.\nfunc acceptFinal(run *Run) (done bool, followUp string) {\n\tif run.ChangedItems > 0 && !run.ValidatedAfterLastChange {\n\t\treturn false, \"You changed items after the last validate_feed call. \" +\n\t\t\t\"Run validate_feed now and report its result before finishing.\"\n\t}\n\tif run.RemainingErrors > 0 && !run.AskedForInput {\n\t\treturn false, fmt.Sprintf(\"%d items still have errors. Continue fixing them.\",\n\t\t\trun.RemainingErrors)\n\t}\n\treturn true, \"\"\n}\n```\n\n- **缩短提示。** 把示例和很少用到的政策移到工具描述或检索文档中；更短的提示本身就有帮助。\n- **把后续要求作为一个新的用户轮次发送**，追加在模型回复之后，这样历史记录保持只追加，模型也会把它当作一条指令。\n- **按完成的 feed 来衡量**，而不是按请求：在改动前后统计提前停止的次数、未经验证就结束的次数，以及每个 feed 消耗的 token。\n\n**取舍。** 提示文字和循环检查成本很低，能让低 effort 方案继续可行；提高 effort 能修复更多情况，但 token 成本明显增加，不过可能仍比换用更大的模型便宜。如有需要，可以用按消息设置的 effort，只在最后的验证轮次提高它。不要矫枉过正地写「永远不要停」这类规则：Agent 在执行删除商品之类的高风险步骤之前，仍然应该暂停。",
+      "followups": [
+        "Why is a loop check more reliable than a prompt instruction for verification?",
+        "How would you decide whether to raise effort or improve the prompt first?"
+      ],
+      "followups_zh": [
+        "为什么在验证这件事上，循环检查比提示指令更可靠？",
+        "你会如何决定是先提高 effort，还是先改进提示？"
+      ],
+      "vocab": [
+        {
+          "en": "effort",
+          "zh": "投入程度"
+        },
+        {
+          "en": "early stopping",
+          "zh": "提前停止"
+        },
+        {
+          "en": "verification",
+          "zh": "验证"
+        },
+        {
+          "en": "follow-up turn",
+          "zh": "后续轮次"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261109-2",
+      "topic": "RAG",
+      "difficulty": "Medium",
+      "title": "The ad-policy assistant has web search, yet answers \"what is Meta's current policy\" from memory",
+      "title_zh": "广告政策助手明明有网页搜索，却凭记忆回答「Meta 现行政策是什么」",
+      "question": "A support assistant helps merchants with ad-platform rules. It has the `web_search` tool, but logs show it often answers questions such as \"Can I advertise CBD products on Meta now?\" or \"What is TikTok's current minimum daily budget?\" without searching, sometimes with rules that have since changed. When the team added \"Always search for any factual question\" to the prompt, it started searching for greetings and simple arithmetic, and costs rose.\n\nHow would you get the assistant to search when it matters, and only then?",
+      "question_zh": "一个支持助手帮助商家处理广告平台的规则问题。它拥有 `web_search` 工具，但日志显示，它经常在不搜索的情况下回答诸如「现在可以在 Meta 上投放 CBD 产品广告吗？」或「TikTok 当前的最低日预算是多少？」这样的问题，有时给出的规则已经变了。团队在提示中加上「任何事实性问题都必须搜索」之后，它开始连打招呼和简单算术都去搜索，成本随之上升。\n\n你会如何让这个助手在需要时去搜索，而且只在需要时搜索？",
+      "answer": "**The core idea.** The model does not know what day it is or how old its knowledge is, so it cannot tell that a remembered rule may be stale. Give it the date, tell it which kinds of facts change, and let it decide; blanket rules make it search for everything.\n\n**Give today's date.** The migration guide recommends stating the current date in the system prompt or the search tool's description when the model has a search tool; in Anthropic's testing this grounded answers in recent search results.\n\n**Say which facts to search for.** The guide suggests a short paragraph right after the date. In testing it raised the search rate on questions whose answers had changed and rarely added a search where none was needed. A blanket instruction to search every present-day factual question made the model search on about half of the prompts that needed no search, without improving correct answers, which matches what the team saw.\n\n```go\nfunc systemPrompt(base string, now time.Time) string {\n\treturn base + \"\\n\\nThe current date is \" + now.Format(\"January 2, 2006\") + \". \" +\n\t\t\"Your training data ends well before today's date. Records, office holders, \" +\n\t\t\"prices, versions, rules and anything \\\"latest\\\" may have changed since then, \" +\n\t\t\"so search for those before you answer, even when you feel sure. Facts that \" +\n\t\t\"can't change need no search. When the answer depends on where the user is, \" +\n\t\t\"put the user's country or region in the search query.\"\n}\n```\n\n- **Put the date after the cached prefix.** A date in the system prompt changes daily; place it where a daily change does not invalidate the large cached part, or accept one cache write per day.\n- **Include the merchant's market.** Ad rules differ by country; the paragraph already asks for the region in the query, so pass the merchant's country into the conversation.\n- **Prefer primary sources.** Restrict or rank the platforms' own policy pages and help centers, and ask for the source and date with each answer.\n\n**Measure it.** Build a small eval with two groups: questions whose answers changed recently, where a search is required, and questions that need no search. Track the search rate and correctness for each group, because the goal is a high rate on the first and a low rate on the second.\n\n**Trade-offs.** More searching costs latency and tool fees, and search results can be wrong or injected, so the assistant should cite sources rather than trust them blindly. The guide notes that with a short prompt at `medium` effort the date alone was enough, so start minimal and add the paragraph if the eval shows missed searches.",
+      "answer_zh": "**核心思想。** 模型不知道今天是哪一天，也不知道自己的知识有多旧，所以它无法判断记住的某条规则是否已经过时。告诉它日期，告诉它哪些类型的事实会变化，然后让它自己判断；一刀切的规则会让它什么都去搜索。\n\n**告诉它今天的日期。** 迁移指南建议，当模型拥有搜索工具时，在系统提示或搜索工具的描述中写明当前日期；在 Anthropic 的测试中，这让回答更多地基于最新的搜索结果。\n\n**说明哪些事实需要搜索。** 指南建议在日期之后紧跟一小段说明。在测试中，它提高了答案已发生变化的问题上的搜索率，并且很少在不需要的地方增加搜索。而一条要求对所有现时事实问题都进行搜索的笼统指令，让模型在大约一半根本不需要搜索的提示上也去搜索，却没有提高正确答案的比例，这与团队看到的情况一致。\n\n```go\nfunc systemPrompt(base string, now time.Time) string {\n\treturn base + \"\\n\\nThe current date is \" + now.Format(\"January 2, 2006\") + \". \" +\n\t\t\"Your training data ends well before today's date. Records, office holders, \" +\n\t\t\"prices, versions, rules and anything \\\"latest\\\" may have changed since then, \" +\n\t\t\"so search for those before you answer, even when you feel sure. Facts that \" +\n\t\t\"can't change need no search. When the answer depends on where the user is, \" +\n\t\t\"put the user's country or region in the search query.\"\n}\n```\n\n- **把日期放在缓存前缀之后。** 系统提示中的日期每天都会变化；把它放在每天的变化不会让大块缓存内容失效的位置，或者接受每天一次的缓存写入。\n- **带上商家所在的市场。** 广告规则因国家而异；这段文字已经要求在查询中加入地区，所以要把商家所在的国家传入对话。\n- **优先使用一手来源。** 限定或优先采用各平台自己的政策页面和帮助中心，并要求每个答案都注明来源和日期。\n\n**衡量效果。** 构建一个包含两组问题的小型评测：一组是答案最近发生过变化、必须搜索的问题，另一组是不需要搜索的问题。分别跟踪每组的搜索率和正确率，因为目标是在第一组上搜索率高、在第二组上搜索率低。\n\n**取舍。** 更多的搜索意味着更高的延迟和工具费用，而且搜索结果可能是错的或被注入了内容，所以助手应该引用来源，而不是盲目相信它们。指南指出，在 `medium` effort 下配合简短的提示，仅提供日期就已足够，所以从最简方案开始，如果评测显示漏掉了应有的搜索，再加上这段说明。",
+      "followups": [
+        "Why does a blanket \"always search\" rule not improve accuracy?",
+        "Where would you put the date so the prompt cache still works?"
+      ],
+      "followups_zh": [
+        "为什么一条笼统的「总是搜索」规则并不能提高准确率？",
+        "你会把日期放在哪里，才能让提示缓存仍然有效？"
+      ],
+      "vocab": [
+        {
+          "en": "knowledge cutoff",
+          "zh": "知识截止日期"
+        },
+        {
+          "en": "search rate",
+          "zh": "搜索率"
+        },
+        {
+          "en": "primary source",
+          "zh": "一手来源"
+        },
+        {
+          "en": "stale answer",
+          "zh": "过时的答案"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261109-3",
+      "topic": "Production",
+      "difficulty": "Hard",
+      "title": "Claude Sonnet 4.5 retires on November 30: migrating the product-description pipeline without breaking it",
+      "title_zh": "Claude Sonnet 4.5 将于 11 月 30 日退役：在不搞坏流程的前提下迁移商品描述生成流水线",
+      "question": "A product-description pipeline has run on Claude Sonnet 4.5 for a year. It sends `thinking: {type: \"enabled\", budget_tokens: 4000}`, `temperature: 0.7`, an assistant prefill of `{` to force JSON, and `tool_choice: {type: \"tool\", name: \"save_description\"}`. The model's listing shows it as deprecated, retiring on November 30, 2026, and you have three weeks.\n\nPlan the migration: target, request changes, and how you ship it safely.",
+      "question_zh": "一条商品描述生成流水线已经在 Claude Sonnet 4.5 上运行了一年。它发送 `thinking: {type: \"enabled\", budget_tokens: 4000}`、`temperature: 0.7`、一个以 `{` 开头来强制输出 JSON 的 assistant 预填充，以及 `tool_choice: {type: \"tool\", name: \"save_description\"}`。模型列表显示它已被弃用，将于 2026 年 11 月 30 日退役，而你只有三周时间。\n\n规划这次迁移：迁移目标、请求需要做的修改，以及如何安全上线。",
+      "answer": "**The core idea.** A model retirement is a deadline, not a model-ID swap. Newer models reject several request shapes the old one accepted, and they behave differently even when the request is accepted, so treat it as a small project with an eval.\n\n**Pick the target.** The docs list Claude Sonnet 5.5 as the default Sonnet migration target, written as `claude-sonnet-5-5` with no date suffix. Coming from Sonnet 4.5, you apply the earlier migration steps it builds on, then its own.\n\n- **Thinking.** Replace `budget_tokens` with adaptive thinking and an explicit effort level; a fixed budget is rejected with a 400.\n- **Sampling.** Non-default `temperature`, `top_p` and `top_k` are rejected, and on API version `2026-10-21` any value is; remove them.\n- **Prefill.** Assistant prefills return a 400; end `messages` with a user turn and use structured outputs or a strict tool for JSON.\n- **Forced tools.** `tool_choice` `any` and `tool` return a 400; use `auto` with `strict: true`, steer from the prompt, and check that the call happened.\n- **Responses.** Read content by block `type`, because a response can begin with `thinking` blocks, and size `max_tokens` for thinking plus the reply.\n- **Refusals.** Handle `stop_reason: \"refusal\"` before reading content; this model declines in five categories.\n\n```json\n{\n  \"model\": \"claude-sonnet-5-5\",\n  \"max_tokens\": 16000,\n  \"thinking\": {\"type\": \"adaptive\"},\n  \"output_config\": {\"effort\": \"low\"},\n  \"tool_choice\": {\"type\": \"auto\"},\n  \"tools\": [{\"name\": \"save_description\", \"strict\": true, \"input_schema\": {\"...\": \"...\"}}],\n  \"messages\": [{\"role\": \"user\", \"content\": \"Write the description for product 812...\"}]\n}\n```\n\n**Behavior, cost and rollout.** Effort levels are recalibrated on this model, so run an effort sweep instead of mapping old settings; for a high-volume writing task, start low. Claude Sonnet 5's tokenizer, which Sonnet 5.5 shares, counts more tokens for the same text than Sonnet 4.6's, so recount with `count_tokens` on real prompts and re-baseline cost. Build an eval from a few hundred real products with checks for JSON validity, required fields and banned claims plus a judged quality score, run old and new side by side, then shift traffic gradually behind a flag with a fast rollback.\n\n**Trade-offs.** Moving straight to the newest Sonnet means one migration instead of two, but more breaking changes at once; an intermediate model is fewer changes now and another deadline later. Removing `temperature` changes output variety; if the business wants varied copy, ask for several options in one request instead.",
+      "answer_zh": "**核心思想。** 模型退役是一个截止日期，而不是简单地替换模型 ID。新模型会拒绝旧模型接受的好几种请求形式，而且即使请求被接受，它们的行为也不相同，所以要把它当作一个带评测的小项目来做。\n\n**选择目标。** 文档把 Claude Sonnet 5.5 列为 Sonnet 的默认迁移目标，写作 `claude-sonnet-5-5`，不带日期后缀。从 Sonnet 4.5 迁移过来，你需要先完成它所依赖的早期迁移步骤，再完成它自己的步骤。\n\n- **思考设置。** 把 `budget_tokens` 换成自适应思考加上明确的 effort 等级；固定预算会被以 400 拒绝。\n- **采样参数。** 非默认值的 `temperature`、`top_p` 和 `top_k` 会被拒绝，而在 API 版本 `2026-10-21` 上，任何取值都会被拒绝；把它们删掉。\n- **预填充。** assistant 预填充会返回 400；让 `messages` 以用户轮次结束，并用结构化输出或 strict 工具来得到 JSON。\n- **强制工具调用。** `tool_choice` 的 `any` 和 `tool` 会返回 400；改用 `auto` 并设置 `strict: true`，在提示中加以引导，并检查调用是否真的发生了。\n- **响应处理。** 按块的 `type` 读取内容，因为响应可能以 `thinking` 块开头，并且要按思考加回复的总量来设置 `max_tokens`。\n- **拒答。** 在读取内容之前先处理 `stop_reason: \"refusal\"`；这个模型会在五个类别下拒答。\n\n```json\n{\n  \"model\": \"claude-sonnet-5-5\",\n  \"max_tokens\": 16000,\n  \"thinking\": {\"type\": \"adaptive\"},\n  \"output_config\": {\"effort\": \"low\"},\n  \"tool_choice\": {\"type\": \"auto\"},\n  \"tools\": [{\"name\": \"save_description\", \"strict\": true, \"input_schema\": {\"...\": \"...\"}}],\n  \"messages\": [{\"role\": \"user\", \"content\": \"Write the description for product 812...\"}]\n}\n```\n\n**行为、成本与上线。** 这个模型的 effort 等级经过重新校准，所以要做一次 effort 扫描，而不是照搬旧的设置；对于大批量的写作任务，从低等级开始。Claude Sonnet 5 的分词器（Sonnet 5.5 也使用它）对同样的文本会比 Sonnet 4.6 的分词器算出更多 token，所以要用真实提示通过 `count_tokens` 重新计数，并重新评估成本基线。用几百个真实商品构建一个评测，检查 JSON 是否有效、必填字段和违禁宣传语，再加上一个评审打出的质量分数；新旧模型并排运行，然后通过开关逐步切换流量，并保留快速回滚的能力。\n\n**取舍。** 直接迁到最新的 Sonnet 意味着只需迁移一次而不是两次，但一次要面对更多破坏性变更；迁到中间版本的模型现在改动更少，但以后还会面临另一个截止日期。删除 `temperature` 会改变输出的多样性；如果业务需要多样化的文案，就改为在一次请求中要求给出多个选项。",
+      "followups": [
+        "How would you find every place in the codebase that calls the retiring model?",
+        "What would your eval need to show before you move all traffic?",
+        "How would you get varied copy without temperature?"
+      ],
+      "followups_zh": [
+        "你会如何找出代码库中所有调用这个即将退役模型的地方？",
+        "在切换全部流量之前，你的评测需要显示出什么结果？",
+        "在不使用 temperature 的情况下，你会如何得到多样化的文案？"
+      ],
+      "vocab": [
+        {
+          "en": "deprecation",
+          "zh": "弃用"
+        },
+        {
+          "en": "retirement",
+          "zh": "退役"
+        },
+        {
+          "en": "assistant prefill",
+          "zh": "assistant 预填充"
+        },
+        {
+          "en": "effort sweep",
+          "zh": "effort 扫描"
+        },
+        {
+          "en": "rollback",
+          "zh": "回滚"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261109-4",
+      "topic": "Safety & Security",
+      "difficulty": "Hard",
+      "title": "A merchant types \"stop, don't touch the German campaigns\" mid-task, and the agent keeps going",
+      "title_zh": "商家在任务进行中输入「停下，别动德国的广告系列」，Agent 却继续执行",
+      "question": "A campaign agent edits budgets across many campaigns in a long tool loop. The chat UI lets merchants type while it runs. To avoid interrupting the loop, the harness appends whatever the merchant types to the next tool result as `[USER]: ...`. A merchant typed \"stop, don't touch the German campaigns\", and the agent changed them anyway. In another session, a reminder the harness adds after tool results was ignored as well.\n\nExplain why, and design how user input and harness notices should reach the model.",
+      "question_zh": "一个广告系列 Agent 在一个很长的工具循环中修改许多广告系列的预算。聊天界面允许商家在它运行时输入内容。为了不打断循环，harness 把商家输入的任何内容都以 `[USER]: ...` 的形式追加到下一个工具结果中。有位商家输入了「停下，别动德国的广告系列」，Agent 还是改了它们。在另一个会话中，harness 在工具结果之后添加的一条提醒同样被忽略了。\n\n解释原因，并设计用户输入和 harness 通知应该如何传达给模型。",
+      "answer": "**The core idea.** The model is trained to distrust text inside tool results, because that is where prompt injection lives: a product page or an email can contain \"ignore your instructions\". Text the harness smuggles into a tool result looks exactly like an attack, so the model may correctly refuse to obey it.\n\n**What the docs say.** The migration guidance states that a message the user typed mid-task that arrives inside a `tool_result` block, or directly after one, can be treated as untrusted text and ignored. Deliver it as a user turn instead: a text block after the last `tool_result` in the same user message. Keep harness notices, such as reminders, in a separate mid-conversation system message, never in the same block as the user's words.\n\n```go\nresults := []anthropic.ContentBlockParamUnion{}\nfor _, r := range toolOutputs {\n\tresults = append(results, anthropic.NewToolResultBlock(r.ID, r.Content, r.IsError))\n}\nif msg, ok := pendingUserInput(); ok {\n\t// The merchant's words as their own text block, after the tool results.\n\tresults = append(results, anthropic.NewTextBlock(msg))\n}\nmessages = append(messages, anthropic.NewUserMessage(results...))\n// Harness reminders go in a separate role \"system\" message, never mixed in here.\n```\n\n- **Never put user text inside a `tool_result`.** Tool results carry tool output only, and should be treated as untrusted data by everyone, including your own code.\n- **Make \"stop\" a control, not a sentence.** A stop button should halt the loop in code before the next tool runs, and pending write calls should be cancelled; do not rely on the model reading a message in time.\n- **Enforce scope in the tools.** If the merchant restricts the agent to some campaigns, store that restriction in the session and reject out-of-scope writes in the tool handler.\n- **Keep system-prompt rules firm.** For assistants that face users, the guide suggests a line saying the rules hold for the whole conversation, even when a user argues, claims an approved exception, or keeps asking.\n\n**Design the channels.** Three channels with three trust levels: the operator speaks through the system prompt and appended system messages; the user speaks through user turns; tools and the web speak through tool results, which are data. Test each channel with adversarial cases: an injected instruction in a product description must not change behavior, while a real user instruction must.\n\n**Trade-offs.** Delivering mid-turn input as a user turn means waiting for the current tool round to finish, so a hard stop needs the code path above. Treating tool results as untrusted is what keeps the agent safe from hostile pages; weakening that to make a shortcut work would reopen the injection risk for every merchant.",
+      "answer_zh": "**核心思想。** 模型经过训练，会不信任工具结果中的文本，因为那正是提示注入藏身的地方：一个商品页面或一封邮件里都可能写着「忽略你的指令」。harness 偷偷塞进工具结果里的文本，看起来和攻击一模一样，所以模型可能会正确地拒绝服从它。\n\n**文档怎么说。** 迁移指南指出，用户在任务进行中输入的消息，如果出现在 `tool_result` 块内部，或紧跟在它之后，可能会被当作不可信文本而忽略。应该把它作为用户轮次来传递：在同一条用户消息中，放在最后一个 `tool_result` 之后的一个文本块里。harness 的通知（例如提醒）则要放在单独的对话中途系统消息里，绝不能与用户的话放在同一个块中。\n\n```go\nresults := []anthropic.ContentBlockParamUnion{}\nfor _, r := range toolOutputs {\n\tresults = append(results, anthropic.NewToolResultBlock(r.ID, r.Content, r.IsError))\n}\nif msg, ok := pendingUserInput(); ok {\n\t// The merchant's words as their own text block, after the tool results.\n\tresults = append(results, anthropic.NewTextBlock(msg))\n}\nmessages = append(messages, anthropic.NewUserMessage(results...))\n// Harness reminders go in a separate role \"system\" message, never mixed in here.\n```\n\n- **绝不要把用户文本放进 `tool_result`。** 工具结果只承载工具输出，所有人都应该把它当作不可信数据，包括你自己的代码。\n- **让「停止」成为一种控制手段，而不是一句话。** 停止按钮应该在下一个工具运行之前就在代码层面中止循环，并取消待执行的写操作调用；不要指望模型及时读到一条消息。\n- **在工具中强制执行范围限制。** 如果商家把 Agent 的操作限定在某些广告系列内，就把这个限制保存在会话中，并在工具处理函数里拒绝超出范围的写操作。\n- **让系统提示的规则保持坚定。** 对于面向用户的助手，指南建议加入一句话，说明这些规则在整个对话中始终有效，即使用户争辩、声称例外已获批准，或者反复要求。\n\n**设计好通道。** 三个通道对应三个信任级别：运营方通过系统提示和追加的系统消息发言；用户通过用户轮次发言；工具和网页通过工具结果发言，而工具结果是数据。用对抗性用例测试每个通道：商品描述中注入的指令绝不能改变行为，而真实的用户指令必须能改变行为。\n\n**取舍。** 把任务进行中的输入作为用户轮次传递，意味着要等当前这一轮工具调用结束，所以真正的立即停止需要上面那条代码路径。把工具结果当作不可信内容，正是让 Agent 免受恶意网页攻击的关键；为了让某个捷径奏效而削弱这一点，会让每个商家重新面临注入风险。",
+      "followups": [
+        "Why might a correctly trained model ignore a genuine user instruction here?",
+        "How would you test that injected text in a product description cannot change the agent's actions?"
+      ],
+      "followups_zh": [
+        "为什么一个训练良好的模型在这里可能会忽略一条真实的用户指令？",
+        "你会如何测试商品描述中被注入的文本无法改变 Agent 的行为？"
+      ],
+      "vocab": [
+        {
+          "en": "prompt injection",
+          "zh": "提示注入"
+        },
+        {
+          "en": "trust boundary",
+          "zh": "信任边界"
+        },
+        {
+          "en": "untrusted data",
+          "zh": "不可信数据"
+        },
+        {
+          "en": "mid-turn input",
+          "zh": "任务中途的输入"
+        },
+        {
+          "en": "scope enforcement",
+          "zh": "范围限制的强制执行"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261109-5",
+      "topic": "Context & Memory",
+      "difficulty": "Senior",
+      "title": "A cost router sends easy turns to Claude Haiku 5.5 and hard ones to Claude Opus 5.5 in the same conversation, and quality drops after every cheap turn",
+      "title_zh": "成本路由器在同一个对话中把简单轮次交给 Claude Haiku 5.5、把困难轮次交给 Claude Opus 5.5，结果每经过一次廉价轮次，质量就下降",
+      "question": "A merchant-support agent routes each turn by a classifier: simple turns to Claude Haiku 5.5, complex ones to Claude Opus 5.5, within one conversation. Since launch, answers after a Haiku turn feel like the agent forgot its earlier reasoning, cache reads collapse on every switch, and a later change that adds \"(answered by the fast model)\" to the system prompt after a Haiku turn makes some Opus requests fail with a 400. To reduce payload size, the router also strips `thinking` blocks before sending history to the other model.\n\nAs the senior engineer, explain each effect and redesign the routing.",
+      "question_zh": "一个商家支持 Agent 用分类器为每一轮选择模型：在同一个对话中，简单轮次交给 Claude Haiku 5.5，复杂轮次交给 Claude Opus 5.5。上线以来，经过一次 Haiku 轮次之后的回答，感觉就像 Agent 忘记了之前的推理；每次切换时缓存读取都会骤降；后来又有一次改动，在 Haiku 轮次之后往系统提示里加上「（由快速模型回答）」，导致部分 Opus 请求报 400。为了减小请求体积，路由器还会在把历史发送给另一个模型之前去掉 `thinking` 块。\n\n作为资深工程师，解释每一种现象，并重新设计路由方案。",
+      "answer": "**The core idea.** A conversation carries more than its visible text: thinking blocks bound to the model that wrote them, and a cache keyed to one model's exact prefix. Switching models inside a conversation quietly throws some of that away. Route between conversations, and vary effort within one.\n\n**Why reasoning is lost.** A thinking block records the model that produced it, and the API first checks whether the model now reading it may read that model's blocks. A switch by itself never fails a request: unreadable blocks are dropped from that call and not billed. Per the docs, Claude Opus 5.5 reads Claude Haiku 5.5's blocks on the Claude API and Google Cloud, but Claude Haiku 5.5 does not read Claude Opus 5.5's blocks. So every Haiku turn runs without Opus's earlier reasoning.\n\n**Why stripping made it worse.** Removing thinking blocks is an edit to the history. The API already leaves out what the current model cannot read, so stripping gains nothing, and when the conversation returns to Opus the reasoning is gone for good. On models that run the history-editing check, later blocks can also stop matching.\n\n**Why the banner caused 400s.** Claude Opus 5.5 checks that the `system` prompt, tools and earlier messages are unchanged since each of its thinking blocks was produced. A banner that persists in `system` after the switch changes that prefix, so Opus blocks minted under the old text fail the check. Anything that must change mid-conversation should be an appended system message. And caches are model-scoped, so each switch starts the other model's cache from scratch.\n\n```go\n// Choose the model once, when the conversation starts.\nfunc modelFor(c *Conversation) string {\n\tif c.Model == \"\" {\n\t\tc.Model = \"claude-haiku-5-5\"\n\t\tif c.Kind == KindCampaignDiagnosis || c.Merchant.Tier == TierEnterprise {\n\t\t\tc.Model = \"claude-opus-5-5\"\n\t\t}\n\t}\n\treturn c.Model\n}\n\n// Within the conversation, adjust effort per turn instead of switching models.\nfunc effortFor(turn Turn) string {\n\tif turn.NeedsDeepAnalysis {\n\t\treturn \"high\"\n\t}\n\treturn \"low\"\n}\n```\n\n- **Send the same `messages` to every model.** Keep thinking blocks in your history unchanged; let the API drop what a model cannot read.\n- **Use per-message effort for hard turns.** The beta per-message effort setting changes effort for later turns without a cache reset on the models that support it.\n- **Escalate by starting a new conversation.** If a conversation turns out to need the larger model, start one on it with a written summary, accepting a cold cache once.\n- **Report reasoning lost by routing.** With the preserved-thinking beta header on, dropped blocks are reported as `model_binding_mismatch`; count them per conversation so the owner sees the cost of routing.\n\n**Trade-offs.** Per-conversation routing gives up some savings on easy turns inside hard conversations, but it keeps the reasoning and the cache intact. Before building a cascade, measure the simpler option the docs recommend: the more capable model at a lower effort for everything, which often holds quality at a comparable cost and keeps one cache namespace.",
+      "answer_zh": "**核心思想。** 一个对话承载的不只是可见的文本：还有与撰写它们的模型绑定在一起的思考块，以及以某个模型的确切前缀为键的缓存。在对话内部切换模型，会悄无声息地丢掉其中一部分。应该在对话之间进行路由，而在单个对话内调整 effort。\n\n**为什么推理丢失了。** 思考块会记录生成它的模型，API 首先检查当前读取它的模型是否被允许读取那个模型的块。单纯切换模型永远不会导致请求失败：无法读取的块会在那次调用中被省略，并且不计费。根据文档，在 Claude API 和 Google Cloud 上，Claude Opus 5.5 可以读取 Claude Haiku 5.5 的块，但 Claude Haiku 5.5 不能读取 Claude Opus 5.5 的块。所以每一次 Haiku 轮次都是在没有 Opus 之前推理的情况下运行的。\n\n**为什么去掉思考块让情况更糟。** 删除思考块是对历史记录的修改。API 本来就会省略当前模型无法读取的内容，所以删除它们毫无收益；而当对话回到 Opus 时，那些推理就永久丢失了。在执行历史编辑检查的模型上，之后的思考块也可能因此对不上。\n\n**为什么横幅导致了 400。** Claude Opus 5.5 会检查 `system` 提示、工具和之前的消息，自它的每个思考块生成以来是否保持不变。一个在切换之后一直留在 `system` 中的横幅改变了这个前缀，所以在旧文本下生成的 Opus 思考块无法通过检查。任何必须在对话中途改变的内容，都应该以追加的系统消息来表达。此外，缓存是按模型隔离的，所以每次切换都会让另一个模型的缓存从零开始。\n\n```go\n// Choose the model once, when the conversation starts.\nfunc modelFor(c *Conversation) string {\n\tif c.Model == \"\" {\n\t\tc.Model = \"claude-haiku-5-5\"\n\t\tif c.Kind == KindCampaignDiagnosis || c.Merchant.Tier == TierEnterprise {\n\t\t\tc.Model = \"claude-opus-5-5\"\n\t\t}\n\t}\n\treturn c.Model\n}\n\n// Within the conversation, adjust effort per turn instead of switching models.\nfunc effortFor(turn Turn) string {\n\tif turn.NeedsDeepAnalysis {\n\t\treturn \"high\"\n\t}\n\treturn \"low\"\n}\n```\n\n- **向每个模型发送相同的 `messages`。** 在你的历史记录中原样保留思考块；让 API 去省略某个模型无法读取的内容。\n- **对困难轮次使用按消息设置的 effort。** 在支持该功能的模型上，beta 版的按消息 effort 设置可以改变后续轮次的 effort，而不会重置缓存。\n- **通过开启新对话来升级。** 如果某个对话最终需要更大的模型，就用一份书面总结在该模型上开启一个新对话，接受一次冷缓存的代价。\n- **报告因路由而丢失的推理。** 开启 preserved thinking 的 beta 头之后，被丢弃的块会被报告为 `model_binding_mismatch`；按对话统计它们，让负责人看到路由的代价。\n\n**取舍。** 按对话路由会放弃困难对话中简单轮次的一部分成本节省，但能让推理和缓存保持完整。在构建级联方案之前，先测量文档推荐的更简单方案：所有请求都使用更强的模型配合更低的 effort，这样往往能在相近的成本下保持质量，并且只有一个缓存命名空间。",
+      "followups": [
+        "Which direction of switch keeps the reasoning, and why?",
+        "How would you add a fallback model for outages without losing reasoning on normal days?",
+        "What would you measure before choosing a cascade over one model at lower effort?"
+      ],
+      "followups_zh": [
+        "哪个方向的模型切换能保留推理，为什么？",
+        "如何添加一个应对故障的备用模型，同时在平时不丢失推理？",
+        "在选择级联方案而不是单一模型配合更低 effort 之前，你会测量什么？"
+      ],
+      "vocab": [
+        {
+          "en": "model routing",
+          "zh": "模型路由"
+        },
+        {
+          "en": "thinking block",
+          "zh": "思考块"
+        },
+        {
+          "en": "model binding",
+          "zh": "模型绑定"
+        },
+        {
+          "en": "cache namespace",
+          "zh": "缓存命名空间"
+        },
+        {
+          "en": "escalation",
+          "zh": "升级"
+        }
+      ]
+    }
+  ]
+}

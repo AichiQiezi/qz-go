@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 32 个模块、144 道题。
+共 33 个模块、149 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -439,3 +439,17 @@ Five new agent questions: localizing web search for a merchant's market, silent 
 | 3 | Tools & MCP | Hard | [Turning on strict tool use for the campaign tools: budget limits, title lengths and a nested category tree do not fit the schema rules](modules/daily-2026-11-08.md#q3) | 为广告系列工具开启 strict 工具调用：预算上下限、标题长度和嵌套的类目树都不符合 schema 规则 |
 | 4 | Evals & Observability | Hard | [The catalog-fix agent scores 95%, but the judge reads the transcript, the answer key sits in the sandbox, and an empty answer passes](modules/daily-2026-11-08.md#q4) | 商品目录修复 Agent 拿到 95 分，但评审读的是对话记录，答案就放在沙箱里，而且空答案也能通过 |
 | 5 | Multi-agent | Senior | [The audit team was meant to run on cheap workers, but the bill shows almost everything on the coordinator's model, and EU sessions fail to start](modules/daily-2026-11-08.md#q5) | 审核团队本应由廉价的 worker 完成工作，但账单显示几乎全部跑在协调者的模型上，而欧盟的会话还无法启动 |
+
+## [Daily set · Nov 9 · 每日新题 · 11 月 9 日](modules/daily-2026-11-09.md)
+
+Five new agent questions: a low-effort agent that stops early and skips verification, getting an assistant to search only when facts may have changed, migrating off a retiring model, why mid-task user input inside tool results gets ignored, and routing between models without losing reasoning or cache.
+
+> 五道新的 Agent 题：低 effort 的 Agent 提前停止并跳过验证、让助手只在事实可能变化时才去搜索、从即将退役的模型迁移出来、为什么放进工具结果里的任务中途用户输入会被忽略，以及在不丢失推理和缓存的前提下在模型之间路由。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Agent Loop | Medium | [The feed-fix agent on low effort hands the task back halfway and reports fixes as done without running the validator](modules/daily-2026-11-09.md#q1) | 低 effort 下的 feed 修复 Agent 做到一半就把任务交回，还在没运行校验器的情况下报告已修复 |
+| 2 | RAG | Medium | [The ad-policy assistant has web search, yet answers "what is Meta's current policy" from memory](modules/daily-2026-11-09.md#q2) | 广告政策助手明明有网页搜索，却凭记忆回答「Meta 现行政策是什么」 |
+| 3 | Production | Hard | [Claude Sonnet 4.5 retires on November 30: migrating the product-description pipeline without breaking it](modules/daily-2026-11-09.md#q3) | Claude Sonnet 4.5 将于 11 月 30 日退役：在不搞坏流程的前提下迁移商品描述生成流水线 |
+| 4 | Safety & Security | Hard | [A merchant types "stop, don't touch the German campaigns" mid-task, and the agent keeps going](modules/daily-2026-11-09.md#q4) | 商家在任务进行中输入「停下，别动德国的广告系列」，Agent 却继续执行 |
+| 5 | Context & Memory | Senior | [A cost router sends easy turns to Claude Haiku 5.5 and hard ones to Claude Opus 5.5 in the same conversation, and quality drops after every cheap turn](modules/daily-2026-11-09.md#q5) | 成本路由器在同一个对话中把简单轮次交给 Claude Haiku 5.5、把困难轮次交给 Claude Opus 5.5，结果每经过一次廉价轮次，质量就下降 |
