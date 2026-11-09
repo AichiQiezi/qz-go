@@ -1,0 +1,205 @@
+{
+  "date": "2026-11-10",
+  "generatedAt": "2026-11-10T06:46:14+08:00",
+  "questions": [
+    {
+      "id": "20261110-1",
+      "topic": "Go",
+      "difficulty": "Hard",
+      "title": "Large order exports end after exactly 30 seconds with a truncated CSV and HTTP 200",
+      "title_zh": "大额订单导出恰好在 30 秒时结束，得到一个被截断的 CSV，状态码却是 200",
+      "question": "A Go admin service streams order exports as CSV: it queries in pages and writes each row to the `http.ResponseWriter`, flushing as it goes. The server sets `WriteTimeout: 30 * time.Second` to protect against slow clients. Small merchants are fine, but large merchants get files that stop mid-row after about 30 seconds. The access log shows status 200, and nothing in the error tracker mentions a timeout.\n\nExplain what happens and fix it without removing protection against slow clients.",
+      "question_zh": "一个 Go 管理后台服务以 CSV 的形式流式导出订单：它分页查询，把每一行写入 `http.ResponseWriter`，边写边刷新。服务器设置了 `WriteTimeout: 30 * time.Second`，用来防范慢客户端。小商家没问题，但大商家拿到的文件在大约 30 秒后就在某一行的中间断掉了。访问日志显示状态码是 200，错误追踪系统里也没有任何关于超时的记录。\n\n解释发生了什么，并在不取消对慢客户端防护的前提下修复它。",
+      "answer": "**What `WriteTimeout` means.** It is a deadline for writing the whole response, set when the request is read, not an idle timeout between writes. A streaming handler that runs longer than that hits the deadline mid-stream: the next write fails, and the connection is closed.\n\n**Why the log says 200.** The status line and headers were sent with the first rows, long before the deadline, so the status cannot change afterwards. In a local test with a 1-second `WriteTimeout`, the client got status 200 and 10 of 30 rows, and `io.ReadAll` returned `unexpected EOF` because the chunked body ended early. The handler saw `i/o timeout` only on a later write, and it ignored the error, so nothing was logged. A browser or a careless client may save the partial file as if it were complete.\n\n**Fix: extend the deadline per write for this endpoint.** `http.ResponseController` lets a handler set its own write deadline. Push it forward after each successful chunk, so a client that keeps reading can download for as long as needed, while a client that stops reading still times out. In the test, extending the deadline delivered all 30 rows.\n\n```go\nfunc exportOrders(w http.ResponseWriter, r *http.Request) {\n\trc := http.NewResponseController(w)\n\tcw := csv.NewWriter(w)\n\tfor page := range ordersPages(r.Context()) {\n\t\t_ = rc.SetWriteDeadline(time.Now().Add(30 * time.Second)) // idle budget per chunk\n\t\tfor _, o := range page {\n\t\t\tif err := cw.Write(o.Row()); err != nil {\n\t\t\t\tlog.Printf(\"export aborted: %v\", err)\n\t\t\t\treturn\n\t\t\t}\n\t\t}\n\t\tcw.Flush()\n\t\tif err := cw.Error(); err != nil {\n\t\t\tlog.Printf(\"export aborted: %v\", err)\n\t\t\treturn\n\t\t}\n\t}\n}\n```\n\n- **Make completeness checkable.** Write a final trailer row with the row count, or send the expected count up front, so clients and support can tell a full file from a partial one.\n- **Log write errors.** A failed write in a streaming handler is the only signal you get; record it with the merchant and export ID.\n- **Check every hop.** Load balancers and proxies have their own timeouts; a stream that survives the Go server can still be cut by an idle timeout upstream.\n\n**Trade-offs.** Long-lived streams tie up a connection and a database cursor for minutes, and a retry starts from zero. For very large exports, an asynchronous job that writes a file to object storage and sends a link is usually better: it survives restarts, can be resumed, and keeps request handlers short.",
+      "answer_zh": "**`WriteTimeout` 的含义。** 它是写完整个响应的截止时间，在读取请求时就已设定，而不是两次写入之间的空闲超时。运行时间超过它的流式处理函数会在流的中途碰到这个截止时间：下一次写入会失败，连接随后被关闭。\n\n**为什么日志显示 200。** 状态行和响应头在写出最初几行时就已发送，远早于截止时间，因此之后无法再改变状态码。在一个 `WriteTimeout` 为 1 秒的本地测试中，客户端拿到的状态码是 200，30 行只收到 10 行，而 `io.ReadAll` 返回了 `unexpected EOF`，因为分块编码的响应体提前结束了。处理函数直到之后的某次写入才看到 `i/o timeout`，而它忽略了这个错误，所以什么也没有记录。浏览器或一个不够谨慎的客户端，可能会把这个不完整的文件当作完整文件保存下来。\n\n**修复：在这个接口上针对每次写入延长截止时间。** `http.ResponseController` 允许处理函数设置自己的写入截止时间。每成功写出一块数据就把截止时间往后推，这样只要客户端一直在读，就可以下载任意长的时间；而停止读取的客户端仍然会超时。在测试中，延长截止时间后，30 行全部送达。\n\n```go\nfunc exportOrders(w http.ResponseWriter, r *http.Request) {\n\trc := http.NewResponseController(w)\n\tcw := csv.NewWriter(w)\n\tfor page := range ordersPages(r.Context()) {\n\t\t_ = rc.SetWriteDeadline(time.Now().Add(30 * time.Second)) // idle budget per chunk\n\t\tfor _, o := range page {\n\t\t\tif err := cw.Write(o.Row()); err != nil {\n\t\t\t\tlog.Printf(\"export aborted: %v\", err)\n\t\t\t\treturn\n\t\t\t}\n\t\t}\n\t\tcw.Flush()\n\t\tif err := cw.Error(); err != nil {\n\t\t\tlog.Printf(\"export aborted: %v\", err)\n\t\t\treturn\n\t\t}\n\t}\n}\n```\n\n- **让完整性可被检查。** 在末尾写一行包含行数的结尾记录，或者事先告知预期的行数，这样客户端和客服就能区分完整文件和不完整文件。\n- **记录写入错误。** 在流式处理函数中，写入失败是你能得到的唯一信号；把它连同商家和导出任务 ID 一起记录下来。\n- **检查链路上的每一跳。** 负载均衡器和代理都有自己的超时设置；一个在 Go 服务器上存活下来的流，仍然可能被上游的空闲超时切断。\n\n**取舍。** 长时间存在的流会占用一个连接和一个数据库游标好几分钟，而一次重试又要从零开始。对于非常大的导出，通常更好的做法是用一个异步任务把文件写到对象存储并发送链接：它能在重启后继续存在、可以断点续传，并让请求处理函数保持简短。",
+      "followups": [
+        "Why can the server not change the status code when the timeout hits?",
+        "How would you protect against a client that reads one byte per minute?",
+        "What does ReadTimeout protect against, compared with WriteTimeout?"
+      ],
+      "followups_zh": [
+        "为什么超时发生时，服务器无法再更改状态码？",
+        "如何防范一个每分钟只读一个字节的客户端？",
+        "与 WriteTimeout 相比，ReadTimeout 防范的是什么？"
+      ],
+      "vocab": [
+        {
+          "en": "write deadline",
+          "zh": "写入截止时间"
+        },
+        {
+          "en": "chunked encoding",
+          "zh": "分块传输编码"
+        },
+        {
+          "en": "truncated response",
+          "zh": "被截断的响应"
+        },
+        {
+          "en": "idle timeout",
+          "zh": "空闲超时"
+        }
+      ]
+    },
+    {
+      "id": "20261110-2",
+      "topic": "System Design",
+      "difficulty": "Hard",
+      "title": "Moving a merchant's whole store from another e-commerce platform: products, customers, orders and SEO redirects, under the source's rate limits",
+      "title_zh": "把商家的整个店铺从另一个电商平台迁移过来：商品、客户、订单和 SEO 重定向，同时受限于源平台的限流",
+      "question": "Sales promises large merchants a one-click migration from a competing platform. A store can have 200,000 products with variants and images, a million customers, years of orders, and URLs that Google has indexed. The source platform's API is rate-limited per store, returns pages with cursors, and sometimes fails for minutes. The merchant must keep selling on the old store until the switch.\n\nDesign the migration system.",
+      "question_zh": "销售向大商家承诺可以从竞争对手的平台一键迁移。一个店铺可能有 20 万个带规格和图片的商品、一百万个客户、多年的订单，以及已被 Google 收录的 URL。源平台的 API 按店铺限流，用游标分页返回数据，有时还会连续失败几分钟。在切换之前，商家必须能在旧店铺上继续销售。\n\n设计这个迁移系统。",
+      "answer": "**Shape: a resumable pipeline per store.** Break the migration into resources (products, customers, orders, pages, redirects), each copied page by page. Persist the source cursor and progress after every page, so a crash or a deploy resumes where it stopped instead of starting over.\n\n- **Idempotent writes.** Keep a mapping table from source ID to new ID per store and upsert by source ID, so re-running a page never creates duplicates. Later resources, such as orders that reference products and customers, use the mapping.\n- **Respect the source's limits.** One token bucket per source store, adapted to the rate-limit headers the source returns, with backoff on errors. Run many stores in parallel, never many workers against one store.\n- **Images out of band.** Copy product data first with the source image URLs, then fetch and re-host images in a separate queue, so slow image downloads do not block the catalog.\n- **Validate and report.** Per resource, compare counts and sample records against the source, and give the merchant a report of what could not be mapped, such as unsupported product options.\n\n**Cutover: bulk copy, then catch up.** While the old store keeps selling, run a full copy, then repeated incremental passes using the source's updated-since filters or webhooks, each shorter than the last. At cutover, freeze the old store briefly, run a final delta, switch DNS, and turn on redirects.\n\n```text\nplan -> full copy (products, customers, orders) -> image queue\n     -> incremental passes (updated_since) x N\n     -> freeze old store -> final delta -> DNS switch -> 301 redirects live\n```\n\n**SEO redirects.** Map every old URL (products, collections, pages) to its new URL and serve permanent redirects from day one; missing mappings lose search ranking that took years to build. Keep the redirect table editable by the merchant.\n\n**Trade-offs.** A full migration under per-store rate limits can take days for large stores, so progress visibility and resumability matter more than raw speed. Customer passwords usually cannot be migrated, so plan a password-reset invitation. Migrating years of orders helps reporting but adds most of the volume; offering \"recent orders now, history later\" shortens time to cutover.",
+      "answer_zh": "**形态：每个店铺一条可断点续传的流水线。** 把迁移拆分成多种资源（商品、客户、订单、页面、重定向），每种资源逐页复制。每处理完一页就持久化源平台的游标和进度，这样崩溃或部署之后都能从中断处继续，而不是从头再来。\n\n- **幂等写入。** 为每个店铺维护一张从源 ID 到新 ID 的映射表，并按源 ID 执行 upsert，这样重新处理某一页也不会产生重复数据。后面迁移的资源，例如引用了商品和客户的订单，就使用这张映射表。\n- **遵守源平台的限制。** 每个源店铺使用一个令牌桶，并根据源平台返回的限流响应头动态调整，出错时退避。可以并行运行很多店铺，但绝不要让很多 worker 同时打同一个店铺。\n- **图片单独处理。** 先连同源图片 URL 一起复制商品数据，再在一个单独的队列中抓取并重新托管图片，这样缓慢的图片下载就不会阻塞商品目录的迁移。\n- **校验并报告。** 对每种资源，将数量与抽样记录同源平台进行比对，并向商家提供一份报告，列出无法映射的内容，例如不受支持的商品选项。\n\n**切换：先批量复制，再追平增量。** 在旧店铺继续销售的同时，先完成一次全量复制，然后利用源平台的「某时间之后更新」过滤条件或 webhook，反复执行增量同步，每一轮都比上一轮更短。切换时，短暂冻结旧店铺，执行最后一次增量同步，切换 DNS，并开启重定向。\n\n```text\nplan -> full copy (products, customers, orders) -> image queue\n     -> incremental passes (updated_since) x N\n     -> freeze old store -> final delta -> DNS switch -> 301 redirects live\n```\n\n**SEO 重定向。** 把每个旧 URL（商品、集合、页面）都映射到新 URL，并从第一天起就返回永久重定向；缺失的映射会让花了数年才积累的搜索排名流失。让商家可以编辑这张重定向表。\n\n**取舍。** 在按店铺限流的情况下，大店铺的完整迁移可能需要好几天，所以进度可见性和可续传性比单纯的速度更重要。客户密码通常无法迁移，所以要准备好重置密码的邀请。迁移多年的订单有助于报表，但也带来了绝大部分的数据量；提供「先迁最近订单，历史订单稍后迁」的选项，可以缩短到切换为止的时间。",
+      "followups": [
+        "How would you handle a product that was edited in the old store during the bulk copy?",
+        "What would you show the merchant while a three-day migration runs?",
+        "How do you test the redirect map before cutover?"
+      ],
+      "followups_zh": [
+        "如果某个商品在批量复制期间于旧店铺中被修改了，你会如何处理？",
+        "在一次持续三天的迁移进行期间，你会向商家展示什么？",
+        "在切换之前，你会如何测试重定向映射？"
+      ],
+      "vocab": [
+        {
+          "en": "cutover",
+          "zh": "切换"
+        },
+        {
+          "en": "incremental sync",
+          "zh": "增量同步"
+        },
+        {
+          "en": "idempotent",
+          "zh": "幂等的"
+        },
+        {
+          "en": "redirect map",
+          "zh": "重定向映射"
+        },
+        {
+          "en": "resumable",
+          "zh": "可断点续传的"
+        }
+      ]
+    },
+    {
+      "id": "20261110-3",
+      "topic": "Database",
+      "difficulty": "Medium",
+      "title": "After importing orders with their original IDs, every new order fails with a duplicate key",
+      "title_zh": "导入带原始 ID 的订单之后，每一笔新订单都因重复键而失败",
+      "question": "During a store migration, a script copies historical orders into Postgres with their original IDs: `INSERT INTO orders (id, ...) VALUES (...)`. The `id` column is `bigserial`. The import succeeds, but as soon as the store goes live, checkout fails with `duplicate key value violates unique constraint \"orders_pkey\"`.\n\nExplain the cause and fix it, now and for future imports.",
+      "question_zh": "在一次店铺迁移中，一个脚本把历史订单连同它们的原始 ID 一起复制到 Postgres：`INSERT INTO orders (id, ...) VALUES (...)`。`id` 列的类型是 `bigserial`。导入成功了，但店铺一上线，结账就报错：`duplicate key value violates unique constraint \"orders_pkey\"`。\n\n解释原因，并给出修复方案，既要解决眼前的问题，也要考虑以后的导入。",
+      "answer": "**Why it happens.** A `bigserial` column takes its default from a sequence, and the sequence advances only when that default is used. Inserting explicit IDs bypasses the sequence, so after the import it still points at the start while the table already holds those IDs. In a local test, after importing IDs 1 to 1,000, the first normal insert asked the sequence for 1 and failed with a duplicate key.\n\n**Fix now: move the sequence past the data.** After the import, set the sequence to the current maximum. In the test, the next insert then got 1001.\n\n```sql\nSELECT setval(pg_get_serial_sequence('orders', 'id'),\n              (SELECT max(id) FROM orders));\n```\n\n- **Run it in the same job as the import,** after the last batch, and for every table that received explicit IDs.\n- **Identity columns behave the same way.** With `GENERATED ALWAYS AS IDENTITY`, an explicit ID is rejected unless the insert says `OVERRIDING SYSTEM VALUE`, which at least makes the bypass visible; but the identity still does not advance, and in the test the next default value was 1.\n- **Expect gaps.** Sequences are not transactional: in the test, a rolled-back insert still consumed an ID. Never use them where gapless numbers are required.\n\n**Better design for imports.** Do not reuse source IDs as primary keys. Let the database generate new IDs and keep the source ID in its own column, `source_order_id`, with a unique index per store. That avoids sequence drift, avoids collisions when two stores are imported, and keeps the original numbers for support and reconciliation. Show merchants their familiar order numbers through a separate display field.\n\n**Trade-offs.** Keeping source IDs as keys makes references simple during the import, but it ties your schema to another system's numbering and needs the sequence fix every time. A mapping column costs a join or lookup during the import, and saves a class of production incidents afterwards.",
+      "answer_zh": "**原因。** `bigserial` 列的默认值来自一个序列，而只有在使用这个默认值时，序列才会前进。显式插入 ID 会绕过序列，所以导入之后它仍然指向起点，而表里已经有了这些 ID。在本地测试中，导入 ID 1 到 1000 之后，第一次正常插入从序列拿到了 1，结果因重复键而失败。\n\n**眼前的修复：把序列推进到数据之后。** 导入完成后，把序列设置为当前的最大值。在测试中，之后的下一次插入拿到了 1001。\n\n```sql\nSELECT setval(pg_get_serial_sequence('orders', 'id'),\n              (SELECT max(id) FROM orders));\n```\n\n- **在导入的同一个任务中执行它**，放在最后一批之后，并且对每一张接收了显式 ID 的表都执行。\n- **identity 列的行为也一样。** 使用 `GENERATED ALWAYS AS IDENTITY` 时，显式 ID 会被拒绝，除非插入语句写明 `OVERRIDING SYSTEM VALUE`，这至少让绕过行为变得可见；但 identity 依然不会前进，在测试中，下一个默认值是 1。\n- **接受空洞。** 序列不受事务控制：在测试中，一次被回滚的插入仍然消耗了一个 ID。在要求编号无空洞的场合，绝不要使用序列。\n\n**更好的导入设计。** 不要把源 ID 复用为主键。让数据库生成新的 ID，并把源 ID 保存在单独的列 `source_order_id` 中，按店铺建立唯一索引。这样既避免了序列漂移，也避免了导入两个店铺时发生冲突，同时还保留了原始编号，便于客服和对账。通过一个单独的展示字段，向商家显示他们熟悉的订单号。\n\n**取舍。** 把源 ID 当作主键，能让导入期间的引用关系很简单，但它会让你的表结构与另一个系统的编号方式绑在一起，而且每次都需要修复序列。映射列在导入期间要付出一次关联或查找的代价，却能在之后避免一整类线上事故。",
+      "followups": [
+        "How would you find every sequence that is behind its table's maximum?",
+        "Why are sequences not rolled back with the transaction?"
+      ],
+      "followups_zh": [
+        "你会如何找出所有落后于其表中最大值的序列？",
+        "为什么序列不会随事务一起回滚？"
+      ],
+      "vocab": [
+        {
+          "en": "sequence",
+          "zh": "序列"
+        },
+        {
+          "en": "identity column",
+          "zh": "identity 列"
+        },
+        {
+          "en": "primary key",
+          "zh": "主键"
+        },
+        {
+          "en": "source ID",
+          "zh": "源 ID"
+        }
+      ]
+    },
+    {
+      "id": "20261110-4",
+      "topic": "Middleware",
+      "difficulty": "Medium",
+      "title": "Unique visitors per ad campaign: a Redis set per campaign uses gigabytes, and HyperLogLog counts are slightly off",
+      "title_zh": "按广告系列统计独立访客：每个广告系列一个 Redis 集合，占用了好几个 GB，而 HyperLogLog 的计数又略有偏差",
+      "question": "The ad dashboard shows unique visitors per campaign per day. Today each click adds the visitor ID to a Redis set `uv:<campaign>:<day>`, and the count is `SCARD`. With tens of thousands of active campaigns, Redis memory keeps growing. A teammate proposes HyperLogLog; the product manager worries the numbers will be wrong and asks how merchants could see \"unique visitors this week\" if each day is stored separately.\n\nEvaluate the proposal and design the counting.",
+      "question_zh": "广告看板按广告系列、按天显示独立访客数。目前每次点击都会把访客 ID 加入 Redis 集合 `uv:<campaign>:<day>`，计数用 `SCARD`。在有数万个活跃广告系列的情况下，Redis 的内存持续增长。一位同事提议使用 HyperLogLog；产品经理担心数字会不准，并且问：如果每天单独存储，商家要怎么看到「本周独立访客」？\n\n评估这个提议，并设计计数方案。",
+      "answer": "**Why sets are expensive.** A set stores every member. In a local test, a set of one million visitor IDs used about 48 MB according to `MEMORY USAGE`, and memory grows with every campaign and day you keep.\n\n**What HyperLogLog trades.** A HyperLogLog estimates the number of distinct items from hashes in a fixed amount of memory; Redis documents a standard error of 0.81% and at most about 12 KB per key. In the test, the same million IDs took about 14 KB, and `PFCOUNT` returned 989,853, about 1% low, which is within the expected spread of the estimate.\n\n**Weekly uniques without double counting.** Summing seven daily counts counts a returning visitor up to seven times. HyperLogLogs merge instead: `PFCOUNT` over several keys, or `PFMERGE` into a new key, estimates the union. In the test, two days of a million IDs each with 400,000 overlapping gave about 1.59 million for a true union of 1.6 million.\n\n```text\nPFADD   uv:c42:2026-11-10 visitor:8812\nPFCOUNT uv:c42:2026-11-10                       # daily estimate\nPFCOUNT uv:c42:2026-11-04 ... uv:c42:2026-11-10 # weekly union, no double counting\nEXPIRE  uv:c42:2026-11-10 7776000               # keep 90 days of daily keys\n```\n\n- **Label it as an estimate.** Show \"about\" in the UI, and keep exact counts where money depends on them, such as billing or conversion attribution.\n- **Set TTLs on daily keys** so storage stays bounded, and build weekly or monthly views by merging at read time.\n- **Hash IDs consistently.** Use the same visitor identifier on every path, or the same person counts as several visitors no matter which structure you use.\n\n**Trade-offs.** HyperLogLog cannot list or remove members, so it cannot answer \"was this visitor counted?\" or delete one user's data from the count; if privacy deletion of individual entries matters, keep the raw events elsewhere and rebuild. For exact counts at scale, an analytics store with distinct-count queries over raw events is the alternative, at a higher storage and query cost.",
+      "answer_zh": "**为什么集合很昂贵。** 集合会存储每一个成员。在本地测试中，根据 `MEMORY USAGE`，一个包含一百万个访客 ID 的集合大约占用 48 MB，而且你保留的每个广告系列、每一天都会让内存继续增长。\n\n**HyperLogLog 的取舍。** HyperLogLog 利用哈希值，在固定大小的内存中估算不同元素的数量；Redis 文档给出的标准误差为 0.81%，每个键最多约 12 KB。在测试中，同样的一百万个 ID 只占约 14 KB，而 `PFCOUNT` 返回了 989,853，偏低约 1%，在估算的预期波动范围之内。\n\n**不重复计算的每周独立访客。** 把七天的计数直接相加，会把回访的访客最多计算七次。HyperLogLog 可以合并：对多个键执行 `PFCOUNT`，或用 `PFMERGE` 合并到一个新键，就能估算出并集。在测试中，两天各一百万个 ID、其中 40 万重叠，估算结果约为 159 万，而真实的并集是 160 万。\n\n```text\nPFADD   uv:c42:2026-11-10 visitor:8812\nPFCOUNT uv:c42:2026-11-10                       # daily estimate\nPFCOUNT uv:c42:2026-11-04 ... uv:c42:2026-11-10 # weekly union, no double counting\nEXPIRE  uv:c42:2026-11-10 7776000               # keep 90 days of daily keys\n```\n\n- **标明这是估算值。** 在界面上显示「约」，而对于与金钱挂钩的计数，例如计费或转化归因，保留精确值。\n- **为每天的键设置 TTL**，让存储空间保持有界，并在读取时通过合并来生成每周或每月的视图。\n- **统一地处理 ID。** 在每条链路上使用同一种访客标识，否则无论用哪种数据结构，同一个人都会被算成好几个访客。\n\n**取舍。** HyperLogLog 无法列出或删除成员，所以它回答不了「这个访客是否被计入了？」，也无法从计数中删除某一个用户的数据；如果需要按隐私要求删除单个条目，就要把原始事件存放在别处，以便重新计算。如果需要在大规模下得到精确计数，替代方案是在分析型存储中对原始事件做去重计数查询，代价是更高的存储和查询成本。",
+      "followups": [
+        "Why can daily HyperLogLogs be merged but daily counts cannot be added?",
+        "When would you still choose an exact set?"
+      ],
+      "followups_zh": [
+        "为什么每天的 HyperLogLog 可以合并，而每天的计数却不能直接相加？",
+        "什么情况下你仍然会选择精确的集合？"
+      ],
+      "vocab": [
+        {
+          "en": "HyperLogLog",
+          "zh": "HyperLogLog"
+        },
+        {
+          "en": "cardinality",
+          "zh": "基数"
+        },
+        {
+          "en": "standard error",
+          "zh": "标准误差"
+        },
+        {
+          "en": "union",
+          "zh": "并集"
+        }
+      ]
+    },
+    {
+      "id": "20261110-5",
+      "topic": "Java & CS",
+      "difficulty": "Senior",
+      "title": "Product updates from three services are resolved by timestamp, and a merchant's latest price change is lost because one server's clock is behind",
+      "title_zh": "来自三个服务的商品更新按时间戳决定胜负，结果因为一台服务器的时钟偏慢，商家最新的改价丢失了",
+      "question": "Product prices can be changed by the admin UI service, a pricing-rules service and an import service. Each Java service writes `price` together with `updated_at = System.currentTimeMillis()`, and the product store keeps whichever write has the larger `updated_at`. Occasionally a merchant changes a price, sees it saved, and minutes later the old price is back. The pricing service's host turns out to have a clock running a couple of seconds behind.\n\nAs the senior engineer, explain why last-write-wins with wall clocks fails and redesign conflict handling.",
+      "question_zh": "商品价格可以由三个服务修改：管理后台界面服务、定价规则服务和导入服务。每个 Java 服务在写入 `price` 时都附带 `updated_at = System.currentTimeMillis()`，而商品存储保留 `updated_at` 较大的那次写入。偶尔会有商家改了价格、看到已保存，几分钟后旧价格却又回来了。后来发现，定价服务所在主机的时钟慢了几秒。\n\n作为资深工程师，解释为什么基于墙上时钟的「最后写入者胜出」会失败，并重新设计冲突处理方案。",
+      "answer": "**Why it fails.** \"Last write wins\" needs timestamps that order events correctly, and wall clocks on different machines do not. Clocks drift and are corrected in steps, and `currentTimeMillis` can even move backwards on one machine. In a local simulation, a write made one second later on a clock two seconds behind got the smaller timestamp, so the store kept the earlier price and silently dropped the newer one.\n\n**Fix 1: compare versions, not clocks.** Give each product row a version number. A writer reads the version, and its update applies only if the version is unchanged; otherwise it re-reads and decides. This is optimistic concurrency, and it detects conflicts instead of guessing an order. In the simulation, the later edit, made against version 1, was accepted.\n\n```java\nint updated = jdbc.update(\n    \"UPDATE products SET price = ?, version = version + 1, updated_by = ? \" +\n    \"WHERE id = ? AND version = ?\",\n    newPrice, source, productId, expectedVersion);\nif (updated == 0) {\n    throw new ConcurrentEditException(productId); // re-read, then retry or ask\n}\n```\n\n- **Decide precedence by business rule.** A merchant's manual price should beat an automated rule; record the source of each write and let a policy, not a clock, resolve real conflicts.\n- **Use one writer per field where possible.** If imports only set initial prices and rules only write a separate `rule_price`, many conflicts disappear by design.\n- **If you need event ordering across services,** use a single sequencer such as the database or a partitioned log, or hybrid logical clocks, which combine wall time with a counter and never go backwards; in the simulation an HLC ordered the later write after the earlier one despite the skew.\n- **Measure durations with `nanoTime`.** It is monotonic within a JVM and meant for elapsed time; `currentTimeMillis` is wall time and is not.\n\n**Monitoring and rollout.** Alert on clock offset on every host, but treat NTP as a hygiene measure, not a correctness guarantee. Roll out versioning by adding the column, making writers send the expected version, and logging rejected writes before enforcing them, so you see how often real conflicts happen.\n\n**Trade-offs.** Optimistic concurrency adds retries and sometimes a user-facing \"this product changed, reload\" message, but it never loses an update silently. Last-write-wins is simpler and available under partitions, which is why some stores choose it, but then losses must be acceptable for that data. Prices are money, so detecting conflicts is worth the extra work.",
+      "answer_zh": "**为什么会失败。** 「最后写入者胜出」需要能够正确排序事件的时间戳，而不同机器上的墙上时钟做不到这一点。时钟会漂移，也会被阶跃式地校正，在同一台机器上 `currentTimeMillis` 甚至可能倒退。在一次本地模拟中，一台时钟慢了两秒的机器在一秒之后做出的写入，得到了更小的时间戳，于是存储保留了较早的价格，悄无声息地丢掉了较新的那个。\n\n**修复 1：比较版本，而不是时钟。** 给每一行商品数据一个版本号。写入方先读取版本号，只有在版本号未变的情况下更新才会生效；否则它要重新读取再做决定。这就是乐观并发控制，它能检测出冲突，而不是去猜测先后顺序。在模拟中，基于版本 1 做出的较晚修改被接受了。\n\n```java\nint updated = jdbc.update(\n    \"UPDATE products SET price = ?, version = version + 1, updated_by = ? \" +\n    \"WHERE id = ? AND version = ?\",\n    newPrice, source, productId, expectedVersion);\nif (updated == 0) {\n    throw new ConcurrentEditException(productId); // re-read, then retry or ask\n}\n```\n\n- **按业务规则决定优先级。** 商家手动设置的价格应该优先于自动规则；记录每次写入的来源，让一套策略而不是时钟来解决真正的冲突。\n- **尽可能让每个字段只有一个写入方。** 如果导入只设置初始价格，而规则只写入单独的 `rule_price` 字段，很多冲突从设计上就不存在了。\n- **如果需要在多个服务之间对事件排序**，就使用单一的排序者，例如数据库或分区日志，或者使用混合逻辑时钟，它把墙上时间与一个计数器结合起来，并且永远不会倒退；在模拟中，尽管存在时钟偏差，混合逻辑时钟仍然把较晚的写入排在了较早的写入之后。\n- **用 `nanoTime` 测量耗时。** 它在单个 JVM 内是单调的，专门用于测量经过的时间；`currentTimeMillis` 是墙上时间，并不具备这种性质。\n\n**监控与上线。** 对每台主机的时钟偏差发出告警，但要把 NTP 当作一项卫生措施，而不是正确性的保证。上线版本控制时，先添加版本列，让写入方发送预期的版本号，并在真正强制执行之前先记录会被拒绝的写入，这样你就能看到真实冲突发生的频率。\n\n**取舍。** 乐观并发控制会增加重试，有时还需要向用户显示「该商品已被修改，请刷新」的提示，但它永远不会悄无声息地丢失更新。「最后写入者胜出」更简单，而且在网络分区时仍然可用，这也是有些存储选择它的原因，但前提是这类数据能够接受丢失。价格关系到钱，所以检测冲突值得多付出这些工作。",
+      "followups": [
+        "Why can currentTimeMillis go backwards on one machine?",
+        "How would you resolve a conflict between a manual price and a pricing rule fairly?",
+        "When is last-write-wins an acceptable choice?"
+      ],
+      "followups_zh": [
+        "为什么在同一台机器上 currentTimeMillis 可能倒退？",
+        "你会如何公平地解决手动价格与定价规则之间的冲突？",
+        "什么情况下「最后写入者胜出」是可以接受的选择？"
+      ],
+      "vocab": [
+        {
+          "en": "clock skew",
+          "zh": "时钟偏差"
+        },
+        {
+          "en": "last write wins",
+          "zh": "最后写入者胜出"
+        },
+        {
+          "en": "optimistic concurrency",
+          "zh": "乐观并发控制"
+        },
+        {
+          "en": "hybrid logical clock",
+          "zh": "混合逻辑时钟"
+        },
+        {
+          "en": "monotonic",
+          "zh": "单调的"
+        }
+      ]
+    }
+  ]
+}

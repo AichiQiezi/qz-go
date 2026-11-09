@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 29 天、145 道题。
+共 30 天、150 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-10](days/2026-11-10.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Hard | [Large order exports end after exactly 30 seconds with a truncated CSV and HTTP 200](days/2026-11-10.md#q1) | 大额订单导出恰好在 30 秒时结束，得到一个被截断的 CSV，状态码却是 200 |
+| 2 | System Design | Hard | [Moving a merchant's whole store from another e-commerce platform: products, customers, orders and SEO redirects, under the source's rate limits](days/2026-11-10.md#q2) | 把商家的整个店铺从另一个电商平台迁移过来：商品、客户、订单和 SEO 重定向，同时受限于源平台的限流 |
+| 3 | Database | Medium | [After importing orders with their original IDs, every new order fails with a duplicate key](days/2026-11-10.md#q3) | 导入带原始 ID 的订单之后，每一笔新订单都因重复键而失败 |
+| 4 | Middleware | Medium | [Unique visitors per ad campaign: a Redis set per campaign uses gigabytes, and HyperLogLog counts are slightly off](days/2026-11-10.md#q4) | 按广告系列统计独立访客：每个广告系列一个 Redis 集合，占用了好几个 GB，而 HyperLogLog 的计数又略有偏差 |
+| 5 | Java & CS | Senior | [Product updates from three services are resolved by timestamp, and a merchant's latest price change is lost because one server's clock is behind](days/2026-11-10.md#q5) | 来自三个服务的商品更新按时间戳决定胜负，结果因为一台服务器的时钟偏慢，商家最新的改价丢失了 |
 
 ## [2026-11-09](days/2026-11-09.md)
 
