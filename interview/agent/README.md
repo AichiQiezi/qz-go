@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 33 个模块、149 道题。
+共 34 个模块、154 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -453,3 +453,17 @@ Five new agent questions: a low-effort agent that stops early and skips verifica
 | 3 | Production | Hard | [Claude Sonnet 4.5 retires on November 30: migrating the product-description pipeline without breaking it](modules/daily-2026-11-09.md#q3) | Claude Sonnet 4.5 将于 11 月 30 日退役：在不搞坏流程的前提下迁移商品描述生成流水线 |
 | 4 | Safety & Security | Hard | [A merchant types "stop, don't touch the German campaigns" mid-task, and the agent keeps going](modules/daily-2026-11-09.md#q4) | 商家在任务进行中输入「停下，别动德国的广告系列」，Agent 却继续执行 |
 | 5 | Context & Memory | Senior | [A cost router sends easy turns to Claude Haiku 5.5 and hard ones to Claude Opus 5.5 in the same conversation, and quality drops after every cheap turn](modules/daily-2026-11-09.md#q5) | 成本路由器在同一个对话中把简单轮次交给 Claude Haiku 5.5、把困难轮次交给 Claude Opus 5.5，结果每经过一次廉价轮次，质量就下降 |
+
+## [Daily set · Nov 10 · 每日新题 · 11 月 10 日](modules/daily-2026-11-10.md)
+
+Five new agent questions around moving to Claude Fable 5.2: keeping MCP and custom tool lists stable, measuring a "finish the whole task" prompt change, planning the migration when every account is checked for history edits, cleaning up cautious memory notes, and controlling a coordinator that delegates too much.
+
+> 五道围绕迁移到 Claude Fable 5.2 的新 Agent 题：保持 MCP 和自定义工具列表稳定、衡量「把整个任务做完」这一提示修改、在所有账户都检查历史编辑的情况下规划迁移、清理过于谨慎的记忆笔记，以及控制一个过度委派的协调者。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Tools & MCP | Medium | [A connected MCP server adds a tool mid-session, and the research agent's requests start failing after a move to Claude Fable 5.2](modules/daily-2026-11-10.md#q1) | 接入的 MCP 服务器在会话中途新增了一个工具，迁到 Claude Fable 5.2 之后，研究 Agent 的请求开始失败 |
+| 2 | Evals & Observability | Medium | [Adding a "finish the whole task" instruction to the catalog agent: proving it helps and knowing what it costs](modules/daily-2026-11-10.md#q2) | 给商品目录 Agent 加上「把整个任务做完」的指令：证明它有效，并弄清它的代价 |
+| 3 | Production | Hard | [Moving the research agent from Claude Fable 5.1 to Claude Fable 5.2: requests that passed yesterday now fail with "bound to a different conversation"](modules/daily-2026-11-10.md#q3) | 把研究 Agent 从 Claude Fable 5.1 迁到 Claude Fable 5.2：昨天还能通过的请求，今天报错「bound to a different conversation」 |
+| 4 | Context & Memory | Hard | [The catalog agent's memory notes make it timid: it stops retrying busy APIs and asks for approvals nobody requires](modules/daily-2026-11-10.md#q4) | 商品目录 Agent 的记忆笔记让它变得畏手畏脚：它不再重试繁忙的 API，还请求根本没人要求的审批 |
+| 5 | Multi-agent | Senior | [After moving the coordinator to Claude Fable 5.2, it starts more subagents than tasks need, and the advisor change breaks running conversations](modules/daily-2026-11-10.md#q5) | 把协调者迁到 Claude Fable 5.2 之后，它启动的子 Agent 多于任务所需，而更换顾问模型还让进行中的对话出错 |

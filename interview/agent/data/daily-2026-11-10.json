@@ -1,0 +1,209 @@
+{
+  "id": "daily-2026-11-10",
+  "order": 20261110,
+  "kind": "daily",
+  "title": "Daily set · Nov 10",
+  "title_zh": "每日新题 · 11 月 10 日",
+  "summary": "Five new agent questions around moving to Claude Fable 5.2: keeping MCP and custom tool lists stable, measuring a \"finish the whole task\" prompt change, planning the migration when every account is checked for history edits, cleaning up cautious memory notes, and controlling a coordinator that delegates too much.",
+  "summary_zh": "五道围绕迁移到 Claude Fable 5.2 的新 Agent 题：保持 MCP 和自定义工具列表稳定、衡量「把整个任务做完」这一提示修改、在所有账户都检查历史编辑的情况下规划迁移、清理过于谨慎的记忆笔记，以及控制一个过度委派的协调者。",
+  "generatedAt": "2026-11-10T06:54:56+08:00",
+  "questions": [
+    {
+      "id": "agent-daily-20261110-1",
+      "topic": "Tools & MCP",
+      "difficulty": "Medium",
+      "title": "A connected MCP server adds a tool mid-session, and the research agent's requests start failing after a move to Claude Fable 5.2",
+      "title_zh": "接入的 MCP 服务器在会话中途新增了一个工具，迁到 Claude Fable 5.2 之后，研究 Agent 的请求开始失败",
+      "question": "A market-research agent uses the Messages API MCP connector to reach an internal catalog MCP server. On Claude Opus 5.5 it worked for months. After moving it to Claude Fable 5.2, some long sessions fail with a 400 saying a thinking block is bound to a different conversation. The failures line up with deploys of the MCP server, which sometimes add a tool or reword a tool description. The team's own tools are also built per request from a feature-flag service.\n\nExplain the failures and how to keep the tool surface stable.",
+      "question_zh": "一个市场调研 Agent 通过 Messages API 的 MCP 连接器访问内部的商品目录 MCP 服务器。在 Claude Opus 5.5 上它运行了好几个月都没问题。迁到 Claude Fable 5.2 之后，一些长会话开始报 400，提示某个思考块绑定到了另一个对话。这些失败与 MCP 服务器的部署时间吻合，而那些部署有时会新增一个工具，或改写某个工具的描述。团队自己的工具也是每次请求时根据功能开关服务动态构建的。\n\n解释这些失败，以及如何让工具集保持稳定。",
+      "answer": "**The core idea.** The model's earlier reasoning is valid only for the exact setup it was produced under, and the tool list is part of that setup. If the tools change under a running conversation, earlier reasoning no longer matches. Keep tools fixed for a conversation, and change them only in ways the API treats as appending.\n\n**Why it started on Fable 5.2.** Each Claude Fable 5.2 thinking block is valid only against the `system` prompt, `tools` and history that preceded it, and on this model the check is enforced for every account. The migration guide adds a detail specific to the connector: a server that returns a different tool list on a later request invalidates Claude Fable 5.2 thinking blocks unless its toolset is pinned, while Claude Fable 5.1 and Claude Opus 5.5 do not check this. So testing against the old model could not have shown it.\n\n**What counts as a change.** Tools are compared as full definitions: name, description and `input_schema`. Rewording one description is a change, and so is adding or removing a tool. Reordering tools is fine, and a tool with `defer_loading: true` stays outside the comparison until something references it.\n\n- **Pin the MCP server's tool list.** The guide points to a beta for this on the Claude API (`mcp-client-2026-09-15`); a pinned list stays the same for the conversation even if the server deploys.\n- **Freeze your own tools per conversation.** Resolve feature flags once when the conversation starts, store the resulting tool definitions with it, and reuse them byte for byte on every turn.\n- **Add tools by appending.** Where a conversation really needs a new tool, the guide lists betas for mid-conversation tool changes, by value or by reference, which keep the history append-only.\n- **Roll out tool changes with new conversations.** A stored conversation resumed after its tools changed can return the 400, so new descriptions should apply to new sessions.\n\n```go\ntype Conversation struct {\n\tID    string\n\tTools json.RawMessage // resolved once, at creation; never rebuilt per turn\n}\n\nfunc toolsFor(c *Conversation, flags FlagSet) (json.RawMessage, error) {\n\tif c.Tools != nil {\n\t\treturn c.Tools, nil\n\t}\n\tdefs, err := json.Marshal(buildTools(flags)) // stable order, stable text\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tc.Tools = defs\n\treturn defs, saveConversation(c)\n}\n```\n\n**Trade-offs.** Freezing tools means a fix to a tool description reaches only new conversations, so long-lived sessions keep the old text until they end. The guide also describes a `drop_block` mode that drops mismatched blocks and continues; it is a stopgap while you fix the edit, because the model has to think again where blocks were dropped, which can raise output tokens.",
+      "answer_zh": "**核心思想。** 模型之前的推理只对它生成时的确切配置有效，而工具列表是这套配置的一部分。如果工具在一个进行中的对话里发生了变化，之前的推理就对不上了。在一个对话期间保持工具不变，只用 API 视为追加的方式来改变它们。\n\n**为什么在 Fable 5.2 上才出现。** Claude Fable 5.2 的每个思考块只对它之前的 `system` 提示、`tools` 和历史记录有效，而且在这个模型上，所有账户都会强制执行这项检查。迁移指南还专门针对连接器补充了一点：如果服务器在后续请求中返回了不同的工具列表，除非固定了它的工具集，否则 Claude Fable 5.2 的思考块会失效；而 Claude Fable 5.1 和 Claude Opus 5.5 不检查这一点。所以在旧模型上测试根本发现不了这个问题。\n\n**什么算作变化。** 工具是按完整定义来比较的：名称、描述和 `input_schema`。改写一条描述就算变化，新增或删除一个工具也算。调整工具顺序没有关系，而设置了 `defer_loading: true` 的工具在被引用之前不参与比较。\n\n- **固定 MCP 服务器的工具列表。** 指南指出 Claude API 上有一个对应的 beta（`mcp-client-2026-09-15`）；固定之后，即使服务器重新部署，这个对话中的工具列表也保持不变。\n- **按对话冻结你自己的工具。** 在对话开始时只解析一次功能开关，把得到的工具定义与对话一起保存，并在之后的每一轮中逐字节地重复使用。\n- **以追加的方式添加工具。** 如果某个对话确实需要一个新工具，指南列出了对话中途修改工具的 beta，可以按值或按引用添加，这样历史记录保持只追加。\n- **在新对话中发布工具变更。** 一个在工具变化后被恢复的已存储对话可能会返回 400，所以新的描述应该只用于新会话。\n\n```go\ntype Conversation struct {\n\tID    string\n\tTools json.RawMessage // resolved once, at creation; never rebuilt per turn\n}\n\nfunc toolsFor(c *Conversation, flags FlagSet) (json.RawMessage, error) {\n\tif c.Tools != nil {\n\t\treturn c.Tools, nil\n\t}\n\tdefs, err := json.Marshal(buildTools(flags)) // stable order, stable text\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tc.Tools = defs\n\treturn defs, saveConversation(c)\n}\n```\n\n**取舍。** 冻结工具意味着对工具描述的修复只会影响新对话，长时间存在的会话在结束之前会一直使用旧文本。指南还介绍了一种 `drop_block` 模式，它会丢弃不匹配的思考块并继续执行；但这只是修复编辑问题期间的权宜之计，因为模型需要在被丢弃的地方重新思考，可能会增加输出 token。",
+      "followups": [
+        "Why would a test on Claude Opus 5.5 not have caught this?",
+        "How would you ship an improved tool description without breaking running sessions?"
+      ],
+      "followups_zh": [
+        "为什么在 Claude Opus 5.5 上测试发现不了这个问题？",
+        "如何在不破坏进行中会话的前提下发布一条改进后的工具描述？"
+      ],
+      "vocab": [
+        {
+          "en": "tool definition",
+          "zh": "工具定义"
+        },
+        {
+          "en": "pinning",
+          "zh": "固定"
+        },
+        {
+          "en": "append-only",
+          "zh": "只追加的"
+        },
+        {
+          "en": "feature flag",
+          "zh": "功能开关"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261110-2",
+      "topic": "Evals & Observability",
+      "difficulty": "Medium",
+      "title": "Adding a \"finish the whole task\" instruction to the catalog agent: proving it helps and knowing what it costs",
+      "title_zh": "给商品目录 Agent 加上「把整个任务做完」的指令：证明它有效，并弄清它的代价",
+      "question": "After moving a catalog-cleanup agent to Claude Fable 5.2 at `medium` effort, the team sees sessions end with \"Here is what remains, shall I continue?\" while hundreds of products are still unfixed. Someone pastes the \"finish the whole task\" text from the migration guide into the system prompt, and another engineer adds \"This codebase is yours\" to the agent that maintains the feed-export scripts. Both say it \"looks better\".\n\nHow would you evaluate these prompt changes before keeping them?",
+      "question_zh": "把一个商品目录清理 Agent 迁到 `medium` effort 的 Claude Fable 5.2 之后，团队发现很多会话以「以下是剩余的工作，要继续吗？」结束，而此时还有数百个商品没有修好。有人把迁移指南中「把整个任务做完」的那段文字粘贴进了系统提示；另一位工程师则在维护 feed 导出脚本的 Agent 上加了一句「这个代码库是你的」。两人都说效果「看起来更好了」。\n\n在保留这些提示修改之前，你会如何评估它们？",
+      "answer": "**The core idea.** A prompt line is a change to the product, and \"looks better\" is not a measurement. Change one thing at a time, measure the behavior you wanted and the cost you pay, and watch for side effects the line was not meant to have.\n\n**What the guide reports.** In Anthropic's testing, replaying recorded agentic coding sessions at `medium`, a version of the finish-the-task text cut the share of sessions that ended with doable work left by about half, removed most endings that ask permission or offer to continue, but not endings that list what remains and then stop, and raised output tokens by about 30%. The model also asks less often with it, so a confirmation step for risky actions must stay. That is the shape of result to look for in your own eval, not a number to assume.\n\n- **Define completion by end state.** For each task, the catalog has a known set of broken products; score how many are fixed after the session, not whether the transcript sounds finished.\n- **Classify how sessions end.** Tag each ending: finished, asked to continue, listed remaining work, stopped at an obstacle, or hit a real blocker. The guide's result says these move differently.\n- **Report cost per completed task.** Track output tokens and time per fixed product, so a 30% token rise is weighed against the work it finishes.\n- **Include risky cases.** Add tasks where the right move is to stop, such as a product marked not to touch, and check the agent still stops there.\n\n**The ownership sentence needs its own checks.** The guide reports that \"This codebase is yours\" made the model merge repeated code in about half of small coding tries, use about 1.5 times the output tokens, make unrequested changes such as tests and docs, change existing behavior in one of every six to ten tries, and often leave small changes out of its summary. So grade the diff, not the summary: run the existing tests, diff behavior on fixed inputs, and count unrequested files.\n\n```text\nvariant            fixed/total  ended_asking  listed_remaining  out_tokens/fixed  risky_stops_kept\nbaseline           ...          ...           ...               ...               ...\n+ finish_text      ...          ...           ...               ...               ...\n+ finish_text, hi  ...          ...           ...               ...               ...\n```\n\n**Trade-offs.** Raising effort is the other lever; the guide notes the model stops early more often at lower levels, so compare the prompt line at `medium` with no line at `high` on cost per fixed product. Run variants in the same window and with enough tasks that the difference is larger than run-to-run noise, and keep only the change that wins on both completion and cost.",
+      "answer_zh": "**核心思想。** 一行提示就是对产品的一次修改，而「看起来更好」不是测量结果。一次只改一处，测量你想要的行为和你付出的代价，并留意这行提示带来的、本不想要的副作用。\n\n**指南报告了什么。** 在 Anthropic 的测试中，以 `medium` 重放录制的 Agent 编程会话，加入一版「做完整个任务」的文字后，以仍有可做工作而结束的会话比例下降了约一半，大部分请求许可或提议继续的结尾都消失了，但列出剩余工作后停止的结尾并没有消失，同时输出 token 增加了约 30%。有了这段文字，模型也更少询问，所以高风险操作的确认步骤必须保留。这正是你在自己的评测中应该寻找的那种结果形态，而不是一个可以直接拿来假设的数字。\n\n- **按最终状态定义「完成」。** 对每个任务来说，商品目录中有一组已知的问题商品；对会话结束后修好了多少个打分，而不是看对话记录听起来是否完成了。\n- **对会话的结束方式分类。** 给每种结尾打上标签：已完成、请求继续、列出剩余工作、在障碍处停下，或遇到真正的阻碍。指南的结果表明，这几类的变化各不相同。\n- **按每个完成的任务报告成本。** 跟踪每修好一个商品所用的输出 token 和时间，这样 30% 的 token 增长就可以和它多完成的工作放在一起权衡。\n- **纳入有风险的用例。** 加入一些正确做法是停下来的任务，例如标记为不可改动的商品，并检查 Agent 在那里仍然会停下。\n\n**关于代码归属的那句话需要单独检查。** 指南报告说，「这个代码库是你的」让模型在约一半的小型编程尝试中合并了重复代码，输出 token 约为原来的 1.5 倍，做出了诸如测试和文档之类没人要求的改动，在每六到十次尝试中就有一次改变了已有功能的行为，而且它的总结常常漏掉小的改动。所以要评判代码差异，而不是总结：运行已有的测试，在固定输入上对比行为差异，并统计没人要求的文件改动。\n\n```text\nvariant            fixed/total  ended_asking  listed_remaining  out_tokens/fixed  risky_stops_kept\nbaseline           ...          ...           ...               ...               ...\n+ finish_text      ...          ...           ...               ...               ...\n+ finish_text, hi  ...          ...           ...               ...               ...\n```\n\n**取舍。** 提高 effort 是另一个可用的手段；指南指出，在较低的等级下模型更容易提前停止，所以要按每修好一个商品的成本，把 `medium` 加这行提示，与 `high` 不加这行提示进行比较。在同一时间段内运行各个变体，并使用足够多的任务，让差异大于每次运行之间的噪声；只保留在完成度和成本两方面都胜出的那个改动。",
+      "followups": [
+        "Why should completion be graded on the catalog state rather than the transcript?",
+        "How would you decide between the prompt line and a higher effort level?"
+      ],
+      "followups_zh": [
+        "为什么完成度应该根据商品目录的状态而不是对话记录来评判？",
+        "你会如何在这行提示和更高的 effort 等级之间做出选择？"
+      ],
+      "vocab": [
+        {
+          "en": "ablation",
+          "zh": "消融对比"
+        },
+        {
+          "en": "end state",
+          "zh": "最终状态"
+        },
+        {
+          "en": "side effect",
+          "zh": "副作用"
+        },
+        {
+          "en": "cost per completed task",
+          "zh": "每个完成任务的成本"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261110-3",
+      "topic": "Production",
+      "difficulty": "Hard",
+      "title": "Moving the research agent from Claude Fable 5.1 to Claude Fable 5.2: requests that passed yesterday now fail with \"bound to a different conversation\"",
+      "title_zh": "把研究 Agent 从 Claude Fable 5.1 迁到 Claude Fable 5.2：昨天还能通过的请求，今天报错「bound to a different conversation」",
+      "question": "Your company's account is several years old. Its research agent ran on Claude Fable 5.1 with a harness that inserts today's date into the system prompt each morning, trims old tool results client-side, and falls back to Claude Opus 5 on refusals. Stored conversations are sometimes resumed days later from a different, separately billed account used by the analytics team. After switching to Claude Fable 5.2 for its lower price, a share of requests return 400s, and resumed conversations seem to have lost their earlier reasoning.\n\nExplain each effect and plan the migration properly.",
+      "question_zh": "你们公司的账户已经有好几年历史了。它的研究 Agent 在 Claude Fable 5.1 上运行，所用的 harness 每天早上都会把当天日期写进系统提示，在客户端裁剪旧的工具结果，并在拒答时回退到 Claude Opus 5。已存储的对话有时会在几天后，由分析团队一个单独计费的账户恢复执行。为了更低的价格切换到 Claude Fable 5.2 之后，有一部分请求返回 400，而被恢复的对话似乎丢失了之前的推理。\n\n解释每一种现象，并合理地规划这次迁移。",
+      "answer": "**The core idea.** Claude Fable 5.2 ties its reasoning more strictly to the conversation, the model and the account that produced it. A harness that edits history, switches models or moves conversations between accounts will lose that reasoning or get errors. Find those habits before switching traffic.\n\n- **Why old accounts now fail.** The history-editing check existed on Claude Fable 5.1, but it was enforced by default only for accounts created on or after August 31, 2026. On Claude Fable 5.2 it is enforced for every account, so the daily date in `system` and the client-side trimming, which passed before, now return a 400, and retrying the same body does not clear it.\n- **Why fallback loses reasoning.** No model released before Claude Fable 5.2 reads its thinking blocks. When a refusal falls back to Claude Opus 5, the API drops those blocks; the request succeeds, but the turns after the switch run without that reasoning, with higher cost and latency on the first one.\n- **Why resumed conversations forget.** A Claude Fable 5.2 block works only in the account that produced it, or one linked to it. Blocks replayed from another account are dropped, so resume each conversation through the account that produced it.\n\n**Plan the move.** First run the three-step check the guide describes against the model you use now; setting `prefix_mismatch_behavior` opts a request into the check from any account, so you can find edits before switching. Then make the harness append-only: keep `system` and `tools` fixed for a session, deliver the date and other changing instructions as an appended system message or in the newest turn, and replace client-side trimming with server-side compaction or context editing.\n\n```json\n{\n  \"role\": \"system\",\n  \"content\": \"The current date is November 10, 2026.\"\n}\n```\n\n- **Choose the mismatch behavior.** Keep `\"error\"` where a mismatch can only be a bug; use `\"drop_block\"` with its beta header only as a stopgap while fixing an edit, because the model thinks again where blocks were dropped.\n- **Re-tune effort.** The default is `high`; re-run the effort sweep instead of carrying over the Claude Fable 5.1 setting, and use a lower level for easy turns.\n- **Count the drops.** With the binding-controls beta header, `input_transformations` lists each dropped block and its reason; chart them per conversation during the rollout.\n\n**Trade-offs.** The lower price only pays off if the reasoning survives; a fallback that runs often or a harness that drops blocks every turn can erase the saving through extra thinking. Moving conversations to the producing account adds routing work for the analytics team, but replaying through another account silently degrades answers.",
+      "answer_zh": "**核心思想。** Claude Fable 5.2 把它的推理更严格地绑定到生成它的对话、模型和账户上。一个会编辑历史记录、切换模型或在账户之间转移对话的 harness，要么会丢失这些推理，要么会遇到错误。在切换流量之前，先找出这些做法。\n\n- **为什么老账户现在会失败。** 历史编辑检查在 Claude Fable 5.1 上就已存在，但默认只对 2026 年 8 月 31 日及之后创建的账户强制执行。在 Claude Fable 5.2 上，所有账户都会被强制执行，所以写入 `system` 的每日日期和客户端裁剪，以前能通过，现在会返回 400，而且重试同样的请求体也无法解决。\n- **为什么回退会丢失推理。** 在 Claude Fable 5.2 之前发布的模型都无法读取它的思考块。当拒答回退到 Claude Opus 5 时，API 会丢弃这些块；请求能成功，但切换之后的轮次都是在没有那些推理的情况下运行的，第一轮的成本和延迟还会更高。\n- **为什么恢复的对话会遗忘。** Claude Fable 5.2 的思考块只在生成它的账户，或与之关联的账户中有效。从另一个账户重放的思考块会被丢弃，所以要通过生成它的账户来恢复每一个对话。\n\n**规划这次迁移。** 首先针对你目前使用的模型，运行指南中描述的三步检查；设置 `prefix_mismatch_behavior` 可以让任何账户的请求都参与这项检查，所以你能在切换之前就找出那些编辑。然后让 harness 只追加：在一个会话中保持 `system` 和 `tools` 不变，把日期和其他会变化的指令作为追加的系统消息或放在最新一轮中发送，并用服务端压缩或上下文编辑取代客户端裁剪。\n\n```json\n{\n  \"role\": \"system\",\n  \"content\": \"The current date is November 10, 2026.\"\n}\n```\n\n- **选择不匹配时的处理方式。** 在不匹配只可能是 bug 的地方保持 `\"error\"`；`\"drop_block\"` 及其 beta 头只作为修复编辑期间的权宜之计，因为模型需要在被丢弃的地方重新思考。\n- **重新调整 effort。** 默认是 `high`；重新做一次 effort 扫描，而不是沿用 Claude Fable 5.1 上的设置，并在简单轮次上使用更低的等级。\n- **统计丢弃的块。** 加上 binding-controls 的 beta 头后，`input_transformations` 会列出每个被丢弃的块及原因；在上线期间按对话把它们绘制成图表。\n\n**取舍。** 只有在推理得以保留时，更低的价格才划算；频繁触发的回退，或每一轮都丢弃思考块的 harness，都可能因为额外的思考而抵消这部分节省。把对话交回生成它的账户，会给分析团队增加路由工作，但通过另一个账户重放会悄无声息地降低回答质量。",
+      "followups": [
+        "Why does putting the date in the system prompt break the check, while a system message does not?",
+        "How would you test the harness for edits before switching any production traffic?",
+        "What would you monitor during the first week on the new model?"
+      ],
+      "followups_zh": [
+        "为什么把日期写进系统提示会破坏检查，而用系统消息就不会？",
+        "在切换任何生产流量之前，你会如何测试 harness 中的编辑？",
+        "在使用新模型的第一周里，你会监控哪些指标？"
+      ],
+      "vocab": [
+        {
+          "en": "history-editing check",
+          "zh": "历史编辑检查"
+        },
+        {
+          "en": "enforcement",
+          "zh": "强制执行"
+        },
+        {
+          "en": "account binding",
+          "zh": "账户绑定"
+        },
+        {
+          "en": "fallback",
+          "zh": "回退"
+        },
+        {
+          "en": "stopgap",
+          "zh": "权宜之计"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261110-4",
+      "topic": "Context & Memory",
+      "difficulty": "Hard",
+      "title": "The catalog agent's memory notes make it timid: it stops retrying busy APIs and asks for approvals nobody requires",
+      "title_zh": "商品目录 Agent 的记忆笔记让它变得畏手畏脚：它不再重试繁忙的 API，还请求根本没人要求的审批",
+      "question": "A long-running catalog agent keeps a memory file across sessions. Over months it has collected notes such as \"Never retry the Amazon feed API, it caused duplicates once\", \"Always ask before changing prices\" and \"Stop at the first error\", the last added by a reviewer agent. After moving to a newer model, the agent stops when the inventory API returns \"busy\", asks merchants to approve routine retries, and leaves nightly jobs half done.\n\nExplain the behavior and redesign how cautionary memory is kept.",
+      "question_zh": "一个长期运行的商品目录 Agent 维护着一个跨会话的记忆文件。几个月下来，它积累了诸如「绝不要重试 Amazon feed API，它曾经造成过重复」「改价前总要先询问」和「遇到第一个错误就停下」之类的笔记，最后一条是一个评审 Agent 添加的。迁到较新的模型之后，这个 Agent 在库存 API 返回「繁忙」时就停下，请商家批准例行的重试，夜间任务也只做了一半。\n\n解释这种行为，并重新设计警示性记忆的保存方式。",
+      "answer": "**The core idea.** Memory is instructions that never expire. Every cautious note written for one incident keeps applying to every later situation, and a model that follows instructions closely will obey all of them. Treat memory like code: scoped, reviewed, and deleted when it no longer applies.\n\n**What the docs report.** The Claude Fable 5.2 migration guide warns that cautious instructions build up wherever context carries over, such as memory, notes, instruction files and messages between agents, and that the model follows them closely. In Anthropic's simulated tasks, with a dozen notes from earlier sessions in context, one of which said never to retry, retries after a busy tool fell from nearly all tries to about four in ten. A general instruction to act more freely changed nothing, while a line naming retries among the steps that need no approval raised them from almost none to about half.\n\n- **Delete notes that no longer apply.** The duplicate problem behind \"never retry\" was fixed with idempotency keys; the note should have gone with the fix.\n- **Write the exception into the rule.** The guide found that under a \"never\" rule, an approved step was taken in about one try in ten, against nine in ten when the rule itself said to get a go-ahead first; a separate line about approvals did not help.\n- **Name the steps that need no approval,** and name retries only for calls that are safe to repeat.\n- **Check what reviewer agents attach.** A reviewer's \"stop at the first error\" is carried forward like any other instruction.\n\n```go\ntype MemoryNote struct {\n\tText      string    // \"Retry inventory API on 'busy' up to 3 times; it is idempotent.\"\n\tScope     string    // tool, merchant or task the note applies to\n\tReason    string    // incident or decision that created it\n\tOwner     string    // who can change it\n\tExpiresAt time.Time // reviewed or removed by then\n}\n\nfunc activeNotes(all []MemoryNote, scope string, now time.Time) []MemoryNote {\n\tvar out []MemoryNote\n\tfor _, n := range all {\n\t\tif n.Scope == scope && now.Before(n.ExpiresAt) {\n\t\t\tout = append(out, n)\n\t\t}\n\t}\n\treturn out\n}\n```\n\n**Keep real guardrails in code.** The application's own confirmation step for risky or irreversible actions, such as price changes above a threshold, should stay in the tool layer, so memory can be cleaned without weakening safety.\n\n**Trade-offs.** Expiring and scoping notes means some hard-won lessons must be rewritten or re-learned; keep the reason with each note so a reviewer can decide. Fewer cautionary notes make the agent act more, so the eval should include cases where stopping is correct, and measure both finished work and wrong actions.",
+      "answer_zh": "**核心思想。** 记忆就是永不过期的指令。为某一次事故写下的每一条谨慎笔记，都会持续作用于之后的每一种情况，而一个严格遵循指令的模型会服从所有这些笔记。要像对待代码一样对待记忆：限定范围、经过评审，并在不再适用时删除。\n\n**文档报告了什么。** Claude Fable 5.2 的迁移指南提醒，凡是上下文会延续的地方，例如记忆、笔记、指令文件和 Agent 之间的消息，谨慎的指令都会不断累积，而模型会严格遵循它们。在 Anthropic 的模拟任务中，上下文里有一打来自之前会话的笔记，其中一条说绝不要重试；结果工具繁忙后的重试，从几乎每次都会重试，降到了大约十次中四次。一条笼统的「更自由地行动」的指令毫无作用，而一句把重试列为无需审批的步骤的话，把重试比例从几乎为零提高到了大约一半。\n\n- **删除不再适用的笔记。** 「绝不要重试」背后的重复问题，已经用幂等键修复了；这条笔记本应随着修复一起删除。\n- **把例外写进规则本身。** 指南发现，在一条「绝不」规则之下，一个已获批准的步骤只在大约十次中一次被执行；而当规则本身写明「先获得许可」时，十次中有九次被执行；单独写一行关于审批的说明并没有帮助。\n- **明确列出无需审批的步骤**，并且只把可以安全重复的调用列为可重试。\n- **检查评审 Agent 附加的条件。** 评审 Agent 写下的「遇到第一个错误就停下」，会像其他任何指令一样被延续下去。\n\n```go\ntype MemoryNote struct {\n\tText      string    // \"Retry inventory API on 'busy' up to 3 times; it is idempotent.\"\n\tScope     string    // tool, merchant or task the note applies to\n\tReason    string    // incident or decision that created it\n\tOwner     string    // who can change it\n\tExpiresAt time.Time // reviewed or removed by then\n}\n\nfunc activeNotes(all []MemoryNote, scope string, now time.Time) []MemoryNote {\n\tvar out []MemoryNote\n\tfor _, n := range all {\n\t\tif n.Scope == scope && now.Before(n.ExpiresAt) {\n\t\t\tout = append(out, n)\n\t\t}\n\t}\n\treturn out\n}\n```\n\n**把真正的防护措施放在代码里。** 对于有风险或不可逆的操作，例如超过阈值的改价，应用自身的确认步骤应该留在工具层，这样清理记忆就不会削弱安全性。\n\n**取舍。** 给笔记设定过期时间和适用范围，意味着一些来之不易的经验必须重写或重新学习；把原因与每条笔记一起保存，让评审者来做决定。警示性笔记变少会让 Agent 更主动，所以评测应该包含停下才是正确做法的用例，并同时测量完成的工作和错误的操作。",
+      "followups": [
+        "Why did a general \"act more freely\" instruction not undo the notes?",
+        "Who should be allowed to write to the agent's memory, and how would you review it?"
+      ],
+      "followups_zh": [
+        "为什么一条笼统的「更自由地行动」指令无法抵消这些笔记的影响？",
+        "应该允许谁写入 Agent 的记忆，你又会如何评审它？"
+      ],
+      "vocab": [
+        {
+          "en": "cautionary note",
+          "zh": "警示性笔记"
+        },
+        {
+          "en": "scope",
+          "zh": "适用范围"
+        },
+        {
+          "en": "expiry",
+          "zh": "过期"
+        },
+        {
+          "en": "guardrail",
+          "zh": "防护措施"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261110-5",
+      "topic": "Multi-agent",
+      "difficulty": "Senior",
+      "title": "After moving the coordinator to Claude Fable 5.2, it starts more subagents than tasks need, and the advisor change breaks running conversations",
+      "title_zh": "把协调者迁到 Claude Fable 5.2 之后，它启动的子 Agent 多于任务所需，而更换顾问模型还让进行中的对话出错",
+      "question": "A campaign-optimization system uses a Claude Fable 5.1 coordinator with a `start_subagent` tool, Claude Haiku 5.5 workers, and an advisor tool set to `claude-fable-5-1`. The team moves the coordinator to Claude Fable 5.2 at `xhigh`. Three things happen: the coordinator starts subagents to review its own work, and subagents become most of the bill; requests fail with a 400 until someone changes the advisor model; and right after that change, conversations that were already running fail with a 400 about a thinking block bound to a different conversation.\n\nAs the senior engineer, explain each effect and redesign the setup.",
+      "question_zh": "一个广告系列优化系统使用 Claude Fable 5.1 作为协调者，配有一个 `start_subagent` 工具、Claude Haiku 5.5 的 worker，以及一个设置为 `claude-fable-5-1` 的顾问工具。团队把协调者迁到了 `xhigh` 的 Claude Fable 5.2。于是发生了三件事：协调者开始启动子 Agent 来审查它自己的工作，子 Agent 成了账单的主要部分；在有人更换顾问模型之前，请求一直返回 400；而就在更换之后，那些已经在运行的对话又报 400，提示某个思考块绑定到了另一个对话。\n\n作为资深工程师，解释每一种现象，并重新设计这套配置。",
+      "answer": "**The core idea.** A stronger coordinator follows its instructions and tools more literally, including any invitation to delegate, and its configuration is part of the conversation it reasons over. Tell it plainly what delegation costs, and change its configuration only at conversation boundaries.\n\n**Why delegation grew.** The migration guide reports that how much Claude Fable 5.2 delegates depends on the harness: with a minimal subagent tool it rarely starts one, where prompts invite delegation it delegates readily, and at `xhigh` and `max` in an agentic coding product it used subagents to review its own work, which Claude Fable 5.1 did not. Subagents can be a large share of a session's cost.\n\n**Fix the delegation.** First review lines in system prompts, skills or agent files that tell it to delegate. Then rewrite the tool description: say what a subagent adds to cost, when delegation is worth it, and how to brief one, with cost first. In the guide's testing on short tasks, a description written that way cut delegation by about a third at the same task success. Also reconsider effort: start at `high`, and keep `xhigh` only where a gain is measured.\n\n```json\n{\n  \"name\": \"start_subagent\",\n  \"description\": \"Starts a separate worker. Each one adds its own model calls and often costs more than doing a small step yourself. Use it for independent, reading-heavy work, such as auditing many campaigns in parallel. Do not use it to review your own output. Brief it with the goal, the inputs and the exact output format you need.\",\n  \"input_schema\": {\"...\": \"...\"}\n}\n```\n\n- **Why the advisor 400s.** A Claude Fable 5.2 executor accepts only `claude-fable-5-2` or `claude-mythos-5-2` as its advisor; `claude-fable-5-1` returns a 400. Set the advisor in the same change that moves the executor. A Claude Fable 5.2 advisor returns its advice encrypted, so code that reads the advice text must stop depending on it.\n- **Why running conversations broke.** Changing the advisor's `model` is an edit to `tools`, so later requests that replay earlier thinking blocks fail the history-editing check. Make such changes in new conversations.\n- **Check the worker model.** Delegation cost depends on which model the harness runs subagents on; keep cheap workers for reading-heavy steps.\n\n**Measure and roll out.** Track subagents started per task, the share of cost spent in subagents, and task success, before and after each change, one change at a time. Roll out the new coordinator configuration as a new agent version used only by new conversations, and let running ones finish on the old one.\n\n**Trade-offs.** Early testers found Claude Fable 5.2 a strong planner and orchestrator for other models, and delegation speeds up parallel work, so do not ban it; a description that says too much about cost can make it delegate too little. Self-review by a subagent can catch mistakes, so if you remove it, check that error rates hold.",
+      "answer_zh": "**核心思想。** 更强的协调者会更忠实地遵循它的指令和工具，包括任何鼓励委派的说法，而它的配置本身就是它推理所依据的对话的一部分。要明确告诉它委派的代价，并且只在对话边界处修改它的配置。\n\n**为什么委派变多了。** 迁移指南报告说，Claude Fable 5.2 委派的多少取决于 harness：如果子 Agent 工具很简单，它很少启动子 Agent；如果提示鼓励委派，它就会很乐意委派；而在一个 Agent 编程产品中，在 `xhigh` 和 `max` 等级下，它会用子 Agent 来审查自己的工作，这是 Claude Fable 5.1 不会做的。子 Agent 可能占一个会话成本的很大一部分。\n\n**修正委派行为。** 首先检查系统提示、技能或 Agent 文件中鼓励委派的语句。然后改写工具描述：说明子 Agent 会增加多少成本、什么时候值得委派，以及如何给子 Agent 下达任务，并把成本放在最前面。在指南针对短任务的测试中，这样写的描述让委派减少了约三分之一，而任务成功率不变。同时重新考虑 effort：从 `high` 开始，只在测得收益的地方保留 `xhigh`。\n\n```json\n{\n  \"name\": \"start_subagent\",\n  \"description\": \"Starts a separate worker. Each one adds its own model calls and often costs more than doing a small step yourself. Use it for independent, reading-heavy work, such as auditing many campaigns in parallel. Do not use it to review your own output. Brief it with the goal, the inputs and the exact output format you need.\",\n  \"input_schema\": {\"...\": \"...\"}\n}\n```\n\n- **为什么顾问会报 400。** Claude Fable 5.2 作为执行者时，只接受 `claude-fable-5-2` 或 `claude-mythos-5-2` 作为顾问；`claude-fable-5-1` 会返回 400。要在迁移执行者的同一次修改中设置顾问。Claude Fable 5.2 作为顾问时会返回加密的建议，所以读取建议文本的代码必须不再依赖它。\n- **为什么进行中的对话出错了。** 修改顾问的 `model` 属于对 `tools` 的编辑，所以之后重放早先思考块的请求无法通过历史编辑检查。这类修改应该放在新对话中进行。\n- **检查 worker 所用的模型。** 委派的成本取决于 harness 用哪个模型来运行子 Agent；把廉价的 worker 留给以阅读为主的步骤。\n\n**衡量与上线。** 在每次修改前后，一次只改一处，跟踪每个任务启动的子 Agent 数量、子 Agent 所占成本比例以及任务成功率。把新的协调者配置作为一个新的 Agent 版本发布，只用于新对话，让进行中的对话在旧版本上运行完。\n\n**取舍。** 早期测试者发现，Claude Fable 5.2 是其他模型的出色规划者和编排者，委派也能加快可并行的工作，所以不要禁止委派；在描述中过多强调成本，可能会让它委派得太少。由子 Agent 进行自我审查能发现错误，所以如果你去掉了这一环节，要检查错误率是否保持不变。",
+      "followups": [
+        "Why should the tool description lead with cost rather than benefits?",
+        "How would you change the advisor model without breaking running conversations?",
+        "What metrics tell you delegation is now at the right level?"
+      ],
+      "followups_zh": [
+        "为什么工具描述应该先讲成本，而不是先讲好处？",
+        "如何在不破坏进行中对话的前提下更换顾问模型？",
+        "哪些指标能告诉你委派现在处于合适的水平？"
+      ],
+      "vocab": [
+        {
+          "en": "coordinator",
+          "zh": "协调者"
+        },
+        {
+          "en": "delegation",
+          "zh": "委派"
+        },
+        {
+          "en": "advisor tool",
+          "zh": "顾问工具"
+        },
+        {
+          "en": "agent version",
+          "zh": "Agent 版本"
+        },
+        {
+          "en": "orchestrator",
+          "zh": "编排者"
+        }
+      ]
+    }
+  ]
+}
