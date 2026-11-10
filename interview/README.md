@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 30 天、150 道题。
+共 31 天、155 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-11](days/2026-11-11.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Medium | [Merchants' flash sales end hours early: promotion times parsed without a time zone](days/2026-11-11.md#q1) | 商家的限时促销提前几个小时结束：促销时间在解析时没有带时区 |
+| 2 | System Design | Senior | [Billing merchants for a subscription plus a share of sales: mid-month plan changes, failed card payments and invoices that must never change](days/2026-11-11.md#q2) | 向商家收取订阅费加销售抽成：月中更换套餐、信用卡扣款失败，以及永远不能更改的发票 |
+| 3 | Database | Medium | ["Highest price first" shows products without a price at the top, and the fix makes the query slow](days/2026-11-11.md#q3) | 「价格从高到低」把没有价格的商品排在了最前面，而修复之后查询又变慢了 |
+| 4 | Middleware | Hard | [A Lua script that recalculates stock for a large merchant makes Redis answer BUSY to every service, and SCRIPT KILL refuses to stop it](days/2026-11-11.md#q4) | 一个为大商家重新计算库存的 Lua 脚本让 Redis 对所有服务都返回 BUSY，而 SCRIPT KILL 也拒绝终止它 |
+| 5 | Java & CS | Hard | [Deploys hang until the pod is killed because a sync worker swallows InterruptedException](days/2026-11-11.md#q5) | 部署一直卡住直到 Pod 被强制杀掉，原因是一个同步 worker 吞掉了 InterruptedException |
 
 ## [2026-11-10](days/2026-11-10.md)
 
