@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 34 个模块、154 道题。
+共 35 个模块、159 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -467,3 +467,17 @@ Five new agent questions around moving to Claude Fable 5.2: keeping MCP and cust
 | 3 | Production | Hard | [Moving the research agent from Claude Fable 5.1 to Claude Fable 5.2: requests that passed yesterday now fail with "bound to a different conversation"](modules/daily-2026-11-10.md#q3) | 把研究 Agent 从 Claude Fable 5.1 迁到 Claude Fable 5.2：昨天还能通过的请求，今天报错「bound to a different conversation」 |
 | 4 | Context & Memory | Hard | [The catalog agent's memory notes make it timid: it stops retrying busy APIs and asks for approvals nobody requires](modules/daily-2026-11-10.md#q4) | 商品目录 Agent 的记忆笔记让它变得畏手畏脚：它不再重试繁忙的 API，还请求根本没人要求的审批 |
 | 5 | Multi-agent | Senior | [After moving the coordinator to Claude Fable 5.2, it starts more subagents than tasks need, and the advisor change breaks running conversations](modules/daily-2026-11-10.md#q5) | 把协调者迁到 Claude Fable 5.2 之后，它启动的子 Agent 多于任务所需，而更换顾问模型还让进行中的对话出错 |
+
+## [Daily set · Nov 11 · 每日新题 · 11 月 11 日](modules/daily-2026-11-11.md)
+
+Five new agent questions: a classification route that runs out of tokens while thinking, a policy assistant that stops correcting itself, approval rules that a literal model can follow, evaluating whether end-of-run reports are clear, and compacting a long session without losing recent reasoning.
+
+> 五道新的 Agent 题：一个在思考时耗尽 token 的分类路由、一个不再纠正自己的政策助手、一个照字面执行的模型能够遵循的审批规则、评估运行结束时的报告是否清晰，以及在不丢失最近推理的前提下压缩一个长会话。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Agent Loop | Medium | [A quick classification route on Claude Fable 5.2 returns empty answers with stop_reason max_tokens, although the prompt says "answer directly without deliberating"](modules/daily-2026-11-11.md#q1) | Claude Fable 5.2 上的一个快速分类路由返回空答案，stop_reason 为 max_tokens，尽管提示里写着「直接回答，不要深思」 |
+| 2 | RAG | Medium | [The policy assistant got cheaper after a "treat earlier answers as settled" line, and stopped correcting its own wrong answers](modules/daily-2026-11-11.md#q2) | 政策助手加上一句「把之前的回答视为定论」后变便宜了，却不再纠正自己答错的地方 |
+| 3 | Safety & Security | Hard | [The campaign agent's approval rule blocks routine work, and loosening it risks real damage: writing approval rules a literal model can follow](modules/daily-2026-11-11.md#q3) | 广告系列 Agent 的审批规则挡住了日常工作，而放宽它又可能造成真正的损失：如何写出一个照字面执行的模型能遵循的审批规则 |
+| 4 | Evals & Observability | Hard | [Merchants can't follow the agent's end-of-run reports: defining and grading "clear" before changing the prompt](modules/daily-2026-11-11.md#q4) | 商家看不懂 Agent 运行结束时的报告：在修改提示之前，先定义并评判什么叫「清晰」 |
+| 5 | Context & Memory | Senior | [A weeks-long store-optimization session must keep its reasoning while the context fills: compaction that stays append-only](modules/daily-2026-11-11.md#q5) | 一个持续数周的店铺优化会话必须在上下文不断增长的同时保留推理：保持只追加的压缩方式 |
