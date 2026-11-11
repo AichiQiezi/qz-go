@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 35 个模块、159 道题。
+共 36 个模块、164 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -481,3 +481,17 @@ Five new agent questions: a classification route that runs out of tokens while t
 | 3 | Safety & Security | Hard | [The campaign agent's approval rule blocks routine work, and loosening it risks real damage: writing approval rules a literal model can follow](modules/daily-2026-11-11.md#q3) | 广告系列 Agent 的审批规则挡住了日常工作，而放宽它又可能造成真正的损失：如何写出一个照字面执行的模型能遵循的审批规则 |
 | 4 | Evals & Observability | Hard | [Merchants can't follow the agent's end-of-run reports: defining and grading "clear" before changing the prompt](modules/daily-2026-11-11.md#q4) | 商家看不懂 Agent 运行结束时的报告：在修改提示之前，先定义并评判什么叫「清晰」 |
 | 5 | Context & Memory | Senior | [A weeks-long store-optimization session must keep its reasoning while the context fills: compaction that stays append-only](modules/daily-2026-11-11.md#q5) | 一个持续数周的店铺优化会话必须在上下文不断增长的同时保留推理：保持只追加的压缩方式 |
+
+## [Daily set · Nov 12 · 每日新题 · 11 月 12 日](modules/daily-2026-11-12.md)
+
+Five new agent questions: fixing a hand-written tool loop with the tool runner, a Claude Haiku 5.5 step that skips its lookup when thinking is off, moving fast-mode traffic off Opus 4.8 before November 30, moving API keys into vault credentials, and an ops console for a coordinator and its workers.
+
+> 五道新的 Agent 题：用工具运行器修复手写的工具循环、Claude Haiku 5.5 的一个步骤在关闭思考后跳过查询、在 11 月 30 日前把快速模式流量迁出 Opus 4.8、把 API 密钥迁入 vault 凭据，以及为协调者及其工作者搭建运维控制台。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Agent Loop | Medium | [The support agent's hand-written tool loop loses tool calls, answers "Continue." to paused searches, and asks for refund approval after the refund](modules/daily-2026-11-12.md#q1) | 客服 agent 手写的工具循环会丢失工具调用、对暂停的搜索回复「Continue.」，还在退款完成之后才请求审批 |
+| 2 | Tools & MCP | Medium | [To cut latency, the team turned thinking off on the Claude Haiku 5.5 category step, and products now get categories nobody looked up](modules/daily-2026-11-12.md#q2) | 为了降低延迟，团队在 Claude Haiku 5.5 的分类步骤上关闭了思考，结果商品被分到了没人查过的类目里 |
+| 3 | Production | Hard | [Fast mode on Opus 4.8 ends on November 30: moving the live-chat agent's fast traffic on the Claude API, Managed Agents, Foundry and Vertex](modules/daily-2026-11-12.md#q3) | Opus 4.8 的快速模式将于 11 月 30 日下线：迁移实时聊天 agent 在 Claude API、Managed Agents、Foundry 和 Vertex 上的快速流量 |
+| 4 | Safety & Security | Hard | [Moving the research agent's API keys into vault credentials: a Slack webhook, a signed S3 upload, an OAuth token exchange, and a key that only fails when set up in the Console](modules/daily-2026-11-12.md#q4) | 把研究 agent 的 API 密钥迁入 vault 凭据：一个 Slack webhook、一次签名的 S3 上传、一次 OAuth 令牌交换，以及一个只在控制台创建时才出错的密钥 |
+| 5 | Multi-agent | Senior | [Building the ops console for a coordinator with six workers: "done" that isn't, empty live views, costs that don't add up, and a stop button that halts everything](modules/daily-2026-11-12.md#q5) | 为带六个工作者的协调者搭建运维控制台：显示「完成」其实没完成、实时视图一片空白、成本对不上账，还有一个会停掉所有东西的停止按钮 |
