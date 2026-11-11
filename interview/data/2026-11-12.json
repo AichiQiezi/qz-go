@@ -1,0 +1,203 @@
+{
+  "date": "2026-11-12",
+  "generatedAt": "2026-11-12T06:51:03+08:00",
+  "questions": [
+    {
+      "id": "20261112-1",
+      "topic": "Go",
+      "difficulty": "Hard",
+      "title": "A worker selects on an urgent queue and a bulk queue, yet order cancellations wait behind catalog syncs",
+      "title_zh": "一个 worker 同时在紧急队列和批量队列上 select，订单取消却仍然排在商品目录同步后面",
+      "question": "A Go worker pushes changes to ad platforms. Order cancellations, which must stop ads quickly, go to an `urgent` channel; nightly catalog syncs, thousands of slow calls, go to a `bulk` channel. The worker loop is a single `select` with one case for each channel. During the nightly sync, cancellations take minutes to reach the platform, and the on-call engineer says \"but urgent has its own channel\". Later, after a shutdown change closes `bulk`, the worker's CPU jumps to 100%.\n\nExplain both problems and fix the loop.",
+      "question_zh": "一个 Go worker 负责把变更推送到广告平台。必须尽快停止广告的订单取消，进入 `urgent` 通道；夜间的商品目录同步有成千上万次慢调用，进入 `bulk` 通道。worker 的循环是一个 `select`，每个通道各有一个 case。在夜间同步期间，取消操作要好几分钟才能到达平台，值班工程师说：「可是紧急任务有自己的通道啊」。后来，一次关闭流程的修改会关闭 `bulk`，此后 worker 的 CPU 跳到了 100%。\n\n解释这两个问题，并修复这个循环。",
+      "answer": "**Why separate channels do not give priority.** When several cases of a `select` are ready, Go picks one at random. With a full bulk queue, roughly half of the worker's picks go to bulk work, and each bulk call is slow, so an urgent item waits for several bulk calls. In a local test with 1,000 bulk items and 10 urgent ones queued, a plain `select` needed 15 to 20 receives to handle all 10 urgent items.\n\n**Fix: check urgent first, then wait on both.** A non-blocking receive on the urgent channel before the main `select` drains urgent work whenever there is any. In the same test, this handled the 10 urgent items in exactly 10 receives.\n\n```go\nfor {\n\tselect {\n\tcase job := <-urgent:\n\t\thandle(job)\n\t\tcontinue\n\tdefault:\n\t}\n\tselect {\n\tcase job := <-urgent:\n\t\thandle(job)\n\tcase job, ok := <-bulk:\n\t\tif !ok {\n\t\t\tbulk = nil // closed: a nil channel is never selected\n\t\t\tcontinue\n\t\t}\n\t\thandle(job)\n\tcase <-ctx.Done():\n\t\treturn\n\t}\n}\n```\n\n**Why a closed channel burns CPU.** A receive from a closed channel never blocks; it returns the zero value immediately, every time. A `select` that keeps choosing the closed case spins in a tight loop. Check the `ok` value and set the channel variable to `nil` once it is closed, because a `nil` channel is never ready.\n\n- **Priority inside one worker is still limited.** If a bulk call takes seconds, an urgent item that arrives during it still waits; give urgent work its own workers so it never queues behind a slow call.\n- **Separate rate limits.** If both share one ad-platform quota, reserve part of it for urgent calls, or bulk work can still starve them.\n- **Measure queue age.** Export the age of the oldest urgent item; it is the number the business cares about.\n\n**Trade-offs.** Strict priority can starve bulk work forever if urgent traffic never stops; dedicated workers or a weighted scheme keeps both moving. Separate worker pools cost more goroutines and connections, which is usually cheap compared with ads running on cancelled orders.",
+      "answer_zh": "**为什么分开的通道并不能带来优先级。** 当 `select` 的多个 case 同时就绪时，Go 会随机选择其中一个。在批量队列已满的情况下，worker 大约一半的选择会落到批量工作上，而每次批量调用都很慢，于是一个紧急任务要等上好几次批量调用。在本地测试中，队列里有 1000 个批量任务和 10 个紧急任务时，普通的 `select` 需要 15 到 20 次接收，才能处理完全部 10 个紧急任务。\n\n**修复：先检查紧急通道，再同时等待两者。** 在主 `select` 之前，对紧急通道做一次非阻塞接收，只要有紧急任务就会先处理完。在同样的测试中，这样只用了恰好 10 次接收就处理完了 10 个紧急任务。\n\n```go\nfor {\n\tselect {\n\tcase job := <-urgent:\n\t\thandle(job)\n\t\tcontinue\n\tdefault:\n\t}\n\tselect {\n\tcase job := <-urgent:\n\t\thandle(job)\n\tcase job, ok := <-bulk:\n\t\tif !ok {\n\t\t\tbulk = nil // closed: a nil channel is never selected\n\t\t\tcontinue\n\t\t}\n\t\thandle(job)\n\tcase <-ctx.Done():\n\t\treturn\n\t}\n}\n```\n\n**为什么已关闭的通道会耗尽 CPU。** 从已关闭的通道接收永远不会阻塞；它每次都会立即返回零值。一个不断选中这个已关闭 case 的 `select`，会陷入空转的死循环。要检查 `ok` 值，并在通道关闭后把通道变量设为 `nil`，因为 `nil` 通道永远不会就绪。\n\n- **单个 worker 内的优先级仍然有限。** 如果一次批量调用要花好几秒，那么在调用期间到达的紧急任务仍然要等待；为紧急工作分配独立的 worker，这样它就永远不会排在慢调用后面。\n- **分开限流。** 如果两者共用同一个广告平台配额，就要为紧急调用预留一部分，否则批量工作仍然可能让它们饿死。\n- **测量队列等待时长。** 导出最老的紧急任务已经等待了多久；这才是业务真正关心的数字。\n\n**取舍。** 如果紧急流量从不停止，严格的优先级可能会让批量工作永远饿死；专用的 worker 或加权方案可以让两者都持续推进。独立的 worker 池会多占用一些 goroutine 和连接，但与在已取消订单上继续投放广告的损失相比，这通常是很便宜的。",
+      "followups": [
+        "Why does Go choose randomly among ready select cases?",
+        "How would you prevent strict priority from starving bulk work?"
+      ],
+      "followups_zh": [
+        "为什么 Go 会在就绪的 select case 之间随机选择？",
+        "你会如何防止严格优先级让批量工作饿死？"
+      ],
+      "vocab": [
+        {
+          "en": "priority",
+          "zh": "优先级"
+        },
+        {
+          "en": "starvation",
+          "zh": "饥饿"
+        },
+        {
+          "en": "non-blocking receive",
+          "zh": "非阻塞接收"
+        },
+        {
+          "en": "nil channel",
+          "zh": "nil 通道"
+        }
+      ]
+    },
+    {
+      "id": "20261112-2",
+      "topic": "System Design",
+      "difficulty": "Medium",
+      "title": "Generating sitemaps and product feeds for 100,000 storefronts every day without hammering the database",
+      "title_zh": "每天为 10 万个店铺生成站点地图和商品 feed，同时不压垮数据库",
+      "question": "Each storefront needs an up-to-date `sitemap.xml` for search engines and product feeds for Google Merchant Center and Meta catalogs. Today a cron job at midnight loops over all stores and queries every product, and for an hour the primary database is saturated. Large stores have hundreds of thousands of products, search engines fetch sitemaps at any time, and merchants complain that a product added in the morning is missing from the feed until the next day.\n\nDesign the generation pipeline.",
+      "question_zh": "每个店铺都需要一份最新的 `sitemap.xml` 供搜索引擎使用，还需要提供给 Google Merchant Center 和 Meta 商品目录的商品 feed。目前一个午夜的定时任务会遍历所有店铺并查询每一个商品，接下来的一个小时里主数据库都处于饱和状态。大店铺有几十万个商品，搜索引擎随时都会来抓取站点地图，而商家抱怨早上新加的商品要到第二天才会出现在 feed 里。\n\n设计这条生成流水线。",
+      "answer": "**Generate incrementally, serve statically.** Treat sitemaps and feeds as build artifacts: regenerate a store's files when its products change, write them to object storage, and serve them from a CDN. Requests from crawlers then never touch the database, and work happens only for stores that changed.\n\n- **Trigger by change, debounce per store.** Product change events mark a store dirty; a scheduler rebuilds a dirty store at most every few minutes, so a bulk import produces one rebuild, not thousands.\n- **Read from a replica in pages.** Rebuilds read with keyset pagination from a read replica or the analytics copy, never with deep offsets on the primary.\n- **Split large stores.** Sitemaps have per-file limits, so write a sitemap index plus several files; rebuild only the shards whose products changed.\n- **Fair scheduling.** A queue with per-tenant concurrency limits keeps one huge store from delaying everyone else.\n\n```text\nproduct events -> mark store dirty (dedupe) -> scheduler (debounce, per-tenant limits)\n   -> builder reads replica in keyset pages -> writes files to object storage\n   -> CDN serves sitemap index + shards + feeds; ad platforms fetch on their schedule\n```\n\n**Feeds have extra rules.** Ad platforms have their own required fields and may reject items; validate items before publishing, keep the previous good feed if a build fails, and report rejected products to the merchant. For urgent changes, such as a product going out of stock, also send updates through the platform's API instead of waiting for the next feed fetch.\n\n**Trade-offs.** Event-driven rebuilds are fresher and cheaper on average but add moving parts: a lost event leaves a stale file, so keep a slow full rebuild, such as weekly, as a safety net. Serving from a CDN means a short delay before crawlers see changes, which is fine for sitemaps but may not be for prices, where the API path matters.",
+      "answer_zh": "**增量生成，静态提供。** 把站点地图和 feed 当作构建产物：当某个店铺的商品发生变化时重新生成它的文件，写入对象存储，再通过 CDN 提供。这样爬虫的请求就永远不会触及数据库，而且只有发生变化的店铺才需要做工作。\n\n- **由变化触发，按店铺去抖。** 商品变更事件把店铺标记为「脏」；调度器对每个脏店铺最多每隔几分钟重建一次，这样一次批量导入只会触发一次重建，而不是成千上万次。\n- **从只读副本分页读取。** 重建时从只读副本或分析副本，用键集分页读取数据，绝不在主库上使用深度 offset。\n- **拆分大店铺。** 站点地图有单文件的限制，所以要写一个站点地图索引加上若干个文件；只重建商品发生变化的那些分片。\n- **公平调度。** 使用按租户限制并发的队列，避免某个超大店铺拖慢所有其他店铺。\n\n```text\nproduct events -> mark store dirty (dedupe) -> scheduler (debounce, per-tenant limits)\n   -> builder reads replica in keyset pages -> writes files to object storage\n   -> CDN serves sitemap index + shards + feeds; ad platforms fetch on their schedule\n```\n\n**feed 还有额外的规则。** 广告平台有各自的必填字段，可能会拒收部分商品；在发布前校验商品，构建失败时保留上一份正确的 feed，并把被拒收的商品报告给商家。对于紧急变更，例如商品缺货，还要通过平台 API 发送更新，而不是等待下一次 feed 抓取。\n\n**取舍。** 事件驱动的重建平均而言更及时也更便宜，但增加了更多环节：丢失一个事件就会留下一个过期文件，所以要保留一个较慢的全量重建作为兜底，例如每周一次。通过 CDN 提供意味着爬虫看到变化会有短暂延迟，这对站点地图没有问题，但对价格可能不行，而价格正是 API 通道发挥作用的地方。",
+      "followups": [
+        "How would you detect that a store's feed has gone stale?",
+        "What would you do when a merchant imports 200,000 products at once?"
+      ],
+      "followups_zh": [
+        "你会如何发现某个店铺的 feed 已经过期了？",
+        "当一个商家一次性导入 20 万个商品时，你会怎么做？"
+      ],
+      "vocab": [
+        {
+          "en": "sitemap",
+          "zh": "站点地图"
+        },
+        {
+          "en": "debounce",
+          "zh": "去抖"
+        },
+        {
+          "en": "build artifact",
+          "zh": "构建产物"
+        },
+        {
+          "en": "read replica",
+          "zh": "只读副本"
+        }
+      ]
+    },
+    {
+      "id": "20261112-3",
+      "topic": "Database",
+      "difficulty": "Hard",
+      "title": "Checkout fails with \"reached maximum value of sequence\" on order_items, and the obvious fix would lock the table for an hour",
+      "title_zh": "结账时报错「序列已达到最大值」，出在 order_items 表上，而显而易见的修复会锁表一个小时",
+      "question": "The `order_items` table was created years ago with `id serial primary key`. One morning, every checkout fails with `nextval: reached maximum value of sequence \"order_items_id_seq\" (2147483647)`. A developer proposes `ALTER TABLE order_items ALTER COLUMN id TYPE bigint` on the 800 GB table during peak hours. Two other tables reference `order_items.id` with foreign keys.\n\nExplain what happened, what the proposed fix would do, and how to recover and migrate safely.",
+      "question_zh": "`order_items` 表是多年前用 `id serial primary key` 建的。某天早上，所有结账都失败了，报错 `nextval: reached maximum value of sequence \"order_items_id_seq\" (2147483647)`。一位开发者提议在高峰期对这张 800 GB 的表执行 `ALTER TABLE order_items ALTER COLUMN id TYPE bigint`。另外还有两张表通过外键引用了 `order_items.id`。\n\n解释发生了什么、提议的修复会带来什么后果，以及如何恢复并安全地完成迁移。",
+      "answer": "**Why it fails.** `serial` creates an `integer` column and an `integer` sequence, whose maximum is 2,147,483,647. In a local test, the insert after reaching that value failed with exactly this sequence error. IDs are also consumed by rolled-back inserts and gaps, so the limit arrives sooner than the row count suggests.\n\n**Why the obvious fix is dangerous.** Changing the column type from `integer` to `bigint` rewrites the whole table and holds an `ACCESS EXCLUSIVE` lock while it runs; the test showed the lock and a new data file after the change. On a large table that blocks every read and write for the duration. The test also showed the sequence still typed `integer` with the same maximum afterwards: it must be changed separately with `ALTER SEQUENCE ... AS bigint`.\n\n**Immediate recovery.** Checkout must work in minutes, not after a rewrite. Options that avoid rewriting: if the application tolerates it, restart the sequence in the negative range of `integer`, which buys roughly the same space again, and plan the real migration; or route new items to a new `bigint` table temporarily. Both are stopgaps with clear costs, so document them.\n\n```sql\n-- online migration, in small steps\nALTER TABLE order_items ADD COLUMN id_new bigint;            -- metadata only\n-- trigger: NEW.id_new := NEW.id on insert/update\n-- backfill in batches: UPDATE ... SET id_new = id WHERE id BETWEEN $1 AND $2\nCREATE UNIQUE INDEX CONCURRENTLY order_items_id_new_key ON order_items (id_new);\n-- short lock: swap columns, attach the primary key using the index,\n-- move the sequence (ALTER SEQUENCE ... AS bigint) and fix foreign keys\n```\n\n- **Foreign keys count too.** Referencing columns in the other tables must become `bigint` as well, with the same online approach, before the new IDs exceed the old range.\n- **Keep the final lock short.** Do the swap with a `lock_timeout`, retry if it cannot get the lock, and test the full runbook on a copy.\n- **Find the next one first.** Query every `integer` key and sequence and alert when one passes a threshold of its range, long before it runs out.\n\n**Trade-offs.** The online migration takes days of careful work and extra write load from the trigger and backfill, but it keeps checkout running. Tools that automate the column swap help, at the cost of trusting their edge cases. For new tables the lesson is simple: use `bigint` identity columns from the start; the extra 4 bytes per row are almost always worth it.",
+      "answer_zh": "**为什么会失败。** `serial` 会创建一个 `integer` 列和一个 `integer` 序列，其最大值为 2,147,483,647。在本地测试中，达到这个值之后的插入就因为正是这个序列错误而失败了。ID 还会被回滚的插入和空洞消耗掉，所以这个上限到来得比行数所显示的更早。\n\n**为什么显而易见的修复很危险。** 把列类型从 `integer` 改成 `bigint` 会重写整张表，并在执行期间持有 `ACCESS EXCLUSIVE` 锁；测试显示了这个锁，以及修改后生成的新数据文件。在一张大表上，这会在整个执行期间阻塞所有读写。测试还显示，修改之后序列的类型仍然是 `integer`，最大值也没变：必须另外用 `ALTER SEQUENCE ... AS bigint` 来修改它。\n\n**立即恢复。** 结账必须在几分钟内恢复，而不是等表重写完。有几种不需要重写的办法：如果应用能接受，把序列重新从 `integer` 的负数区间开始，这样大致又能获得同样大小的空间，然后再规划真正的迁移；或者暂时把新的条目写入一张新的 `bigint` 表。两者都是权宜之计，各有明确的代价，所以要记录在案。\n\n```sql\n-- online migration, in small steps\nALTER TABLE order_items ADD COLUMN id_new bigint;            -- metadata only\n-- trigger: NEW.id_new := NEW.id on insert/update\n-- backfill in batches: UPDATE ... SET id_new = id WHERE id BETWEEN $1 AND $2\nCREATE UNIQUE INDEX CONCURRENTLY order_items_id_new_key ON order_items (id_new);\n-- short lock: swap columns, attach the primary key using the index,\n-- move the sequence (ALTER SEQUENCE ... AS bigint) and fix foreign keys\n```\n\n- **外键也要处理。** 其他表中的引用列也必须改成 `bigint`，同样采用在线迁移的方式，并且要在新的 ID 超出旧范围之前完成。\n- **让最后的加锁时间尽量短。** 用 `lock_timeout` 执行切换，拿不到锁就重试，并在副本上演练整个运维流程。\n- **先找出下一个隐患。** 查询所有 `integer` 类型的键和序列，在某个序列用到其范围的一定比例时就发出告警，远远早于它真正耗尽之前。\n\n**取舍。** 在线迁移需要好几天的细致工作，触发器和数据回填还会带来额外的写入负载，但它能让结账一直正常运行。能自动完成列切换的工具有所帮助，代价是要信任它们对各种边界情况的处理。对于新表，教训很简单：从一开始就使用 `bigint` 的 identity 列；每行多出的 4 个字节几乎总是值得的。",
+      "followups": [
+        "Why does changing integer to bigint require a table rewrite?",
+        "How would you find all keys close to their limit across many databases?",
+        "What could break if the sequence restarts at a negative number?"
+      ],
+      "followups_zh": [
+        "为什么把 integer 改成 bigint 需要重写表？",
+        "你会如何在众多数据库中找出所有接近上限的键？",
+        "如果序列从负数重新开始，可能会造成哪些问题？"
+      ],
+      "vocab": [
+        {
+          "en": "sequence exhaustion",
+          "zh": "序列耗尽"
+        },
+        {
+          "en": "table rewrite",
+          "zh": "表重写"
+        },
+        {
+          "en": "online migration",
+          "zh": "在线迁移"
+        },
+        {
+          "en": "backfill",
+          "zh": "回填"
+        },
+        {
+          "en": "lock timeout",
+          "zh": "锁超时"
+        }
+      ]
+    },
+    {
+      "id": "20261112-4",
+      "topic": "Middleware",
+      "difficulty": "Medium",
+      "title": "A flash-sale product's view counter makes one Redis Cluster node hot while the others are idle",
+      "title_zh": "一个限时抢购商品的浏览计数器让 Redis Cluster 的某个节点过热，而其他节点却很空闲",
+      "question": "Product pages increment `views:<product_id>` in Redis Cluster on every view, and the merchant dashboard reads it. During a flash sale, one product receives a huge share of traffic; the node owning that key's slot hits 100% CPU and its latency spikes for every other key it holds, while the rest of the cluster is idle. A developer tries `{views:p42}:0` to `{views:p42}:7` to spread the load, and nothing changes.\n\nExplain the hot key problem and fix it.",
+      "question_zh": "商品页面在每次浏览时都会在 Redis Cluster 中对 `views:<product_id>` 执行自增，商家看板会读取这个值。在一次限时抢购中，某个商品获得了极大比例的流量；拥有这个键所在槽的节点 CPU 达到 100%，它所存放的其他所有键的延迟都出现了尖峰，而集群其余节点却很空闲。一位开发者尝试用 `{views:p42}:0` 到 `{views:p42}:7` 来分散负载，结果毫无变化。\n\n解释热点键问题并修复它。",
+      "answer": "**Why one node melts.** Redis Cluster assigns each key to one slot, and each slot lives on one node. Every increment for one key goes to the same node, and Redis executes commands on a single main thread, so one very popular key is limited by one CPU core no matter how many nodes the cluster has.\n\n**Why the hash tags did not help.** A hash tag tells the cluster to hash only the part inside `{}`, precisely so related keys land in the same slot. All eight keys were therefore on the same node. Computing the slots for the two key styles showed it: `views:p42:0` to `views:p42:7` spread over eight different slots, while `{views:p42}:0` to `{views:p42}:7` all mapped to one.\n\n```go\n// write: pick one of N shards at random, without a hash tag\nfunc incrView(ctx context.Context, rdb *redis.ClusterClient, product string) error {\n\tkey := fmt.Sprintf(\"views:%s:%d\", product, rand.IntN(8))\n\treturn rdb.IncrBy(ctx, key, 1).Err()\n}\n// read: sum the shards with separate GETs (one per slot), not MGET across slots\n```\n\n- **Aggregate before writing.** Count views in memory in each app instance and flush with `INCRBY` every second or so; this cuts the command rate far more than sharding.\n- **Shard only hot keys.** Detect heavy keys from metrics or a hot-key report and split those, rather than every counter.\n- **Read across slots carefully.** Multi-key commands across slots fail in a cluster, so read shards with separate commands, ideally pipelined, and cache the summed value briefly.\n\n**Trade-offs.** Local aggregation loses up to a flush interval of counts if an instance crashes, which is fine for view counts but not for stock or money. Sharding adds read work and makes the value eventually consistent. For exact business counters such as inventory, keep one authoritative key and reduce contention another way, such as reserving stock in batches.",
+      "answer_zh": "**为什么一个节点会被压垮。** Redis Cluster 把每个键分配到一个槽，而每个槽位于一个节点上。对同一个键的每次自增都会发往同一个节点，而 Redis 在单个主线程上执行命令，所以无论集群有多少个节点，一个非常热门的键都受限于一个 CPU 核心。\n\n**为什么 hash tag 没有帮助。** hash tag 让集群只对 `{}` 内的部分进行哈希，其目的恰恰是让相关的键落在同一个槽里。因此这八个键全都在同一个节点上。计算两种键名风格的槽位就能看出来：`views:p42:0` 到 `views:p42:7` 分散在八个不同的槽，而 `{views:p42}:0` 到 `{views:p42}:7` 全都映射到同一个槽。\n\n```go\n// write: pick one of N shards at random, without a hash tag\nfunc incrView(ctx context.Context, rdb *redis.ClusterClient, product string) error {\n\tkey := fmt.Sprintf(\"views:%s:%d\", product, rand.IntN(8))\n\treturn rdb.IncrBy(ctx, key, 1).Err()\n}\n// read: sum the shards with separate GETs (one per slot), not MGET across slots\n```\n\n- **先聚合再写入。** 在每个应用实例的内存中计数，大约每秒用 `INCRBY` 刷新一次；这比分片更能大幅降低命令频率。\n- **只对热点键分片。** 根据指标或热点键报告找出访问量大的键，只对这些键进行拆分，而不是对每一个计数器都拆分。\n- **谨慎地跨槽读取。** 在集群中，跨槽的多键命令会失败，所以要用单独的命令读取各个分片，最好用管道批量发送，并把求和结果短暂缓存。\n\n**取舍。** 如果实例崩溃，本地聚合会丢失最多一个刷新周期内的计数，这对浏览数来说没问题，但对库存或金额就不行了。分片会增加读取的工作量，并让数值变成最终一致。对于库存这类必须精确的业务计数器，保留一个权威的键，并通过其他方式降低争用，例如批量预留库存。",
+      "followups": [
+        "When are hash tags the right tool?",
+        "How would you find hot keys in production?"
+      ],
+      "followups_zh": [
+        "什么时候 hash tag 才是合适的工具？",
+        "你会如何在生产环境中找出热点键？"
+      ],
+      "vocab": [
+        {
+          "en": "hot key",
+          "zh": "热点键"
+        },
+        {
+          "en": "hash slot",
+          "zh": "哈希槽"
+        },
+        {
+          "en": "hash tag",
+          "zh": "hash tag"
+        },
+        {
+          "en": "local aggregation",
+          "zh": "本地聚合"
+        }
+      ]
+    },
+    {
+      "id": "20261112-5",
+      "topic": "Java & CS",
+      "difficulty": "Senior",
+      "title": "Sizing the thread pool and connection pool for calls to a slow ad platform: Little's law, queues and timeouts",
+      "title_zh": "为调用缓慢广告平台的服务设置线程池和连接池大小：Little 定律、队列与超时",
+      "question": "A Java service sends conversion events to an ad platform: about 200 calls per second at peak, each taking around 300 ms, and sometimes several seconds when the platform is slow. It uses a fixed pool of 20 threads with an unbounded queue, and an HTTP client with 20 connections. During peaks, event delivery lags by minutes, memory climbs, and when the platform slows down, the whole service becomes unresponsive. Someone suggests raising the pool to 500 threads.\n\nAs the senior engineer, explain the behavior with numbers and design the sizing and protection.",
+      "question_zh": "一个 Java 服务向广告平台发送转化事件：高峰时每秒约 200 次调用，每次约 300 ms，当平台变慢时有时要好几秒。它使用一个固定 20 个线程、队列无界的线程池，以及一个有 20 个连接的 HTTP 客户端。高峰期间，事件投递会延迟好几分钟，内存持续上涨；而当平台变慢时，整个服务都会失去响应。有人建议把线程池扩大到 500 个线程。\n\n作为资深工程师，用数字解释这种行为，并设计容量规划和保护机制。",
+      "answer": "**Little's law.** In a stable system, the average number of requests in flight equals the arrival rate times the time each request spends: L = λW. At 200 calls per second and 0.3 seconds each, about 60 calls must be in flight. With 20 threads, at most 20 can be, so the remaining work waits in the queue, and the queue grows without limit while the arrival rate exceeds what 20 threads can serve.\n\n**What the simulation showed.** A local Java simulation with 200 arrivals per second and 300 ms of work per call gave a median latency of about 3.3 seconds with 20 threads, growing for as long as the load lasted, and about 300 ms with 60 or more threads. The unbounded queue explains the rising memory: every waiting event is held in the heap.\n\n**Why 500 threads is the wrong fix.** When the platform slows to 3 seconds, L becomes 600; 500 threads still cannot keep up, and now 500 threads hold memory, connections and the platform's rate limit at once, so the slowdown spreads to everything else in the process. Capacity has to follow the slow case, and it has to stop somewhere.\n\n- **Size for normal load with headroom.** Size the pool for the normal case, here somewhat above 60 because arrivals are bursty, and make the HTTP client's connection limit match the pool, or threads just wait for connections.\n- **Bound the queue and decide what happens when it is full.** Persist events to a durable queue or log and send from it, so overload means delay, not lost events or an out-of-memory crash.\n- **Set timeouts below the pain threshold.** A call timeout caps W, which caps how many threads one slow dependency can occupy; retry later from the durable queue with backoff.\n- **Isolate the dependency.** A dedicated pool, a concurrency limit and a circuit breaker for this platform keep its slowdown from consuming threads that serve other work.\n\n```java\nExecutorService metaPool = new ThreadPoolExecutor(\n        80, 80, 0, TimeUnit.MILLISECONDS,\n        new ArrayBlockingQueue<>(10_000),               // bounded\n        new ThreadPoolExecutor.CallerRunsPolicy());     // or reject and leave in the durable queue\nHttpClient client = HttpClient.newBuilder()\n        .connectTimeout(Duration.ofSeconds(2))\n        .build();                                       // plus a per-request timeout\n```\n\n**Trade-offs.** Virtual threads remove the cost of many blocked threads, but not Little's law: in-flight calls are still bounded by connections and the platform's rate limit, so you still need concurrency limits and timeouts. A durable queue adds infrastructure, but turns spikes and outages into delay that can be measured and caught up later.",
+      "answer_zh": "**Little 定律。** 在稳定的系统中，处理中请求的平均数量，等于到达速率乘以每个请求所花的时间：L = λW。每秒 200 次调用、每次 0.3 秒，就需要大约 60 个调用同时在处理。只有 20 个线程时，最多只能同时处理 20 个，所以其余的工作在队列中等待；只要到达速率超过 20 个线程所能处理的速率，队列就会无限增长。\n\n**模拟的结果。** 在一个本地 Java 模拟中，每秒到达 200 个请求、每次调用耗时 300 ms：使用 20 个线程时，中位延迟约为 3.3 秒，并且只要负载持续就会不断增长；使用 60 个或更多线程时，中位延迟约为 300 ms。无界队列解释了内存为什么持续上涨：每一个等待中的事件都占用着堆内存。\n\n**为什么 500 个线程是错误的修复。** 当平台变慢到 3 秒时，L 就变成了 600；500 个线程仍然跟不上，而且现在 500 个线程同时占用着内存、连接和平台的限流额度，于是这次变慢会蔓延到进程中的其他所有部分。容量必须按照缓慢情况来规划，而且必须在某个地方设定上限。\n\n- **按正常负载加余量来规划。** 按正常情况来设定线程池大小，这里要比 60 略大一些，因为请求的到达是突发性的；并让 HTTP 客户端的连接上限与线程池相匹配，否则线程只是在等待连接。\n- **限制队列长度，并决定队列满了之后怎么办。** 把事件持久化到一个可靠的队列或日志中，再从那里发送，这样过载只意味着延迟，而不会丢失事件，也不会因内存耗尽而崩溃。\n- **把超时设在可承受的范围之内。** 调用超时给 W 设定了上限，从而限制了一个缓慢依赖所能占用的线程数；之后再从可靠队列中带退避地重试。\n- **隔离这个依赖。** 为这个平台使用专用的线程池、并发上限和熔断器，避免它的变慢占用服务其他工作的线程。\n\n```java\nExecutorService metaPool = new ThreadPoolExecutor(\n        80, 80, 0, TimeUnit.MILLISECONDS,\n        new ArrayBlockingQueue<>(10_000),               // bounded\n        new ThreadPoolExecutor.CallerRunsPolicy());     // or reject and leave in the durable queue\nHttpClient client = HttpClient.newBuilder()\n        .connectTimeout(Duration.ofSeconds(2))\n        .build();                                       // plus a per-request timeout\n```\n\n**取舍。** 虚拟线程消除了大量阻塞线程的开销，但改变不了 Little 定律：处理中的调用数量仍然受连接数和平台限流的约束，所以你仍然需要并发上限和超时。可靠队列增加了基础设施，但能把突发流量和故障转化为可以度量、之后再追上的延迟。",
+      "followups": [
+        "How does a timeout change the number of threads one slow dependency can hold?",
+        "What would you alert on to catch this before users notice?",
+        "Do virtual threads make the pool size irrelevant here?"
+      ],
+      "followups_zh": [
+        "超时如何改变一个缓慢依赖所能占用的线程数？",
+        "你会针对什么设置告警，才能在用户察觉之前发现这个问题？",
+        "在这里，虚拟线程会让线程池大小变得无关紧要吗？"
+      ],
+      "vocab": [
+        {
+          "en": "Little's law",
+          "zh": "Little 定律"
+        },
+        {
+          "en": "arrival rate",
+          "zh": "到达速率"
+        },
+        {
+          "en": "bounded queue",
+          "zh": "有界队列"
+        },
+        {
+          "en": "bulkhead",
+          "zh": "舱壁隔离"
+        },
+        {
+          "en": "circuit breaker",
+          "zh": "熔断器"
+        }
+      ]
+    }
+  ]
+}

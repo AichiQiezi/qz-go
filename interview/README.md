@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 31 天、155 道题。
+共 32 天、160 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-12](days/2026-11-12.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Hard | [A worker selects on an urgent queue and a bulk queue, yet order cancellations wait behind catalog syncs](days/2026-11-12.md#q1) | 一个 worker 同时在紧急队列和批量队列上 select，订单取消却仍然排在商品目录同步后面 |
+| 2 | System Design | Medium | [Generating sitemaps and product feeds for 100,000 storefronts every day without hammering the database](days/2026-11-12.md#q2) | 每天为 10 万个店铺生成站点地图和商品 feed，同时不压垮数据库 |
+| 3 | Database | Hard | [Checkout fails with "reached maximum value of sequence" on order_items, and the obvious fix would lock the table for an hour](days/2026-11-12.md#q3) | 结账时报错「序列已达到最大值」，出在 order_items 表上，而显而易见的修复会锁表一个小时 |
+| 4 | Middleware | Medium | [A flash-sale product's view counter makes one Redis Cluster node hot while the others are idle](days/2026-11-12.md#q4) | 一个限时抢购商品的浏览计数器让 Redis Cluster 的某个节点过热，而其他节点却很空闲 |
+| 5 | Java & CS | Senior | [Sizing the thread pool and connection pool for calls to a slow ad platform: Little's law, queues and timeouts](days/2026-11-12.md#q5) | 为调用缓慢广告平台的服务设置线程池和连接池大小：Little 定律、队列与超时 |
 
 ## [2026-11-11](days/2026-11-11.md)
 
