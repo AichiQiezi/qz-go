@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 32 天、160 道题。
+共 33 天、165 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-13](days/2026-11-13.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Medium | [A merchant's CSV import says the "sku" column is missing, and another file fails on a product titled 12" frame](days/2026-11-13.md#q1) | 商家的 CSV 导入提示缺少「sku」列，另一个文件则在一个名为 12" frame 的商品上失败 |
+| 2 | System Design | Hard | [Checkout shows shipping rates from three carriers within two seconds, and the price charged must match the price shown](days/2026-11-13.md#q2) | 结账页要在两秒内展示三家承运商的运费，而且最终收取的价格必须与展示的价格一致 |
+| 3 | Database | Hard | [Get-or-create for product tags sometimes returns no ID, and in another service fails with a serialization error](days/2026-11-13.md#q3) | 商品标签的「获取或创建」有时拿不到 ID，在另一个服务里则因序列化错误失败 |
+| 4 | Middleware | Senior | [Unpaid orders are cancelled by Redis expiry events: some are never cancelled, some are late, and some are cancelled twice](days/2026-11-13.md#q4) | 未支付订单靠 Redis 过期事件来取消：有的永远没被取消，有的取消得很晚，还有的被取消了两次 |
+| 5 | Java & CS | Medium | [A token cache hits 99% of the time, yet the ad platform still gets one token request per call and starts returning 429](days/2026-11-13.md#q5) | 令牌缓存的命中率是 99%，广告平台却仍然在每次调用时收到一次令牌请求，并开始返回 429 |
 
 ## [2026-11-12](days/2026-11-12.md)
 

@@ -1,0 +1,207 @@
+{
+  "date": "2026-11-13",
+  "generatedAt": "2026-11-13T06:47:41+08:00",
+  "questions": [
+    {
+      "id": "20261113-1",
+      "topic": "Go",
+      "difficulty": "Medium",
+      "title": "A merchant's CSV import says the \"sku\" column is missing, and another file fails on a product titled 12\" frame",
+      "title_zh": "商家的 CSV 导入提示缺少「sku」列，另一个文件则在一个名为 12\" frame 的商品上失败",
+      "question": "The product import reads merchant CSV files with `encoding/csv` and maps columns by header name. A merchant exports from Excel, and the import fails with \"missing column sku\", although the first header in the file clearly says `sku`. Another merchant's file fails with `parse error on line 2, column 6: bare \" in non-quoted-field` on a row whose title is `12\" frame`. A teammate proposes setting `LazyQuotes = true` for every file.\n\nExplain both failures, and decide whether the teammate's fix is safe.",
+      "question_zh": "商品导入功能用 `encoding/csv` 读取商家的 CSV 文件，并按表头名称映射列。一位商家从 Excel 导出文件，导入时报错「missing column sku」，可文件里的第一个表头明明就是 `sku`。另一位商家的文件在一行标题为 `12\" frame` 的数据上失败，报错 `parse error on line 2, column 6: bare \" in non-quoted-field`。一位同事提议对所有文件都设置 `LazyQuotes = true`。\n\n解释这两个故障，并判断同事的修复是否安全。",
+      "answer": "**Why \"sku\" is missing.** Excel's \"CSV UTF-8\" format starts the file with a byte order mark, the bytes `EF BB BF`. `encoding/csv` does not remove it, so the first header is `\"\\ufeffsku\"`. Most logs print it as `sku`, which is why it looks correct, but the string comparison fails. Strip the mark once before parsing, and normalize headers with `TrimSpace` and lower case while you are there.\n\n**Why the bare quote fails.** In standard CSV, a quote may appear only inside a quoted field, and there it must be doubled: `\"12\"\" frame\"`. An unquoted `12\" frame` is invalid, and Go's reader is strict by default, so it stops and reports the line and column.\n\n**Why LazyQuotes everywhere is risky.** It accepts a quote in the middle of a field, but a field that starts with a quote is still treated as quoted. In a local test, the row `A3,\"12\" frame,1` came back with a second field that ran past the line break and swallowed the next row. Without a field-count check, columns shift silently. Keep `LazyQuotes` only together with a fixed field count, so such a row fails loudly, and collect errors per row. Swallowed rows get no error of their own, so tell the merchant to check from that line on.\n\n```go\nfunc readProducts(r io.Reader) ([]map[string]string, []error) {\n\tbr := bufio.NewReader(r)\n\tif b, err := br.Peek(3); err == nil && bytes.Equal(b, []byte{0xEF, 0xBB, 0xBF}) {\n\t\tbr.Discard(3) // Excel's UTF-8 byte order mark\n\t}\n\tcr := csv.NewReader(br)\n\tcr.LazyQuotes = true // accept 12\" frame ...\n\theader, err := cr.Read()\n\tif err != nil {\n\t\treturn nil, []error{err}\n\t}\n\tfor i, h := range header {\n\t\theader[i] = strings.ToLower(strings.TrimSpace(h))\n\t}\n\tcr.FieldsPerRecord = len(header) // ... but a shifted row must fail\n\tvar rows []map[string]string\n\tvar errs []error\n\tfor {\n\t\trec, err := cr.Read()\n\t\tif err == io.EOF {\n\t\t\tbreak\n\t\t}\n\t\tif err != nil {\n\t\t\terrs = append(errs, err) // *csv.ParseError has the line number\n\t\t\tcontinue\n\t\t}\n\t\trow := make(map[string]string, len(header))\n\t\tfor i, h := range header {\n\t\t\trow[h] = rec[i]\n\t\t}\n\t\trows = append(rows, row)\n\t}\n\treturn rows, errs\n}\n```\n\n**Trade-offs.** A lenient parser accepts more files but can write wrong prices without anyone noticing. For SKUs and prices, prefer a loud failure per row and give the merchant an error report with line numbers. BOM stripping does not help with other encodings such as Windows-1252; detect them or ask the merchant to export as UTF-8.",
+      "answer_zh": "**为什么会缺少「sku」。** Excel 的「CSV UTF-8」格式会在文件开头写入字节顺序标记（BOM），即字节 `EF BB BF`。`encoding/csv` 不会去掉它，所以第一个表头其实是 `\"\\ufeffsku\"`。大多数日志会把它打印成 `sku`，所以看起来没问题，但字符串比较却失败了。在解析之前去掉一次这个标记，同时顺便用 `TrimSpace` 和转小写来规范化表头。\n\n**为什么裸引号会失败。** 在标准 CSV 中，引号只能出现在带引号的字段里，而且必须写成两个：`\"12\"\" frame\"`。不带引号的 `12\" frame` 是非法的，Go 的读取器默认是严格的，所以它会停下来并报告行号和列号。\n\n**为什么对所有文件开启 LazyQuotes 有风险。** 它能接受字段中间的引号，但以引号开头的字段仍然会被当作带引号的字段。在本地测试中，`A3,\"12\" frame,1` 这一行的第二个字段越过了换行符，把下一行也吞了进去。如果不检查字段数，列就会悄无声息地错位。只有在固定字段数的前提下才保留 `LazyQuotes`，这样这类行会明确报错；并且按行收集错误。被吞掉的行不会有自己的报错，所以要提示商家从那一行开始往后检查。\n\n```go\nfunc readProducts(r io.Reader) ([]map[string]string, []error) {\n\tbr := bufio.NewReader(r)\n\tif b, err := br.Peek(3); err == nil && bytes.Equal(b, []byte{0xEF, 0xBB, 0xBF}) {\n\t\tbr.Discard(3) // Excel's UTF-8 byte order mark\n\t}\n\tcr := csv.NewReader(br)\n\tcr.LazyQuotes = true // accept 12\" frame ...\n\theader, err := cr.Read()\n\tif err != nil {\n\t\treturn nil, []error{err}\n\t}\n\tfor i, h := range header {\n\t\theader[i] = strings.ToLower(strings.TrimSpace(h))\n\t}\n\tcr.FieldsPerRecord = len(header) // ... but a shifted row must fail\n\tvar rows []map[string]string\n\tvar errs []error\n\tfor {\n\t\trec, err := cr.Read()\n\t\tif err == io.EOF {\n\t\t\tbreak\n\t\t}\n\t\tif err != nil {\n\t\t\terrs = append(errs, err) // *csv.ParseError has the line number\n\t\t\tcontinue\n\t\t}\n\t\trow := make(map[string]string, len(header))\n\t\tfor i, h := range header {\n\t\t\trow[h] = rec[i]\n\t\t}\n\t\trows = append(rows, row)\n\t}\n\treturn rows, errs\n}\n```\n\n**权衡。** 宽松的解析器能接受更多文件，但可能在无人察觉的情况下写入错误的价格。对于 SKU 和价格，宁可让单行明确失败，并给商家一份带行号的错误报告。去掉 BOM 对 Windows-1252 等其他编码没有帮助；要么检测编码，要么让商家以 UTF-8 导出。",
+      "followups": [
+        "How would you tell a merchant which rows failed and why, without making them read Go error strings?",
+        "The file is 2 GB. What changes in this function?"
+      ],
+      "followups_zh": [
+        "你会如何告诉商家哪些行失败了以及原因，而不让他们去读 Go 的错误字符串？",
+        "文件有 2 GB。这个函数需要做哪些修改？"
+      ],
+      "vocab": [
+        {
+          "en": "byte order mark",
+          "zh": "字节顺序标记（BOM）"
+        },
+        {
+          "en": "bare quote",
+          "zh": "裸引号"
+        },
+        {
+          "en": "lenient",
+          "zh": "宽松的"
+        },
+        {
+          "en": "column shift",
+          "zh": "列错位"
+        }
+      ]
+    },
+    {
+      "id": "20261113-2",
+      "topic": "System Design",
+      "difficulty": "Hard",
+      "title": "Checkout shows shipping rates from three carriers within two seconds, and the price charged must match the price shown",
+      "title_zh": "结账页要在两秒内展示三家承运商的运费，而且最终收取的价格必须与展示的价格一致",
+      "question": "Cross-border stores show live shipping rates from three carrier APIs at checkout. Each API is usually fast but sometimes takes several seconds, has occasional outages, limits requests per merchant account, and charges per quote request. Requirements: the checkout page shows shipping options within two seconds; one slow carrier must not block the page; the price charged when the order is placed must equal the price the shopper saw, even if the carrier changes its rate in between.\n\nDesign the rate service.",
+      "question_zh": "跨境店铺在结账时展示来自三家承运商 API 的实时运费。每个 API 通常都很快，但有时需要好几秒，偶尔会宕机，按商家账号限制请求数，并且按报价请求收费。要求：结账页在两秒内展示配送选项；一家慢的承运商不能拖住整个页面；下单时收取的价格必须等于顾客看到的价格，即使承运商在这期间改了运费。\n\n设计这个运费服务。",
+      "answer": "**Why calling every carrier on every page load fails.** The page waits for the slowest of three calls, so tail latency gets worse, not better. Every refresh and every cart change multiplies the per-request fees and burns the rate limit, and an outage leaves the shopper with no shipping option, which means no order.\n\n**The design.**\n\n- **Parallel calls with one deadline.** Ask all carriers at once under a single budget, for example 1.5 seconds, and show whatever arrived. A carrier that misses the budget is left out or shown with a table rate marked as an estimate.\n- **A quote cache.** Key it by what the carrier prices on: origin, normalized destination postcode, weight and size rounded to the carrier's brackets, service level and currency. Keep it for a few minutes. Most refreshes then cost nothing.\n- **A circuit breaker per carrier.** After repeated failures, stop calling that carrier for a while and use the fallback, so a dead API costs nothing and does not slow the page.\n- **Stored quotes.** Save each shown option server-side with an ID, the price, currency, a hash of the cart and address, and an expiry. The page sends back only the quote ID. At order placement, load the quote, check that it has not expired and that the cart and address still match, and charge the stored price. If anything changed, re-quote and show the new price before charging, never after.\n\n```go\nfunc rates(ctx context.Context, carriers []Carrier, req RateReq) []Quote {\n\tctx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)\n\tdefer cancel()\n\tch := make(chan []Quote, len(carriers)) // buffered: late senders never block\n\tfor _, c := range carriers {\n\t\tgo func(c Carrier) {\n\t\t\tq, err := c.Rates(ctx, req) // cache and circuit breaker live inside\n\t\t\tif err != nil {\n\t\t\t\tq = c.TableRates(req) // fallback, marked as an estimate\n\t\t\t}\n\t\t\tch <- q\n\t\t}(c)\n\t}\n\tvar out []Quote\n\tfor range carriers {\n\t\tselect {\n\t\tcase q := <-ch:\n\t\t\tout = append(out, q...)\n\t\tcase <-ctx.Done():\n\t\t\treturn out // show what arrived in time\n\t\t}\n\t}\n\treturn out\n}\n```\n\n**Trade-offs.** A longer cache lifetime saves fees but can show an outdated rate; the stored quote protects the shopper, so the merchant absorbs any difference the carrier bills later. Record the quoted and the billed amount for reconciliation. Fallback table rates keep checkout working but may undercharge. A longer deadline shows more options but costs conversions.",
+      "answer_zh": "**为什么每次加载页面都调用所有承运商行不通。** 页面要等三个调用中最慢的那个，所以尾延迟只会变差，不会变好。每次刷新、每次购物车变化都会成倍增加按请求计费的费用，并消耗限流额度；而一旦某家宕机，顾客就没有可选的配送方式，也就没有订单。\n\n**设计方案。**\n\n- **带统一截止时间的并行调用。** 在同一个时间预算（比如 1.5 秒）内同时询问所有承运商，展示已经返回的结果。超出预算的承运商要么不显示，要么显示一个标注为估算的费率表价格。\n- **报价缓存。** 以承运商计价所依据的因素作为键：发货地、规范化后的目的地邮编、按承运商计费档位取整的重量和尺寸、服务等级以及币种。缓存几分钟即可。这样大多数刷新就不再产生费用。\n- **每家承运商各自的熔断器。** 连续失败多次之后，在一段时间内停止调用这家承运商并使用兜底方案，这样一个挂掉的 API 既不花钱也不会拖慢页面。\n- **保存报价。** 在服务端保存展示过的每个选项，包括 ID、价格、币种、购物车和地址的哈希值，以及过期时间。页面只回传报价 ID。下单时，加载这条报价，检查它没有过期、购物车和地址仍然一致，然后按保存的价格收费。如果有任何变化，就重新报价，并在收费之前向顾客展示新价格，绝不在收费之后。\n\n```go\nfunc rates(ctx context.Context, carriers []Carrier, req RateReq) []Quote {\n\tctx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)\n\tdefer cancel()\n\tch := make(chan []Quote, len(carriers)) // buffered: late senders never block\n\tfor _, c := range carriers {\n\t\tgo func(c Carrier) {\n\t\t\tq, err := c.Rates(ctx, req) // cache and circuit breaker live inside\n\t\t\tif err != nil {\n\t\t\t\tq = c.TableRates(req) // fallback, marked as an estimate\n\t\t\t}\n\t\t\tch <- q\n\t\t}(c)\n\t}\n\tvar out []Quote\n\tfor range carriers {\n\t\tselect {\n\t\tcase q := <-ch:\n\t\t\tout = append(out, q...)\n\t\tcase <-ctx.Done():\n\t\t\treturn out // show what arrived in time\n\t\t}\n\t}\n\treturn out\n}\n```\n\n**权衡。** 更长的缓存时间能省下费用，但可能展示过时的运费；保存的报价保护了顾客，所以承运商事后多收的差额由商家承担。要记录报价金额和实际账单金额以便对账。兜底的费率表能让结账继续运转，但可能少收运费。更长的截止时间能展示更多选项，但会损失转化率。",
+      "followups": [
+        "A carrier's rate depends on the exact address, not just the postcode. How does that change the cache?",
+        "How would you test that the price charged always equals the price shown?",
+        "Would you hedge slow requests by sending a second one? What does it cost here?"
+      ],
+      "followups_zh": [
+        "某家承运商的运费取决于精确地址，而不只是邮编。这会如何改变缓存设计？",
+        "你会如何测试收取的价格总是等于展示的价格？",
+        "你会通过再发一次请求来对冲慢请求吗？在这里它的代价是什么？"
+      ],
+      "vocab": [
+        {
+          "en": "quote",
+          "zh": "报价"
+        },
+        {
+          "en": "deadline",
+          "zh": "截止时间"
+        },
+        {
+          "en": "circuit breaker",
+          "zh": "熔断器"
+        },
+        {
+          "en": "fallback",
+          "zh": "兜底方案"
+        },
+        {
+          "en": "reconciliation",
+          "zh": "对账"
+        }
+      ]
+    },
+    {
+      "id": "20261113-3",
+      "topic": "Database",
+      "difficulty": "Hard",
+      "title": "Get-or-create for product tags sometimes returns no ID, and in another service fails with a serialization error",
+      "title_zh": "商品标签的「获取或创建」有时拿不到 ID，在另一个服务里则因序列化错误失败",
+      "question": "Imports create product tags on demand in `tags(id bigserial, store_id, name, UNIQUE (store_id, name))`. One service does it in a single statement:\n\n```sql\nWITH ins AS (\n  INSERT INTO tags (store_id, name) VALUES ($1, $2)\n  ON CONFLICT (store_id, name) DO NOTHING\n  RETURNING id\n)\nSELECT id FROM ins\nUNION ALL\nSELECT id FROM tags WHERE store_id = $1 AND name = $2;\n```\n\nWhen two import workers create the same tag at the same moment, one of them sometimes gets zero rows and fails with \"tag not found\". A second service runs the same logic inside a REPEATABLE READ transaction and fails with \"could not serialize access due to concurrent update\". Someone also notices tag IDs jumping: 1, 3, 7. Explain all three and fix the get-or-create.",
+      "question_zh": "导入过程会按需在 `tags(id bigserial, store_id, name, UNIQUE (store_id, name))` 中创建商品标签。其中一个服务用一条语句完成：\n\n```sql\nWITH ins AS (\n  INSERT INTO tags (store_id, name) VALUES ($1, $2)\n  ON CONFLICT (store_id, name) DO NOTHING\n  RETURNING id\n)\nSELECT id FROM ins\nUNION ALL\nSELECT id FROM tags WHERE store_id = $1 AND name = $2;\n```\n\n当两个导入 worker 在同一时刻创建同一个标签时，其中一个有时会拿到零行，并以「tag not found」失败。另一个服务在 REPEATABLE READ 事务中执行同样的逻辑，失败信息是「could not serialize access due to concurrent update」。还有人注意到标签 ID 在跳号：1、3、7。解释这三个现象，并修复这个获取或创建逻辑。",
+      "answer": "**Why zero rows.** The whole statement uses one snapshot, taken when it starts. Worker B's insert finds worker A's uncommitted row in the unique index, waits for A to commit, and then does nothing, so `ins` is empty. The `SELECT` branch still reads the old snapshot, from before A committed, so it cannot see the row either. In a local test the statement returned zero rows, and the same `SELECT` run as a separate statement right afterwards returned the ID.\n\n**The fix in READ COMMITTED.** Use separate statements. Each new statement gets a new snapshot and sees the row the other worker committed:\n\n```sql\n-- 1. Most tags already exist: a plain read first.\nSELECT id FROM tags WHERE store_id = $1 AND name = $2;\n\n-- 2. Not found: insert. No row back means another transaction won.\nINSERT INTO tags (store_id, name) VALUES ($1, $2)\nON CONFLICT (store_id, name) DO NOTHING\nRETURNING id;\n\n-- 3. A new statement gets a new snapshot and sees the winner's row.\nSELECT id FROM tags WHERE store_id = $1 AND name = $2;\n```\n\nAn alternative is `ON CONFLICT ... DO UPDATE SET name = EXCLUDED.name RETURNING id`. It always returns the row, because it locks and updates the latest committed version, and in the same race test it returned the ID. The price is a new row version on every call: dead tuples, extra WAL, update triggers firing and row-lock waits on popular tags. Reading first keeps the common case write-free.\n\n**Why REPEATABLE READ fails.** There the snapshot belongs to the whole transaction. When the conflicting row was committed after that snapshot was taken, Postgres cannot pretend the row does not exist, so it raises a serialization failure (SQLSTATE `40001`). That is by design: retry the whole transaction, or create tags in a short READ COMMITTED transaction before the main one.\n\n**Why IDs jump.** The insert takes the next sequence value before the conflict is detected, and a conflict throws that value away. Re-importing a catalog full of existing tags burns many values. With `bigserial` this is harmless; just never assume IDs have no gaps.\n\n**Trade-offs.** Three statements cost an extra round trip on a miss. `DO UPDATE` is one statement but writes every time. Retrying on `40001` is correct for REPEATABLE READ, but the retry loop must cover the whole transaction, not just the failed statement.",
+      "answer_zh": "**为什么是零行。** 整条语句使用同一个快照，它在语句开始时获取。worker B 的插入在唯一索引里发现了 worker A 尚未提交的行，于是等待 A 提交，随后什么也不做，所以 `ins` 是空的。而 `SELECT` 分支读的仍然是 A 提交之前的旧快照，所以也看不到这一行。在本地测试中，这条语句返回了零行，而紧接着把同样的 `SELECT` 作为单独的语句执行，就返回了 ID。\n\n**在 READ COMMITTED 下的修复。** 使用多条独立的语句。每条新语句都会获取新的快照，从而看到另一个 worker 已提交的行：\n\n```sql\n-- 1. Most tags already exist: a plain read first.\nSELECT id FROM tags WHERE store_id = $1 AND name = $2;\n\n-- 2. Not found: insert. No row back means another transaction won.\nINSERT INTO tags (store_id, name) VALUES ($1, $2)\nON CONFLICT (store_id, name) DO NOTHING\nRETURNING id;\n\n-- 3. A new statement gets a new snapshot and sees the winner's row.\nSELECT id FROM tags WHERE store_id = $1 AND name = $2;\n```\n\n另一种做法是 `ON CONFLICT ... DO UPDATE SET name = EXCLUDED.name RETURNING id`。它总能返回这一行，因为它会锁定并更新最新已提交的版本，在同样的竞争测试中它也返回了 ID。代价是每次调用都会产生一个新的行版本：死元组、额外的 WAL、触发更新触发器，以及热门标签上的行锁等待。先读一次，能让常见情况完全不产生写入。\n\n**为什么 REPEATABLE READ 会失败。** 在这个隔离级别下，快照属于整个事务。当发生冲突的行是在快照获取之后才提交的，Postgres 无法假装这一行不存在，于是抛出序列化失败（SQLSTATE `40001`）。这是有意为之的设计：要么重试整个事务，要么在主事务之前，用一个简短的 READ COMMITTED 事务来创建标签。\n\n**为什么 ID 会跳号。** 插入在检测到冲突之前就取走了下一个序列值，一旦冲突，这个值就被丢弃了。重新导入一个满是已有标签的目录会消耗大量序列值。用 `bigserial` 时这无害；只是永远不要假设 ID 没有空洞。\n\n**权衡。** 三条语句在未命中时会多一次往返。`DO UPDATE` 只需一条语句，但每次都会写入。在 REPEATABLE READ 下遇到 `40001` 时重试是正确的，但重试循环必须覆盖整个事务，而不只是失败的那条语句。",
+      "followups": [
+        "Between steps 2 and 3, the winning transaction rolls back. What does your code see, and what should it do?",
+        "How would you create 5,000 tags from one import file efficiently?"
+      ],
+      "followups_zh": [
+        "在第 2 步和第 3 步之间，获胜的事务回滚了。你的代码会看到什么？应该怎么做？",
+        "你会如何高效地从一个导入文件中创建 5,000 个标签？"
+      ],
+      "vocab": [
+        {
+          "en": "snapshot",
+          "zh": "快照"
+        },
+        {
+          "en": "get-or-create",
+          "zh": "获取或创建"
+        },
+        {
+          "en": "serialization failure",
+          "zh": "序列化失败"
+        },
+        {
+          "en": "dead tuple",
+          "zh": "死元组"
+        },
+        {
+          "en": "round trip",
+          "zh": "往返"
+        }
+      ]
+    },
+    {
+      "id": "20261113-4",
+      "topic": "Middleware",
+      "difficulty": "Senior",
+      "title": "Unpaid orders are cancelled by Redis expiry events: some are never cancelled, some are late, and some are cancelled twice",
+      "title_zh": "未支付订单靠 Redis 过期事件来取消：有的永远没被取消，有的取消得很晚，还有的被取消了两次",
+      "question": "To cancel unpaid orders after 30 minutes and release their reserved stock, the team sets `order:unpaid:{id}` with `EX 1800` and subscribes to `__keyevent@0__:expired` from every instance of the order service. After a few weeks:\n\n- orders created around deploys stay unpaid forever, with their stock still reserved;\n- during busy periods cancellations arrive minutes late;\n- some orders are cancelled twice and their stock is released twice;\n- after a move to Redis Cluster, a share of orders never fires at all.\n\nExplain each symptom and redesign the cancellation.",
+      "question_zh": "为了在 30 分钟后取消未支付的订单并释放其预留的库存，团队用 `EX 1800` 设置 `order:unpaid:{id}`，并在订单服务的每个实例上订阅 `__keyevent@0__:expired`。几周之后：\n\n- 在发布前后创建的订单永远停留在未支付状态，库存也一直被预留着；\n- 在繁忙时段，取消会晚好几分钟才到；\n- 有些订单被取消了两次，库存也被释放了两次；\n- 迁移到 Redis Cluster 之后，有一部分订单的事件根本不会触发。\n\n解释每个现象，并重新设计取消机制。",
+      "answer": "**Why events are lost.** Keyspace notifications are Pub/Sub messages: sent once to whoever is subscribed at that moment, and never stored. During a deploy, a reconnect or a network blip, nobody is listening and the event is gone. In a local test, a client that subscribed after a key expired received nothing. Notifications are also off by default (`notify-keyspace-events` is empty), so a new or restored server silently stops sending them.\n\n**Why events are late.** The `expired` event is sent when Redis actually deletes the key, not when its TTL reaches zero. A key is deleted when a client touches it or when the background expiry cycle samples it, and that cycle has a bounded amount of work per run, so with many keys expiring some are deleted late. In a local test with the background cycle turned off through a debug command, no event arrived until a `GET` touched the key.\n\n**Why orders are cancelled twice.** Pub/Sub has no consumer groups: every subscribed instance receives every message, so two instances both run the cancellation, and the cancel must be idempotent.\n\n**Why Cluster loses more.** Each node publishes events only for its own keys, and only to clients subscribed on that node. A subscriber on one node misses the others and must re-subscribe after failovers.\n\n**Redesign: the database is the timer.** Store `pay_deadline` on the order with a partial index on unpaid orders, and run a sweeper every few seconds that cancels due orders with a conditional update. `SKIP LOCKED` lets several sweepers share the work, and the `status = 'unpaid'` condition means a payment and a cancellation cannot both win.\n\n```sql\nWITH due AS (\n  SELECT id FROM orders\n  WHERE status = 'unpaid' AND pay_deadline < now()\n  ORDER BY pay_deadline\n  LIMIT 500\n  FOR UPDATE SKIP LOCKED\n)\nUPDATE orders o\nSET status = 'cancelled', cancelled_at = now()\nFROM due\nWHERE o.id = due.id\nRETURNING o.id;  -- release stock for exactly these orders, in the same transaction\n```\n\nKeep Redis only as a hint if you need faster reactions: an expiry event or a sorted-set queue can trigger the same conditional cancel early, while the sweeper guarantees that nothing is missed. Decide with the business what happens when a payment arrives a second after cancellation: refund it, or re-reserve stock if available.\n\n**Trade-offs.** The sweeper adds a few seconds of delay and a steady query load. Redis notifications are cheap and fast but are a best-effort signal; they must never be the only record that work is due.",
+      "answer_zh": "**为什么事件会丢。** 键空间通知是 Pub/Sub 消息：只发送一次，发给当时已订阅的客户端，从不存储。在发布、重连或网络抖动期间，没有人在监听，事件就丢了。在本地测试中，一个在键过期之后才订阅的客户端什么也没收到。通知默认也是关闭的（`notify-keyspace-events` 为空），所以一台新的或恢复的服务器会悄无声息地停止发送这些事件。\n\n**为什么事件会晚。** `expired` 事件是在 Redis 真正删除这个键时发出的，而不是在 TTL 归零时。键被删除，要么是因为有客户端访问了它，要么是后台过期周期抽样到了它；而这个周期每次运行的工作量是有上限的，所以当大量键同时过期时，有些键会被延迟删除。在本地测试中，用调试命令关闭后台过期周期后，直到一次 `GET` 访问了这个键，事件才到达。\n\n**为什么订单会被取消两次。** Pub/Sub 没有消费者组：每个订阅的实例都会收到每条消息，所以两个实例都会执行取消，取消操作必须是幂等的。\n\n**为什么在 Cluster 上丢得更多。** 每个节点只为自己的键发布事件，而且只发给在该节点上订阅的客户端。连在某一个节点上的订阅者会错过其他节点的事件，而且在故障转移之后必须重新订阅。\n\n**重新设计：让数据库充当定时器。** 在订单上保存 `pay_deadline`，为未支付订单建一个部分索引，再运行一个每隔几秒执行一次的清理任务，用条件更新取消到期的订单。`SKIP LOCKED` 让多个清理任务可以分摊工作，而 `status = 'unpaid'` 这个条件保证支付和取消不可能同时成功。\n\n```sql\nWITH due AS (\n  SELECT id FROM orders\n  WHERE status = 'unpaid' AND pay_deadline < now()\n  ORDER BY pay_deadline\n  LIMIT 500\n  FOR UPDATE SKIP LOCKED\n)\nUPDATE orders o\nSET status = 'cancelled', cancelled_at = now()\nFROM due\nWHERE o.id = due.id\nRETURNING o.id;  -- release stock for exactly these orders, in the same transaction\n```\n\n如果需要更快的反应，Redis 只作为一种提示保留：过期事件或有序集合队列可以提前触发同样的条件取消，而清理任务保证不会漏掉任何订单。还要和业务方商定：如果支付在取消一秒之后才到，应该怎么处理——退款，还是在有库存时重新预留。\n\n**权衡。** 清理任务会带来几秒的延迟和持续的查询负载。Redis 通知既便宜又快，但只是一种尽力而为的信号；它绝不能成为「有工作待处理」的唯一记录。",
+      "followups": [
+        "Releasing stock lives in another service. How do you make sure it happens exactly once per cancelled order?",
+        "Merchants want different payment windows, from 15 minutes to 3 days. What changes?",
+        "How would you monitor that cancellations are on time?"
+      ],
+      "followups_zh": [
+        "释放库存的逻辑在另一个服务里。你如何确保每个被取消的订单只释放一次库存？",
+        "商家希望设置不同的支付时限，从 15 分钟到 3 天不等。需要做哪些修改？",
+        "你会如何监控取消是否按时执行？"
+      ],
+      "vocab": [
+        {
+          "en": "keyspace notification",
+          "zh": "键空间通知"
+        },
+        {
+          "en": "fire-and-forget",
+          "zh": "发出即不管"
+        },
+        {
+          "en": "sweeper",
+          "zh": "清理任务"
+        },
+        {
+          "en": "conditional update",
+          "zh": "条件更新"
+        },
+        {
+          "en": "best-effort",
+          "zh": "尽力而为的"
+        }
+      ]
+    },
+    {
+      "id": "20261113-5",
+      "topic": "Java & CS",
+      "difficulty": "Medium",
+      "title": "A token cache hits 99% of the time, yet the ad platform still gets one token request per call and starts returning 429",
+      "title_zh": "令牌缓存的命中率是 99%，广告平台却仍然在每次调用时收到一次令牌请求，并开始返回 429",
+      "question": "A service that calls an ad platform caches OAuth access tokens per ad account. The code reads:\n\n```java\nString token = Optional.ofNullable(cache.get(accountId))\n        .orElse(platform.fetchAccessToken(accountId));\n```\n\nThe cache metrics show a 99% hit rate, but the platform's token endpoint receives one request for every API call. When the platform starts rate-limiting token requests, calls fail with 429 even for accounts whose token is cached. Explain the behavior and fix it. Where else does the same pattern appear?",
+      "question_zh": "一个调用广告平台的服务按广告账号缓存 OAuth 访问令牌。代码如下：\n\n```java\nString token = Optional.ofNullable(cache.get(accountId))\n        .orElse(platform.fetchAccessToken(accountId));\n```\n\n缓存指标显示命中率为 99%，可平台的令牌端点在每次 API 调用时都会收到一次请求。当平台开始对令牌请求限流时，即使是令牌已经缓存的账号，调用也会以 429 失败。解释这种行为并修复它。同样的模式还会出现在哪里？",
+      "answer": "**Why the cache does not help.** Java evaluates method arguments before calling the method. `orElse(x)` receives a value that has already been computed, so `fetchAccessToken` runs on every call, and its result is thrown away when the cache has a token. If it throws, the exception escapes even though a cached token was available. In a local test, `orElse` threw the platform's 429 for an account with a cached token, while `orElseGet` returned the cached one.\n\n**The fix.** Pass a supplier, which runs only when the `Optional` is empty:\n\n```java\n// Before: fetchAccessToken runs on every call, hit or miss.\nString token = Optional.ofNullable(cache.get(accountId))\n        .orElse(platform.fetchAccessToken(accountId));\n\n// After: the supplier runs only when the cache has nothing.\nString token = Optional.ofNullable(cache.get(accountId))\n        .orElseGet(() -> platform.fetchAccessToken(accountId));\n```\n\n**Make the cache do the loading.** Even with `orElseGet`, ten threads that miss at the same moment fetch ten tokens. A loading cache that runs one load per key fixes that. Avoid a slow HTTP call inside `ConcurrentHashMap.computeIfAbsent`, because the map blocks other updates to the same bin while the function runs. Tokens also expire, so store the expiry and refresh shortly before it.\n\n**The same shape elsewhere.** `map.getOrDefault(key, compute())` computes the default every time; a local test counted one extra platform call for a key that was present. `Objects.requireNonNullElse(a, b())` has the same problem, and `requireNonNullElseGet` is the lazy version. `log.debug(\"... \" + expensive())` builds the string even when debug logging is off; use placeholders or a supplier.\n\n**Trade-offs.** `orElse` is right for constants and values you already have, such as `orElse(\"\")` or `orElse(List.of())`. A supplier costs a lambda, which is nothing next to a network call.",
+      "answer_zh": "**为什么缓存没起作用。** Java 会在调用方法之前先计算方法参数。`orElse(x)` 收到的是一个已经算好的值，所以 `fetchAccessToken` 每次调用都会执行，而在缓存里有令牌时，它的结果就被扔掉了。如果它抛出异常，即使有缓存的令牌，异常也会逃逸出来。在本地测试中，对一个已缓存令牌的账号，`orElse` 抛出了平台的 429，而 `orElseGet` 返回了缓存中的令牌。\n\n**修复。** 传入一个 supplier，它只在 `Optional` 为空时才执行：\n\n```java\n// Before: fetchAccessToken runs on every call, hit or miss.\nString token = Optional.ofNullable(cache.get(accountId))\n        .orElse(platform.fetchAccessToken(accountId));\n\n// After: the supplier runs only when the cache has nothing.\nString token = Optional.ofNullable(cache.get(accountId))\n        .orElseGet(() -> platform.fetchAccessToken(accountId));\n```\n\n**让缓存自己负责加载。** 即使用了 `orElseGet`，十个线程同时未命中，也会去获取十个令牌。一个对每个键只执行一次加载的加载式缓存可以解决这个问题。避免在 `ConcurrentHashMap.computeIfAbsent` 里执行慢的 HTTP 调用，因为在函数运行期间，这个 map 会阻塞对同一个桶的其他更新。令牌还会过期，所以要保存过期时间，并在快到期时提前刷新。\n\n**同样的模式还出现在其他地方。** `map.getOrDefault(key, compute())` 每次都会计算默认值；本地测试中，一个已经存在的键也多触发了一次平台调用。`Objects.requireNonNullElse(a, b())` 有同样的问题，`requireNonNullElseGet` 是它的惰性版本。`log.debug(\"... \" + expensive())` 即使在 debug 日志关闭时也会拼接字符串；应使用占位符或 supplier。\n\n**权衡。** 对于常量和已经拿到的值，`orElse` 是正确的选择，比如 `orElse(\"\")` 或 `orElse(List.of())`。supplier 只多一个 lambda 的开销，和一次网络调用相比可以忽略不计。",
+      "followups": [
+        "How would a code review or a static check catch this before production?",
+        "Two pods refresh the same account's token at the same time, and the platform invalidates the first one. What do you do?"
+      ],
+      "followups_zh": [
+        "代码审查或静态检查如何在上线之前发现这个问题？",
+        "两个 Pod 同时刷新同一个账号的令牌，而平台让第一个令牌失效了。你怎么办？"
+      ],
+      "vocab": [
+        {
+          "en": "eager evaluation",
+          "zh": "立即求值"
+        },
+        {
+          "en": "supplier",
+          "zh": "供给函数（Supplier）"
+        },
+        {
+          "en": "loading cache",
+          "zh": "加载式缓存"
+        },
+        {
+          "en": "rate limit",
+          "zh": "限流"
+        }
+      ]
+    }
+  ]
+}
