@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 36 个模块、164 道题。
+共 37 个模块、169 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -495,3 +495,17 @@ Five new agent questions: fixing a hand-written tool loop with the tool runner, 
 | 3 | Production | Hard | [Fast mode on Opus 4.8 ends on November 30: moving the live-chat agent's fast traffic on the Claude API, Managed Agents, Foundry and Vertex](modules/daily-2026-11-12.md#q3) | Opus 4.8 的快速模式将于 11 月 30 日下线：迁移实时聊天 agent 在 Claude API、Managed Agents、Foundry 和 Vertex 上的快速流量 |
 | 4 | Safety & Security | Hard | [Moving the research agent's API keys into vault credentials: a Slack webhook, a signed S3 upload, an OAuth token exchange, and a key that only fails when set up in the Console](modules/daily-2026-11-12.md#q4) | 把研究 agent 的 API 密钥迁入 vault 凭据：一个 Slack webhook、一次签名的 S3 上传、一次 OAuth 令牌交换，以及一个只在控制台创建时才出错的密钥 |
 | 5 | Multi-agent | Senior | [Building the ops console for a coordinator with six workers: "done" that isn't, empty live views, costs that don't add up, and a stop button that halts everything](modules/daily-2026-11-12.md#q5) | 为带六个工作者的协调者搭建运维控制台：显示「完成」其实没完成、实时视图一片空白、成本对不上账，还有一个会停掉所有东西的停止按钮 |
+
+## [Daily set · Nov 13 · 每日新题 · 11 月 13 日](modules/daily-2026-11-13.md)
+
+Five new agent questions: an eval that missed broken retrieval, auditors asking for reasoning that newer models decline to reproduce, MCP credentials that stop matching or refreshing, a migration eval graded against the old model's answers, and memory stores on a self-hosted sandbox.
+
+> 五道新的 Agent 题：没有发现检索已失效的评测、审计人员要求展示而新模型拒绝复现的推理过程、不再匹配或不再刷新的 MCP 凭据、以旧模型答案为标准的迁移评测，以及自托管沙箱上的记忆库。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | RAG | Medium | [The help-center assistant's eval stayed at 91% for a week while its retrieval was broken](modules/daily-2026-11-13.md#q1) | 帮助中心助手的检索坏了整整一周，评测分数却一直停在 91% |
+| 2 | Safety & Security | Medium | [Auditors want the ad-review agent to show its reasoning, and after the move to Claude Opus 5.5 some reviews come back as refusals](modules/daily-2026-11-13.md#q2) | 审计人员希望广告审核 agent 展示它的推理过程，而在迁移到 Claude Opus 5.5 之后，部分审核以拒答告终 |
+| 3 | Tools & MCP | Hard | [On Managed Agents, one MCP server suddenly runs unauthenticated, and another stops working an hour into each session](modules/daily-2026-11-13.md#q3) | 在 Managed Agents 上，一个 MCP 服务器突然在未认证状态下运行，另一个则在每个会话进行到一小时左右时失效 |
+| 4 | Evals & Observability | Hard | [The migration eval says Claude Haiku 5.5 is 12 points worse at product descriptions, and the gold answers were written by Claude Haiku 4.5](modules/daily-2026-11-13.md#q4) | 迁移评测显示 Claude Haiku 5.5 写商品描述的得分低了 12 分，而标准答案是由 Claude Haiku 4.5 写的 |
+| 5 | Context & Memory | Senior | [After moving the catalog agent to a self-hosted sandbox, its memory notes go missing, a read-only playbook gets edited, and some sessions never start](modules/daily-2026-11-13.md#q5) | 把商品目录 agent 迁到自托管沙箱之后，它的记忆笔记会丢失、只读的操作手册被改动，还有些会话根本启动不了 |
