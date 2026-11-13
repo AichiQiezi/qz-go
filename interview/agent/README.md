@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 37 个模块、169 道题。
+共 38 个模块、174 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -509,3 +509,17 @@ Five new agent questions: an eval that missed broken retrieval, auditors asking 
 | 3 | Tools & MCP | Hard | [On Managed Agents, one MCP server suddenly runs unauthenticated, and another stops working an hour into each session](modules/daily-2026-11-13.md#q3) | 在 Managed Agents 上，一个 MCP 服务器突然在未认证状态下运行，另一个则在每个会话进行到一小时左右时失效 |
 | 4 | Evals & Observability | Hard | [The migration eval says Claude Haiku 5.5 is 12 points worse at product descriptions, and the gold answers were written by Claude Haiku 4.5](modules/daily-2026-11-13.md#q4) | 迁移评测显示 Claude Haiku 5.5 写商品描述的得分低了 12 分，而标准答案是由 Claude Haiku 4.5 写的 |
 | 5 | Context & Memory | Senior | [After moving the catalog agent to a self-hosted sandbox, its memory notes go missing, a read-only playbook gets edited, and some sessions never start](modules/daily-2026-11-13.md#q5) | 把商品目录 agent 迁到自托管沙箱之后，它的记忆笔记会丢失、只读的操作手册被改动，还有些会话根本启动不了 |
+
+## [Daily set · Nov 14 · 每日新题 · 11 月 14 日](modules/daily-2026-11-14.md)
+
+Five new agent questions: an agent that stopped batching tool calls, a model router that should ask the Models API, the advisor tool in production, strict tools that disappear in a CMEK organization, and checking a latency claim before shipping it.
+
+> 五道新的 Agent 题：不再合并工具调用的 agent、应该改为查询 Models API 的模型路由器、生产环境中的顾问工具、在 CMEK 组织中无法使用的 strict 工具，以及在上线之前核实一个延迟结论。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Agent Loop | Medium | [After moving the catalog-audit agent to Claude Fable 5.1, it checks one product per turn and audits take twice as long](modules/daily-2026-11-14.md#q1) | 把商品目录审计 agent 迁到 Claude Fable 5.1 之后，它每轮只检查一个商品，审计耗时翻了一倍 |
+| 2 | Production | Medium | [The model router keeps its own table of context windows and features, and every new model breaks it](modules/daily-2026-11-14.md#q2) | 模型路由器自己维护了一张上下文窗口和功能的表，每出一个新模型它就会出问题 |
+| 3 | Multi-agent | Hard | [The advisor tool in production: the advice log is empty, some turns get no advice, and removing the advisor breaks running conversations](modules/daily-2026-11-14.md#q3) | 生产环境中的顾问工具：顾问建议日志是空的，有些轮次拿不到建议，而移除顾问会让进行中的对话出错 |
+| 4 | Tools & MCP | Hard | [An enterprise merchant's workspace moves to customer-managed encryption keys, and the Claude Fable 5.2 extractor can no longer use strict tools](modules/daily-2026-11-14.md#q4) | 一家企业商家的工作区改用客户自管加密密钥，Claude Fable 5.2 的抽取步骤再也不能使用 strict 工具 |
+| 5 | Evals & Observability | Senior | [A pull request claims the new prompt cut the checkout assistant's p99 latency from 14 s to 9 s: deciding whether to believe it](modules/daily-2026-11-14.md#q5) | 一个 PR 声称新提示词把结账助手的 p99 延迟从 14 秒降到了 9 秒：判断这个结论是否可信 |
