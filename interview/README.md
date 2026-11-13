@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 33 天、165 道题。
+共 34 天、170 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-14](days/2026-11-14.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Hard | [The product API hangs under load while the database is almost idle, and only some endpoints recover on their own](days/2026-11-14.md#q1) | 商品 API 在负载下卡死，而数据库几乎是空闲的，只有部分接口能自己恢复 |
+| 2 | System Design | Senior | [One app's bulk sync slows the Admin API for everyone: rate limiting third-party apps on your own platform](days/2026-11-14.md#q2) | 一个应用的批量同步拖慢了所有人的 Admin API：为自己平台上的第三方应用做限流 |
+| 3 | Database | Medium | [A SKU prefix search uses the index in staging and scans 30 million rows in production](days/2026-11-14.md#q3) | SKU 前缀搜索在预发环境走索引，在生产环境却扫描了 3000 万行 |
+| 4 | Middleware | Medium | [A Redis bitmap of products viewed today: one new product ID made Redis allocate 500 MB and stall](days/2026-11-14.md#q4) | 用 Redis 位图记录今天被浏览过的商品：一个新的商品 ID 让 Redis 分配了 500 MB 内存并卡顿 |
+| 5 | Java & CS | Hard | [Campaigns created in late December get end dates a year too late on US servers and in the past on EU servers](days/2026-11-14.md#q5) | 在 12 月底创建的广告活动，在美国服务器上结束日期晚了一年，在欧洲服务器上则变成了过去的日期 |
 
 ## [2026-11-13](days/2026-11-13.md)
 
