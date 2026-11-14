@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 34 天、170 道题。
+共 35 天、175 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-15](days/2026-11-15.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Medium | [A retry backoff set to 500 hammers the ad API, and a 30-second timeout fires at once: Go durations are nanoseconds](days/2026-11-15.md#q1) | 设置为 500 的重试退避把广告 API 打爆了，30 秒的超时则立刻触发：Go 的时长单位是纳秒 |
+| 2 | System Design | Medium | [Generating one million single-use coupon codes for a merchant's campaign: unique, hard to guess, and easy to type](days/2026-11-15.md#q2) | 为商家的营销活动生成一百万个一次性优惠码：唯一、难以猜测、而且容易输入 |
+| 3 | Database | Hard | [The order list is fast for small stores until the sixth request, then the largest store's page takes seconds](days/2026-11-15.md#q3) | 订单列表对小店铺一直很快，直到第六次请求之后，最大店铺的页面开始要好几秒 |
+| 4 | Middleware | Senior | [Redis keeps 3 GB of RSS after the nightly cart cleanup removes 70% of its data, and the kernel kills it at the next traffic peak](days/2026-11-15.md#q4) | 夜间清理购物车删掉了 70% 的数据后，Redis 的 RSS 仍然占着 3 GB，并在下一个流量高峰被内核杀掉 |
+| 5 | Java & CS | Hard | [Sorting products by price puts expensive items first, and on large catalogs throws "Comparison method violates its general contract!"](days/2026-11-15.md#q5) | 按价格排序把昂贵商品排到了最前面，在大型商品目录上还抛出「Comparison method violates its general contract!」 |
 
 ## [2026-11-14](days/2026-11-14.md)
 
