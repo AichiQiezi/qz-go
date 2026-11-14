@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 38 个模块、174 道题。
+共 39 个模块、179 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -523,3 +523,17 @@ Five new agent questions: an agent that stopped batching tool calls, a model rou
 | 3 | Multi-agent | Hard | [The advisor tool in production: the advice log is empty, some turns get no advice, and removing the advisor breaks running conversations](modules/daily-2026-11-14.md#q3) | 生产环境中的顾问工具：顾问建议日志是空的，有些轮次拿不到建议，而移除顾问会让进行中的对话出错 |
 | 4 | Tools & MCP | Hard | [An enterprise merchant's workspace moves to customer-managed encryption keys, and the Claude Fable 5.2 extractor can no longer use strict tools](modules/daily-2026-11-14.md#q4) | 一家企业商家的工作区改用客户自管加密密钥，Claude Fable 5.2 的抽取步骤再也不能使用 strict 工具 |
 | 5 | Evals & Observability | Senior | [A pull request claims the new prompt cut the checkout assistant's p99 latency from 14 s to 9 s: deciding whether to believe it](modules/daily-2026-11-14.md#q5) | 一个 PR 声称新提示词把结账助手的 p99 延迟从 14 秒降到了 9 秒：判断这个结论是否可信 |
+
+## [Daily set · Nov 15 · 每日新题 · 11 月 15 日](modules/daily-2026-11-15.md)
+
+Five new agent questions: whether a 1M-token window should replace retrieval, file mounts and outputs in Managed Agents sessions, a per-merchant memory layout, long deliverables at high effort, and support-bot defenses that hold under persuasion.
+
+> 五道新的 Agent 题：100 万 token 的窗口是否应该取代检索、Managed Agents 会话中的文件挂载与输出、按商家划分的记忆库组织方式、高 effort 下的长交付物，以及在软磨硬泡下依然有效的客服机器人防线。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | RAG | Medium | [With Claude Haiku 5.5's 1M-token window, the team wants to drop retrieval and send the whole 400K-token help center with every question](modules/daily-2026-11-15.md#q1) | 既然 Claude Haiku 5.5 有 100 万 token 的上下文窗口，团队想去掉检索，每个问题都把 40 万 token 的整个帮助中心发过去 |
+| 2 | Production | Medium | [The catalog-cleanup agent on Managed Agents cannot find the uploaded CSV, and its cleaned file never shows up for download](modules/daily-2026-11-15.md#q2) | Managed Agents 上的商品目录清理 agent 找不到上传的 CSV，清理后的文件也始终没有出现在可下载列表里 |
+| 3 | Context & Memory | Hard | [One shared memory store for 3,000 merchants: preferences leak between merchants, a store was archived by mistake, and memory cannot be added mid-session](modules/daily-2026-11-15.md#q3) | 3,000 个商家共用一个记忆库：偏好在商家之间串用、一个记忆库被误归档，而且会话进行中无法再添加记忆 |
+| 4 | Agent Loop | Hard | [At xhigh effort, the catalog agent's 300-row product tables take twice as long, use twice the output tokens, and sometimes stop mid-table](modules/daily-2026-11-15.md#q4) | 在 xhigh effort 下，商品目录 agent 生成的 300 行商品表格耗时翻倍、输出 token 翻倍，有时还会在表格中间停下 |
+| 5 | Safety & Security | Senior | [Shoppers talk the support assistant into refunds and discount codes outside policy: designing defenses that hold under persuasion](modules/daily-2026-11-15.md#q5) | 顾客能说服客服助手给出超出政策的退款和折扣码：设计在软磨硬泡下依然有效的防线 |
