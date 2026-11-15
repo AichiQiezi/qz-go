@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 35 天、175 道题。
+共 36 天、180 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-16](days/2026-11-16.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Hard | [After someone sets Accept-Encoding: gzip on the ad-report client, JSON decoding fails with '\x1f', and the size limit stops working](days/2026-11-16.md#q1) | 有人在广告报表客户端上设置了 Accept-Encoding: gzip 之后，JSON 解码报 '\x1f' 错误，而且大小限制也失效了 |
+| 2 | System Design | Medium | [Search-as-you-type for 100,000 storefronts: suggestions within 100 ms on every keystroke](days/2026-11-16.md#q2) | 为 100,000 个店铺实现边输入边搜索：每次按键都要在 100 毫秒内给出建议 |
+| 3 | Database | Senior | [Upgrading the orders database with logical replication: at cutover every insert fails with a duplicate key, and the old primary rejected updates during the copy](days/2026-11-16.md#q3) | 用逻辑复制升级订单数据库：切换时每次插入都报主键冲突，而在复制期间，旧主库还拒绝了更新操作 |
+| 4 | Middleware | Medium | [Catalog sync jobs disappear when a worker pod is killed: a Redis list queue built on BLPOP](days/2026-11-16.md#q4) | worker Pod 被杀掉时，商品同步任务就凭空消失：一个基于 BLPOP 的 Redis 列表队列 |
+| 5 | Java & CS | Hard | [Supplier feeds in Windows-1252: one import crashes, another sends broken titles to Google, a third shows 'CafÃ©'](days/2026-11-16.md#q5) | Windows-1252 编码的供应商 feed：一个导入任务崩溃，另一个把损坏的标题发给了 Google，第三个则显示成「CafÃ©」 |
 
 ## [2026-11-15](days/2026-11-15.md)
 
