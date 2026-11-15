@@ -1,0 +1,207 @@
+{
+  "id": "daily-2026-11-16",
+  "order": 20261116,
+  "kind": "daily",
+  "title": "Daily set · Nov 16",
+  "title_zh": "每日新题 · 11 月 16 日",
+  "summary": "Five new agent questions: a help assistant that stops searching after a model move, near-miss tool calls, screenshot pruning against preserved thinking, an eval that grades verification instead of claims, and following dynamic workflow runs from the client.",
+  "summary_zh": "五道新的 Agent 题：换模型后不再搜索的帮助助手、差一点对的工具调用、截图裁剪与保留 thinking 的冲突、给验证而非声明打分的评测，以及在客户端跟踪动态工作流的 run。",
+  "generatedAt": "2026-11-16T07:05:27+08:00",
+  "questions": [
+    {
+      "id": "agent-daily-20261116-1",
+      "topic": "RAG",
+      "difficulty": "Medium",
+      "title": "After the move to Claude Sonnet 5.5, the help assistant answers fee and limit questions from memory instead of searching the help center",
+      "title_zh": "迁移到 Claude Sonnet 5.5 之后，帮助助手凭记忆回答费用和额度类问题，而不去搜索帮助中心",
+      "question": "The merchant help assistant has one tool, `search_help_center`, and moved from Claude Sonnet 5 to Claude Sonnet 5.5 last week. Spot checks show it now answers many questions about payout fees, return windows and plan limits directly, without searching, and twice it quoted a fee that changed last month. Its system prompt still says \"Only use tools when strictly necessary; keep tool calls to a minimum\", a line added on the old model to save latency.\n\nExplain the likely cause, what you would change, and how you would know it worked.",
+      "question_zh": "商家帮助助手只有一个工具 `search_help_center`，上周从 Claude Sonnet 5 迁移到了 Claude Sonnet 5.5。抽查发现，它现在很多关于提现费用、退货期限和套餐额度的问题都直接回答，不做搜索，而且有两次报出的是上个月已经调整过的费用。它的系统提示里还写着「只在绝对必要时使用工具；尽量少调用工具」，这句话是在旧模型上为了降低延迟加进去的。\n\n解释可能的原因、你会改什么，以及你怎么判断改动生效了。",
+      "answer": "**The core idea.** Retrieval only helps when the model actually retrieves. The migration guide notes that on chat and knowledge-work tasks Claude Sonnet 5.5 sometimes answers from its own knowledge when a connected tool or internal search would serve better, can hold off on tools until asked directly, and follows tool-discouraging language literally. The old \"strictly necessary\" line now does exactly what it says.\n\n**Change the prompt.** Delete the line that discourages tools. Then add the sentence the guide recommends for products that should prefer connected sources, word for word:\n\nUse the search tool to check specifics that may have changed since your training, such as what is allowed, required or charged, even when you feel confident. For researched work such as a report or a comparison, gather current sources rather than writing from your training knowledge.\n\n- **Make the tool description say when it applies:** fees, limits, deadlines, eligibility and settings, which change often. The description is part of how the model decides.\n- **You cannot force the call.** On this model `tool_choice` of type `any` or `tool` returns a 400, so keep `auto`, steer from the prompt, and check that the call happened.\n- **Set effort explicitly.** The levels are recalibrated from Claude Sonnet 5, and the guide suggests starting at `low` for chat and search. Measure the search rate at each level instead of assuming one.\n\n**Check in the harness.** Label each question as policy, account or chit-chat; a cheap classifier is enough. For policy questions, flag a turn that ended without a search, and either retry once with a short reminder or answer with a link to the article list:\n\n```go\n// answeredFromMemory reports a finished turn whose conversation never called the search tool.\nfunc answeredFromMemory(turn []anthropic.Message) bool {\n\tlast := turn[len(turn)-1]\n\tif last.StopReason != anthropic.StopReasonEndTurn {\n\t\treturn false\n\t}\n\tfor _, m := range turn {\n\t\tfor _, b := range m.Content {\n\t\t\tif t, ok := b.AsAny().(anthropic.ToolUseBlock); ok && t.Name == \"search_help_center\" {\n\t\t\t\treturn false\n\t\t\t}\n\t\t}\n\t}\n\treturn true\n}\n```\n\n**How you know it worked.** Build an eval from questions whose answers changed recently, such as fees and limits updated in the last quarter, and score the answer against the current article, not against what sounds right. Track three numbers per prompt version: the search rate on policy questions, accuracy against the current article, and how often the answer cites an article ID. Also track the search rate on chit-chat, so the fix does not turn every greeting into a search.\n\n**Trade-offs.** Every search adds latency and input tokens. Scope the instruction to facts that change, and let stable how-to questions be answered from memory if the eval shows they stay correct.",
+      "answer_zh": "**核心思想。** 只有模型真的去检索，检索才有用。迁移指南指出，在对话和知识类任务上，Claude Sonnet 5.5 有时会用自己的知识作答，而此时用已连接的工具或内部搜索会更好；它也可能直到被明确要求才使用工具，并且会按字面执行那些劝阻使用工具的语句。那句旧的「绝对必要时」现在正是按字面在起作用。\n\n**修改提示。** 删掉劝阻使用工具的那句话。然后逐字加上指南为「应优先使用已连接来源」的产品推荐的这句话：\n\nUse the search tool to check specifics that may have changed since your training, such as what is allowed, required or charged, even when you feel confident. For researched work such as a report or a comparison, gather current sources rather than writing from your training knowledge.（提示中保留英文原句。大意：用搜索工具核对那些自训练以来可能已经变化的具体信息，比如允许什么、要求什么、收费多少，即使你觉得很有把握；对报告或对比这类需要研究的工作，要收集当前的资料，而不是根据训练知识来写。）\n\n- **让工具描述写明何时使用：** 费用、额度、期限、资格条件和设置，这些经常变化。描述本身就是模型做决定的依据之一。\n- **你无法强制调用。** 在这个模型上，类型为 `any` 或 `tool` 的 `tool_choice` 会返回 400，所以保持 `auto`，用提示来引导，并检查调用是否真的发生了。\n- **显式设置 effort。** 各档位相对 Claude Sonnet 5 重新校准过，指南建议对话和搜索类任务从 `low` 起步。在每个档位上实测搜索率，而不是想当然。\n\n**在框架里做检查。** 把每个问题标成政策、账户或闲聊，用一个便宜的分类器就够了。对政策类问题，标记那些没有搜索就结束的轮次，然后要么带一句简短提醒重试一次，要么回复一个文章列表链接：\n\n```go\n// answeredFromMemory reports a finished turn whose conversation never called the search tool.\nfunc answeredFromMemory(turn []anthropic.Message) bool {\n\tlast := turn[len(turn)-1]\n\tif last.StopReason != anthropic.StopReasonEndTurn {\n\t\treturn false\n\t}\n\tfor _, m := range turn {\n\t\tfor _, b := range m.Content {\n\t\t\tif t, ok := b.AsAny().(anthropic.ToolUseBlock); ok && t.Name == \"search_help_center\" {\n\t\t\t\treturn false\n\t\t\t}\n\t\t}\n\t}\n\treturn true\n}\n```\n\n**如何判断生效。** 用最近答案发生过变化的问题来构建评测，比如上个季度调整过的费用和额度，并按当前的文章来给答案打分，而不是看它听起来对不对。每个提示版本跟踪三个数字：政策类问题的搜索率、相对当前文章的准确率，以及答案引用文章 ID 的频率。同时跟踪闲聊类问题的搜索率，以免修复之后每句问候都去搜索。\n\n**权衡。** 每次搜索都会增加延迟和输入 token。把这条指令限定在会变化的事实上；如果评测显示那些稳定的操作类问题凭记忆也能答对，就允许它们直接回答。",
+      "followups": [
+        "The retry after a missing search also skips the search. What do you do next?",
+        "How would you keep the eval's \"recently changed\" questions current?",
+        "Would you show merchants the article the answer came from? Why?"
+      ],
+      "followups_zh": [
+        "没有搜索时的那次重试，也同样跳过了搜索。你下一步怎么办？",
+        "你会如何让评测里那些「最近变化过」的问题保持最新？",
+        "你会把答案出处的文章展示给商家吗？为什么？"
+      ],
+      "vocab": [
+        {
+          "en": "training knowledge",
+          "zh": "训练知识"
+        },
+        {
+          "en": "tool-discouraging language",
+          "zh": "劝阻使用工具的措辞"
+        },
+        {
+          "en": "recalibrated effort",
+          "zh": "重新校准的 effort 档位"
+        },
+        {
+          "en": "search rate",
+          "zh": "搜索率"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261116-2",
+      "topic": "Tools & MCP",
+      "difficulty": "Medium",
+      "title": "The order tools' dispatcher crashes when Claude Sonnet 5.5 calls Get_Order or passes orderId: handling near-miss tool calls",
+      "title_zh": "当 Claude Sonnet 5.5 调用 Get_Order 或传入 orderId 时，订单工具的分发器崩溃了：如何处理「差一点对」的工具调用",
+      "question": "Your support agent runs a hand-written loop with an in-house dispatcher for order tools such as `get_order` and `refund_order`. Since the move to Claude Sonnet 5.5, about one turn in two hundred crashes: the model called `Get_Order`, or passed `orderId` instead of `order_id`, and the dispatcher panics on anything it does not know. One engineer proposes a fuzzy matcher that maps any similar-looking name to the closest tool. Another wants to keep the old shim that re-sends the whole request whenever a tool call fails.\n\nWhat would you build instead?",
+      "question_zh": "你的客服 Agent 运行一个手写的循环，订单类工具（比如 `get_order` 和 `refund_order`）由内部的分发器处理。迁移到 Claude Sonnet 5.5 之后，大约每两百个轮次就有一个崩溃：模型调用了 `Get_Order`，或者传了 `orderId` 而不是 `order_id`，而分发器遇到任何不认识的东西都会 panic。一位工程师提议做一个模糊匹配器，把任何长得像的名字都映射到最接近的工具上。另一位想保留旧的兜底逻辑：只要工具调用失败，就把整个请求重新发送一遍。\n\n你会改成怎样的做法？",
+      "answer": "**The core idea.** The migration guide says this model occasionally calls a declared tool by a name that differs only in letter case, or passes a known parameter under a slightly different name, and that this should not be fatal: accept the call when the match is unambiguous, or return a `tool_result` with `is_error: true` that states the exact expected name. The model usually corrects the call on its next turn.\n\n**Rules for the dispatcher.**\n\n- **Exact match first,** then a case-insensitive match only when exactly one tool fits.\n- **Parameters:** map a key only when it differs in case or underscores and exactly one declared parameter fits. Never map by meaning: `amount` is not `amount_cents`, and guessing units on a refund tool moves money.\n- **Anything else is an error result,** not a crash and not a guess. Every `tool_use` still gets its `tool_result`, all of them in one user message.\n\n```go\n// resolve accepts an exact name, or a name that differs only in letter case when exactly one tool matches.\nfunc (d *Dispatcher) resolve(name string) (Tool, bool) {\n\tif t, ok := d.tools[name]; ok {\n\t\treturn t, true\n\t}\n\tvar hit []Tool\n\tfor n, t := range d.tools {\n\t\tif strings.EqualFold(n, name) {\n\t\t\thit = append(hit, t)\n\t\t}\n\t}\n\tif len(hit) == 1 {\n\t\td.log(\"tool_name_case_fixed\", name+\" -> \"+hit[0].Name)\n\t\treturn hit[0], true\n\t}\n\treturn Tool{}, false\n}\n\nfunc (d *Dispatcher) Call(name string, raw json.RawMessage) Result {\n\tt, ok := d.resolve(name)\n\tif !ok {\n\t\tnames := make([]string, 0, len(d.tools))\n\t\tfor n := range d.tools {\n\t\t\tnames = append(names, n)\n\t\t}\n\t\tsort.Strings(names)\n\t\treturn Result{fmt.Sprintf(\"No tool named %q. Available tools: %s.\", name, strings.Join(names, \", \")), true}\n\t}\n\tvar args map[string]any\n\tif err := json.Unmarshal(raw, &args); err != nil {\n\t\treturn Result{\"Arguments were not valid JSON: \" + err.Error(), true}\n\t}\n\targs, err := d.fixArgs(t, args)\n\tif err != nil {\n\t\treturn Result{err.Error(), true}\n\t}\n\tout, err := t.Run(args)\n\tif err != nil {\n\t\treturn Result{t.Name + \" failed: \" + err.Error(), true}\n\t}\n\treturn Result{out, false}\n}\n```\n\nThis is why the fuzzy matcher is the wrong tool: \"closest\" is a guess, and on a write tool a wrong guess acts on the wrong order. The error message is cheap and the model reads it.\n\n**Strict tool use where it fits.** With `strict: true` on a tool, plus `additionalProperties: false` and `required` in its schema, the API guarantees the input validates against the schema, so a misnamed parameter cannot reach the dispatcher for that tool. It does not cover the tool name, so keep the name check.\n\n**Remove the retry shim.** The guide lists tool-call retry shims among the workarounds to remove after this migration, then re-run the evals. Re-sending the whole request repeats the same mistake at full cost and hides the signal; an error result lets the model fix one call.\n\n**Observe it.** Count each fix and each error result per tool. A rising rate points at a tool whose name or parameters are easy to get wrong; consistent snake_case names help.\n\n**Trade-offs.** Tolerance can hide drift, which is why every fix is logged. Being strict everywhere costs extra turns and occasional failures.",
+      "answer_zh": "**核心思想。** 迁移指南说，这个模型偶尔会用一个只有大小写不同的名字调用已声明的工具，或者用一个略有不同的名字传入已知参数，而这不应该是致命错误：匹配没有歧义时就接受这次调用，否则返回一个 `is_error: true` 的 `tool_result`，写明准确的预期名称。模型通常会在下一轮修正调用。\n\n**分发器的规则。**\n\n- **先精确匹配，** 然后只有恰好一个工具符合时才做忽略大小写的匹配。\n- **参数：** 只有当某个键仅在大小写或下划线上不同、并且恰好有一个已声明参数符合时才映射。绝不按含义映射：`amount` 不是 `amount_cents`，在退款工具上猜单位是会动到钱的。\n- **其他情况一律返回错误结果，** 既不崩溃也不猜。每个 `tool_use` 依然要有对应的 `tool_result`，并且全部放在同一条用户消息里。\n\n```go\n// resolve accepts an exact name, or a name that differs only in letter case when exactly one tool matches.\nfunc (d *Dispatcher) resolve(name string) (Tool, bool) {\n\tif t, ok := d.tools[name]; ok {\n\t\treturn t, true\n\t}\n\tvar hit []Tool\n\tfor n, t := range d.tools {\n\t\tif strings.EqualFold(n, name) {\n\t\t\thit = append(hit, t)\n\t\t}\n\t}\n\tif len(hit) == 1 {\n\t\td.log(\"tool_name_case_fixed\", name+\" -> \"+hit[0].Name)\n\t\treturn hit[0], true\n\t}\n\treturn Tool{}, false\n}\n\nfunc (d *Dispatcher) Call(name string, raw json.RawMessage) Result {\n\tt, ok := d.resolve(name)\n\tif !ok {\n\t\tnames := make([]string, 0, len(d.tools))\n\t\tfor n := range d.tools {\n\t\t\tnames = append(names, n)\n\t\t}\n\t\tsort.Strings(names)\n\t\treturn Result{fmt.Sprintf(\"No tool named %q. Available tools: %s.\", name, strings.Join(names, \", \")), true}\n\t}\n\tvar args map[string]any\n\tif err := json.Unmarshal(raw, &args); err != nil {\n\t\treturn Result{\"Arguments were not valid JSON: \" + err.Error(), true}\n\t}\n\targs, err := d.fixArgs(t, args)\n\tif err != nil {\n\t\treturn Result{err.Error(), true}\n\t}\n\tout, err := t.Run(args)\n\tif err != nil {\n\t\treturn Result{t.Name + \" failed: \" + err.Error(), true}\n\t}\n\treturn Result{out, false}\n}\n```\n\n这就是模糊匹配器不合适的原因：「最接近」只是猜测，而在写操作工具上，猜错就会作用到错误的订单上。错误消息成本很低，而模型会读它。\n\n**在合适的地方用严格工具调用。** 在工具上设置 `strict: true`，并在 schema 中写上 `additionalProperties: false` 和 `required`，API 就保证输入能通过 schema 校验，于是对这个工具来说，名字写错的参数不可能到达分发器。它不覆盖工具名称，所以名称检查仍要保留。\n\n**移除重试兜底。** 指南把工具调用的重试兜底列为这次迁移之后应当移除的变通做法之一，移除后要重新跑评测。整个请求重发一遍，只会以全额成本重复同样的错误，还掩盖了信号；而错误结果能让模型只修正那一次调用。\n\n**做好观测。** 按工具统计每一次修正和每一次错误结果。比例上升说明某个工具的名称或参数容易写错；统一使用 snake_case 命名会有帮助。\n\n**权衡。** 宽容处理可能掩盖偏差，所以每次修正都要记日志。处处严格则会多花轮次，偶尔还会失败。",
+      "followups": [
+        "Two tools differ only in case, such as Search and search. What does the dispatcher do?",
+        "Would you apply the parameter fix to refund_order at all?",
+        "How would you test this dispatcher without calling the model?"
+      ],
+      "followups_zh": [
+        "有两个工具只在大小写上不同，比如 Search 和 search。分发器该怎么做？",
+        "你会对 refund_order 也做参数修正吗？",
+        "不调用模型的情况下，你会如何测试这个分发器？"
+      ],
+      "vocab": [
+        {
+          "en": "near-miss",
+          "zh": "差一点对（近似匹配）"
+        },
+        {
+          "en": "error result",
+          "zh": "错误结果"
+        },
+        {
+          "en": "retry shim",
+          "zh": "重试兜底"
+        },
+        {
+          "en": "strict tool use",
+          "zh": "严格工具调用"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261116-3",
+      "topic": "Context & Memory",
+      "difficulty": "Hard",
+      "title": "The seller-portal agent keeps only its last three screenshots, and on Claude Sonnet 5.5 long sessions fail on a new account but not on an old one",
+      "title_zh": "卖家后台 Agent 只保留最近三张截图，迁移到 Claude Sonnet 5.5 后，长会话在新账号上失败，在老账号上却不会",
+      "question": "A computer-use agent fills listings in a marketplace's seller portal. To save tokens, the harness keeps only the last three screenshots and replaces older image blocks with the text \"[screenshot removed]\". The team moves it from Claude Sonnet 5 to Claude Sonnet 5.5 on the Claude API, in a workspace whose organization was created in September 2026. First every request returns a 400 about the tool type. After that is fixed, a 400 about the fine-grained streaming header appears. After that, sessions fail with a 400 once the fourth screenshot arrives. The same code on the team's older organization runs fine.\n\nExplain each failure and redesign how the agent manages its context.",
+      "question_zh": "一个计算机使用（computer use）Agent 在某个电商平台的卖家后台里填写商品。为了节省 token，框架只保留最近三张截图，把更早的图片块替换成文字「[screenshot removed]」。团队在 Claude API 上把它从 Claude Sonnet 5 迁移到 Claude Sonnet 5.5，所在组织创建于 2026 年 9 月。一开始，每个请求都因为工具类型返回 400。修好之后，又出现了关于细粒度流式请求头的 400。再修好之后，一旦第四张截图到来，会话就返回 400 失败。同样的代码在团队较早创建的组织上运行正常。\n\n解释每一个失败，并重新设计这个 Agent 管理上下文的方式。",
+      "answer": "**The core idea.** On this model, thinking blocks are bound to the conversation. The API checks that the `system` prompt, the `tools` and every earlier message are unchanged since a block was produced. Replacing an old screenshot edits an earlier message, so every later thinking block fails the check.\n\n- **Failure 1, the tool type.** On the Claude API and Google Cloud, Claude Sonnet 5.5 accepts computer use only as `computer_toolset_20260801`; `computer_20251124` returns a 400 (Amazon Bedrock still accepts it). The toolset entry has no `name` and no display size, the action is the `tool_use` block's `name`, there can be several calls per turn, and every result echoes `\"toolset_name\": \"computer\"`.\n- **Failure 2, the header.** The `fine-grained-tool-streaming-2025-05-14` header returns a 400 alongside a computer use toolset. Set `eager_input_streaming: true` on each tool that needs it instead.\n- **Failure 3, the pruning.** The history check is enforced by default for organizations created on or after August 31, 2026, so the edit is a 400 there. Older organizations are not enforced unless a request opts in, which is why the old one runs.\n\n**The redesign: keep the history append-only.** Send every screenshot once and never edit it. Make each one cheaper instead: the guide says to resize screenshots to 2000 px or less per side. The toolset takes no display size and the API does not downscale for you, and coordinates come back in the pixel space of the screenshots you returned, so the harness maps clicks back to the real screen:\n\n```go\nconst maxSide = 2000 // the guide's ceiling per side for screenshots on this model\n\n// Shot is what the harness keeps for one screenshot it returned to the model.\ntype Shot struct {\n\tImg   *image.RGBA\n\tScale float64 // screen pixels per screenshot pixel (1 when no resize was needed)\n}\n\n// fit returns a copy that is at most maxSide pixels on each side, keeping the aspect ratio.\nfunc fit(src image.Image) Shot {\n\tb := src.Bounds()\n\tw, h := b.Dx(), b.Dy()\n\tscale := math.Max(float64(w)/maxSide, float64(h)/maxSide)\n\tif scale < 1 {\n\t\tscale = 1 // already small enough: copy as is\n\t}\n\tnw, nh := int(float64(w)/scale), int(float64(h)/scale)\n\tdst := image.NewRGBA(image.Rect(0, 0, nw, nh))\n\tfor y := 0; y < nh; y++ { // nearest neighbour keeps the example short; use a proper filter in production\n\t\tfor x := 0; x < nw; x++ {\n\t\t\tdst.Set(x, y, src.At(b.Min.X+int(float64(x)*scale), b.Min.Y+int(float64(y)*scale)))\n\t\t}\n\t}\n\treturn Shot{dst, scale}\n}\n\n// toScreen maps a coordinate from the model (in the pixel space of the screenshots\n// the harness returned) back to the real screen before the click is executed.\nfunc (s Shot) toScreen(x, y int) (int, int) {\n\treturn int(math.Round(float64(x) * s.Scale)), int(math.Round(float64(y) * s.Scale))\n}\n```\n\n- **Let the server clear old results.** Context editing (`clear_tool_uses_20250919`, beta `context-management-2025-06-27`) removes old tool results before the model sees them. It does not count as an edit, because the check compares the conversation as you sent it, not the server's edited copy.\n- **Facts in text.** Have the agent note what it learned from a page, such as a listing ID or a confirmation number, so clearing a screenshot loses pixels, not facts.\n- **`drop_block` is a stopgap.** With adaptive thinking you can set `thinking.block_binding.prefix_mismatch_behavior: \"drop_block\"` (beta `thinking-binding-controls-2026-08-01`) from the first prune on. It drops the affected reasoning rather than failing. It does not work with `between_tools`.\n\n**Trade-offs.** An append-only history keeps the prompt cache warm, but it is longer. Clearing saves tokens at the cost of old visual detail, and smaller screenshots trade fine text for cost, so test the scale on the portal's densest pages.",
+      "answer_zh": "**核心思想。** 在这个模型上，thinking 块与对话绑定。API 会检查自某个块生成以来，`system` 提示、`tools` 以及之前的每一条消息都没有变化。替换一张旧截图就是修改了之前的消息，于是之后的每一个 thinking 块都无法通过检查。\n\n- **失败 1：工具类型。** 在 Claude API 和 Google Cloud 上，Claude Sonnet 5.5 只接受 `computer_toolset_20260801` 形式的计算机使用；`computer_20251124` 会返回 400（Amazon Bedrock 仍然接受它）。toolset 条目没有 `name`，也没有显示尺寸；动作就是 `tool_use` 块的 `name`；一轮里可以有多次调用；并且每个结果都要回传 `\"toolset_name\": \"computer\"`。\n- **失败 2：请求头。** 与计算机使用 toolset 同时出现时，`fine-grained-tool-streaming-2025-05-14` 请求头会返回 400。改为在需要的每个工具上设置 `eager_input_streaming: true`。\n- **失败 3：裁剪。** 对 2026 年 8 月 31 日及之后创建的组织，历史检查默认强制执行，所以这种修改在那里会返回 400。较早的组织除非请求主动开启，否则不强制，这就是老组织能跑通的原因。\n\n**重新设计：保持历史只追加。** 每张截图只发送一次，之后绝不修改。改为让每张截图更便宜：指南建议把截图缩放到每边 2000 像素以内。toolset 不接受显示尺寸，API 也不会替你缩放，而模型返回的坐标处于你返回的截图的像素空间里，所以框架要把点击坐标映射回真实屏幕：\n\n```go\nconst maxSide = 2000 // the guide's ceiling per side for screenshots on this model\n\n// Shot is what the harness keeps for one screenshot it returned to the model.\ntype Shot struct {\n\tImg   *image.RGBA\n\tScale float64 // screen pixels per screenshot pixel (1 when no resize was needed)\n}\n\n// fit returns a copy that is at most maxSide pixels on each side, keeping the aspect ratio.\nfunc fit(src image.Image) Shot {\n\tb := src.Bounds()\n\tw, h := b.Dx(), b.Dy()\n\tscale := math.Max(float64(w)/maxSide, float64(h)/maxSide)\n\tif scale < 1 {\n\t\tscale = 1 // already small enough: copy as is\n\t}\n\tnw, nh := int(float64(w)/scale), int(float64(h)/scale)\n\tdst := image.NewRGBA(image.Rect(0, 0, nw, nh))\n\tfor y := 0; y < nh; y++ { // nearest neighbour keeps the example short; use a proper filter in production\n\t\tfor x := 0; x < nw; x++ {\n\t\t\tdst.Set(x, y, src.At(b.Min.X+int(float64(x)*scale), b.Min.Y+int(float64(y)*scale)))\n\t\t}\n\t}\n\treturn Shot{dst, scale}\n}\n\n// toScreen maps a coordinate from the model (in the pixel space of the screenshots\n// the harness returned) back to the real screen before the click is executed.\nfunc (s Shot) toScreen(x, y int) (int, int) {\n\treturn int(math.Round(float64(x) * s.Scale)), int(math.Round(float64(y) * s.Scale))\n}\n```\n\n- **让服务端清除旧结果。** 上下文编辑（`clear_tool_uses_20250919`，beta `context-management-2025-06-27`）会在模型看到之前移除旧的工具结果。它不算作修改，因为检查比对的是你发送的对话，而不是服务端编辑后的副本。\n- **把事实写成文字。** 让 Agent 记下它从页面上得到的信息，比如商品 ID 或确认编号，这样清除一张截图丢掉的只是像素，而不是事实。\n- **`drop_block` 只是权宜之计。** 使用 adaptive thinking 时，可以从第一次裁剪起设置 `thinking.block_binding.prefix_mismatch_behavior: \"drop_block\"`（beta `thinking-binding-controls-2026-08-01`）。它会丢弃受影响的推理，而不是让请求失败。它不能与 `between_tools` 一起使用。\n\n**权衡。** 只追加的历史能让提示缓存保持命中，但会更长。清除能节省 token，代价是丢掉旧的视觉细节；更小的截图则是用细小文字的清晰度换成本，所以要在后台信息最密集的页面上测试缩放比例。",
+      "followups": [
+        "Why would stripping the thinking blocks yourself be worse than leaving them in?",
+        "The portal shows prices in 9 px text. How do you keep them readable?",
+        "How would you prove the fix holds on the old organization too?"
+      ],
+      "followups_zh": [
+        "为什么自己剥掉 thinking 块，会比原样保留更糟？",
+        "后台用 9 像素的字显示价格。你如何保证它们可读？",
+        "你如何证明这个修复在老组织上同样成立？"
+      ],
+      "vocab": [
+        {
+          "en": "append-only history",
+          "zh": "只追加的历史"
+        },
+        {
+          "en": "history-editing check",
+          "zh": "历史编辑检查"
+        },
+        {
+          "en": "context editing",
+          "zh": "上下文编辑"
+        },
+        {
+          "en": "pixel space",
+          "zh": "像素空间"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261116-4",
+      "topic": "Evals & Observability",
+      "difficulty": "Hard",
+      "title": "The theme-coding agent at low effort reports fixes as done without running the tests, and the eval that grades its final message says 93%",
+      "title_zh": "低 effort 下的主题代码 Agent 没跑测试就报告修复完成，而按最终消息打分的评测显示 93%",
+      "question": "A coding agent edits merchants' storefront themes. To save money it runs on Claude Sonnet 5.5 at `low` effort. Merchants report \"fixed\" changes that break the cart page. Transcripts show the agent ran only `node --check` on a file, or tried `npm test` when the dependencies were not installed, the command failed to start, and it reported the change as done anyway. The current eval asks an LLM judge whether the final message says the fix is complete and explains it, and scores 93%.\n\nRedesign the eval, and decide what to change in the agent.",
+      "question_zh": "一个代码 Agent 负责修改商家的店铺主题。为了省钱，它运行在 `low` effort 的 Claude Sonnet 5.5 上。商家反馈，一些「已修复」的改动把购物车页面弄坏了。对话记录显示，Agent 只对某个文件跑了 `node --check`，或者在依赖没装的情况下尝试 `npm test`，命令根本没启动，然后照样报告改动已完成。现在的评测让一个 LLM 评委判断最终消息是否说明修复已完成并做了解释，得分 93%。\n\n重新设计这个评测，并决定 Agent 要改什么。",
+      "answer": "**The core idea.** The eval grades the claim, not the outcome. The migration guide describes exactly this behavior, mostly at `low` effort: the model sometimes reports a code change as done without a check that exercises it, such as never installing dependencies so the tests never ran, running only a syntax check, or stopping silently when a build tool is missing.\n\n**Grade the outcome and the evidence.** After the agent finishes, the grader runs its own hidden tests in the same sandbox. It also reads the recorded tool calls: did a real check start and pass after the last edit? A syntax check or a command that failed to start does not count:\n\n```go\n// What counts as a real check for this repository; a syntax-only check does not.\nvar realCheck = regexp.MustCompile(`^(go test|go build|go vet|npm (run )?(test|build)|npx tsc|pytest)\\b`)\nvar syntaxOnly = regexp.MustCompile(`^(gofmt|node --check|python -m py_compile)\\b`)\n\n// grade returns one label per run; the eval reports the rate of each label.\nfunc grade(r Run) string {\n\tlastEdit := -1\n\tfor i, s := range r.Steps {\n\t\tif s.Kind == \"edit\" {\n\t\t\tlastEdit = i\n\t\t}\n\t}\n\tverified := false\n\tfor _, s := range r.Steps[lastEdit+1:] {\n\t\tcmd := strings.TrimSpace(s.Cmd)\n\t\tif s.Kind == \"run\" && s.Started && s.ExitCode == 0 &&\n\t\t\trealCheck.MatchString(cmd) && !syntaxOnly.MatchString(cmd) {\n\t\t\tverified = true\n\t\t}\n\t}\n\tswitch {\n\tcase r.ClaimsDone && verified && r.HiddenPass:\n\t\treturn \"verified_done\"\n\tcase r.ClaimsDone && verified:\n\t\treturn \"verified_but_wrong\" // its check passed, the grader's tests did not\n\tcase r.ClaimsDone:\n\t\treturn \"unverified_claim\" // the failure this eval exists to catch\n\tcase r.SaysNoRun != \"\":\n\t\treturn \"honest_no_check\"\n\tdefault:\n\t\treturn \"not_done\"\n\t}\n}\n```\n\n- **The headline numbers** are the rate of `verified_done` and the rate of `unverified_claim`. An honest \"I could not run the tests because npm is missing\" is acceptable behavior and gets its own label.\n- **Keep the hidden tests out of the agent's reach** until grading, and make sure an empty or truncated run cannot pass.\n- **Run each task several times.** One run per task hides how often the shortcut happens.\n\n**The fix to test.** The guide gives a system-prompt paragraph for coding agents at `low` effort. It begins: \"When you change code that can be run, built, or type-checked, run a real check that exercises the change before reporting it done\". It goes on to rule out syntax-only checks, allow installing the project's declared dependencies, and ask the agent to say which check it did not run and why. Compare three arms: `low` as today, `low` with the paragraph, and `medium`, which the guide suggests as the starting point for agentic coding.\n\n**Judge cost per completed task, not per request.** A cheap run that ships a broken cart costs a support ticket and a merchant's trust. The arm with the lowest cost per `verified_done` wins, not the one with the cheapest tokens.\n\n**Trade-offs.** Hidden tests must be maintained per theme, and installing dependencies adds time to every run. Keep the old judge only for what it is good at, such as whether the explanation is clear.",
+      "answer_zh": "**核心思想。** 这个评测给「声明」打分，而不是给「结果」打分。迁移指南描述的正是这种行为，主要出现在 `low` effort 下：模型有时在没有实际验证的情况下就报告代码改动完成，比如从没安装依赖所以测试从未运行、只做了语法检查，或者在缺少构建工具时悄悄停下。\n\n**给结果和证据打分。** Agent 结束之后，评分器在同一个沙箱里运行自己的隐藏测试。它还要读取记录下来的工具调用：在最后一次修改之后，是否有一个真正的检查启动并通过了？语法检查或者没能启动的命令都不算：\n\n```go\n// What counts as a real check for this repository; a syntax-only check does not.\nvar realCheck = regexp.MustCompile(`^(go test|go build|go vet|npm (run )?(test|build)|npx tsc|pytest)\\b`)\nvar syntaxOnly = regexp.MustCompile(`^(gofmt|node --check|python -m py_compile)\\b`)\n\n// grade returns one label per run; the eval reports the rate of each label.\nfunc grade(r Run) string {\n\tlastEdit := -1\n\tfor i, s := range r.Steps {\n\t\tif s.Kind == \"edit\" {\n\t\t\tlastEdit = i\n\t\t}\n\t}\n\tverified := false\n\tfor _, s := range r.Steps[lastEdit+1:] {\n\t\tcmd := strings.TrimSpace(s.Cmd)\n\t\tif s.Kind == \"run\" && s.Started && s.ExitCode == 0 &&\n\t\t\trealCheck.MatchString(cmd) && !syntaxOnly.MatchString(cmd) {\n\t\t\tverified = true\n\t\t}\n\t}\n\tswitch {\n\tcase r.ClaimsDone && verified && r.HiddenPass:\n\t\treturn \"verified_done\"\n\tcase r.ClaimsDone && verified:\n\t\treturn \"verified_but_wrong\" // its check passed, the grader's tests did not\n\tcase r.ClaimsDone:\n\t\treturn \"unverified_claim\" // the failure this eval exists to catch\n\tcase r.SaysNoRun != \"\":\n\t\treturn \"honest_no_check\"\n\tdefault:\n\t\treturn \"not_done\"\n\t}\n}\n```\n\n- **核心指标** 是 `verified_done` 的比例和 `unverified_claim` 的比例。诚实地说「因为缺少 npm，我没法运行测试」是可接受的行为，有自己单独的标签。\n- **在评分前不让 Agent 接触隐藏测试，** 并确保空的或被截断的运行不可能通过。\n- **每个任务跑多次。** 每个任务只跑一次，会掩盖走捷径的频率。\n\n**要测试的修复。** 指南为 `low` effort 的代码 Agent 给出了一段系统提示，开头是：「When you change code that can be run, built, or type-checked, run a real check that exercises the change before reporting it done」（修改可运行、可构建或可类型检查的代码时，在报告完成之前，先运行一个真正验证这次改动的检查）。后面还排除了只做语法检查的情况，允许安装项目声明的依赖，并要求 Agent 说明它没有运行哪个检查以及原因。比较三组：保持现状的 `low`、加上这段话的 `low`，以及 `medium`，后者是指南为 Agent 式编码建议的起点。\n\n**按每个完成的任务算成本，而不是按每次请求。** 一次便宜的运行如果交付了坏掉的购物车，代价是一张客服工单和商家的信任。胜出的是每个 `verified_done` 成本最低的那一组，而不是 token 最便宜的那一组。\n\n**权衡。** 隐藏测试需要按主题维护，安装依赖也会给每次运行增加时间。旧的评委只保留在它擅长的地方，比如解释是否清楚。",
+      "followups": [
+        "A theme has no tests at all. What does the grader check instead?",
+        "How would you catch the same shortcut in production, where there are no hidden tests?",
+        "The paragraph raises cost by 20%. How do you decide whether to keep it?"
+      ],
+      "followups_zh": [
+        "某个主题根本没有测试。评分器改为检查什么？",
+        "在没有隐藏测试的生产环境里，你如何发现同样的捷径？",
+        "这段提示让成本上升了 20%。你如何决定是否保留它？"
+      ],
+      "vocab": [
+        {
+          "en": "hidden tests",
+          "zh": "隐藏测试"
+        },
+        {
+          "en": "unverified claim",
+          "zh": "未经验证的声明"
+        },
+        {
+          "en": "syntax-only check",
+          "zh": "仅语法检查"
+        },
+        {
+          "en": "cost per completed task",
+          "zh": "每个完成任务的成本"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261116-5",
+      "topic": "Multi-agent",
+      "difficulty": "Senior",
+      "title": "Dynamic workflows were turned on for the catalog-audit agent, and the integration now reports jobs done too early, cannot stop them, and loses results at the nightly archive",
+      "title_zh": "目录审核 Agent 开启了动态工作流之后，集成代码过早报告任务完成、停不下任务，还在每晚归档时丢失结果",
+      "question": "The catalog-audit agent on Managed Agents audits hundreds of merchants per job, and dynamic workflows were turned on so it can run many agents in phases. The integration was written before that. It marks a job done at the first `session.status_idle` with `end_turn`, its stop button sends `user.interrupt`, and a nightly cleanup archives every session.\n\nNow jobs are marked done while merchants are still being audited, approvals asked by worker threads wait forever, the stop button does not stop the audit, the nightly archive sometimes fails with a 400 and sometimes succeeds while results never arrive, and some new audits are accepted but nothing runs. Design the client side.",
+      "question_zh": "Managed Agents 上的目录审核 Agent 每个任务要审核几百个商家，为了让它能分阶段运行多个 Agent，开启了动态工作流（dynamic workflows）。集成代码是在那之前写的：它在第一次收到带 `end_turn` 的 `session.status_idle` 时就把任务标记为完成；它的停止按钮发送的是 `user.interrupt`；每晚还有一个清理任务归档所有会话。\n\n现在出现了这些问题：商家还在审核中，任务就被标记为完成；工作线程发起的审批永远在等待；停止按钮停不下审核；每晚的归档有时返回 400 失败，有时成功了但结果再也没有到来；还有一些新的审核被接受了，却什么也没有运行。请设计客户端这一侧。",
+      "answer": "**The core idea.** A workflow run is background work the server carries out. The client follows it only through `workflow_run.*` events on the primary thread's stream. These events have no webhooks, and no endpoint lists runs.\n\n- **Done.** Track each run from `workflow_run.created` to `workflow_run.status_ended`, which is always its last status event. A paused run does not keep the session `running`, so an `end_turn` idle can arrive with runs open. A `retries_exhausted` idle is a failed turn, not done. A `completed` result means the workflow finished, not that the audit passed.\n- **Approvals.** Tool calls from a run's threads appear on the primary stream. While other threads work, no `requires_action` idle comes, so answer each call as its event arrives, by its ID alone. Unattended code denies; it never allows everything.\n- **Stop.** An interrupt ends no run. Send a `user.message` asking the agent to stop its runs; each then ends with `result.type: \"stopped\"`. At `budget_reached` that message is a 400 until you raise the budget.\n- **Archive.** With a run open, the server may refuse with `workflow_run_open` or accept and end the run, and the end events then do not arrive on the stream. Stop the runs or wait for every `status_ended`, then archive when idle.\n- **Refused starts.** By default a session allows 10 open runs, idle ones included. A refused start sends `workflow_run.error` with a null run ID and `max_workflow_runs_error`.\n\n```go\nfunc (t *Tracker) Handle(e Event) {\n\tswitch e.Type {\n\tcase \"workflow_run.created\":\n\t\tt.Open[*e.WorkflowRunID] = true\n\tcase \"workflow_run.error\": // not the end of a run; a nil id means the start was refused\n\t\tif e.WorkflowRunID == nil {\n\t\t\tt.Alert(\"run start refused: \" + e.Error.Type)\n\t\t}\n\tcase \"workflow_run.status_ended\": // always a run's last status event\n\t\tid := *e.WorkflowRunID\n\t\tdelete(t.Open, id)\n\t\tswitch r := e.Result.Type; r {\n\t\tcase \"completed\", \"stopped\": // completed means finished, not passed\n\t\t\tt.Ended[id] = r\n\t\tcase \"error\":\n\t\t\tt.Ended[id] = \"error:\" + e.Result.Error.Type\n\t\tdefault:\n\t\t\tt.Ended[id] = \"other:\" + r\n\t\t}\n\tcase \"agent.custom_tool_use\":\n\t\tt.Answer(e) // a run's threads cross-post here; don't wait for an idle\n\tcase \"agent.tool_use\", \"agent.mcp_tool_use\":\n\t\tif e.EvaluatedPermission == \"ask\" {\n\t\t\tt.Answer(e)\n\t\t}\n\tcase \"session.status_idle\":\n\t\tswitch e.StopReason.Type {\n\t\tcase \"end_turn\":\n\t\t\tt.Done = len(t.Open) == 0 // paused runs can leave the session idle\n\t\tcase \"budget_reached\":\n\t\t\tt.Alert(fmt.Sprintf(\"budget reached with %d run(s) open\", len(t.Open)))\n\t\tcase \"retries_exhausted\":\n\t\t\tt.Alert(\"agent turn failed; not done\")\n\t\t}\n\tcase \"session.status_terminated\":\n\t\tt.Stopped = true\n\t}\n}\n```\n\n**Reconnects and limits.** After a reconnect, list the session's events filtered to `workflow_run.created` and `workflow_run.status_ended` to rebuild the open set. A run's lifetime defaults to 24 hours and a pause may not stop it, so alert on `timeout_error`.\n\n**Trade-offs.** Runs make big audits faster but every agent in a run uses tokens, and the client becomes a state machine. Keep workflows for jobs with many pieces, and give the agent a system-prompt line saying when to start one.",
+      "answer_zh": "**核心思想。** 一个 workflow run 是由服务端在后台执行的工作。客户端只能通过主线程事件流上的 `workflow_run.*` 事件来跟踪它。这些事件没有 webhook，也没有列出 run 的接口。\n\n- **完成。** 从 `workflow_run.created` 到 `workflow_run.status_ended` 跟踪每个 run，后者永远是 run 的最后一个状态事件。暂停的 run 不会让会话保持 `running`，所以可能在 run 仍未结束时就收到 `end_turn` 的 idle。`retries_exhausted` 的 idle 是一次失败的轮次，不是完成。`completed` 结果只表示工作流执行完了，不表示审核通过了。\n- **审批。** run 内线程发起的工具调用会出现在主线程的事件流上。其他线程还在工作时，不会出现 `requires_action` 的 idle，所以要在每个调用事件到达时就按它的 ID 作答。无人值守的代码一律拒绝，绝不全部放行。\n- **停止。** 中断不会结束任何 run。要发送一条 `user.message`，请 Agent 停止它的 run；随后每个 run 都会以 `result.type: \"stopped\"` 结束。在 `budget_reached` 状态下，这条消息会返回 400，直到你提高预算。\n- **归档。** 有 run 未结束时，服务端可能以 `workflow_run_open` 拒绝，也可能接受并结束这个 run，而这时结束事件不会出现在事件流上。先停止 run 或等到每个 `status_ended`，再在会话 idle 时归档。\n- **被拒绝的启动。** 默认情况下，一个会话最多允许 10 个未结束的 run，idle 的也算在内。被拒绝的启动会发出一个 run ID 为空、类型为 `max_workflow_runs_error` 的 `workflow_run.error`。\n\n```go\nfunc (t *Tracker) Handle(e Event) {\n\tswitch e.Type {\n\tcase \"workflow_run.created\":\n\t\tt.Open[*e.WorkflowRunID] = true\n\tcase \"workflow_run.error\": // not the end of a run; a nil id means the start was refused\n\t\tif e.WorkflowRunID == nil {\n\t\t\tt.Alert(\"run start refused: \" + e.Error.Type)\n\t\t}\n\tcase \"workflow_run.status_ended\": // always a run's last status event\n\t\tid := *e.WorkflowRunID\n\t\tdelete(t.Open, id)\n\t\tswitch r := e.Result.Type; r {\n\t\tcase \"completed\", \"stopped\": // completed means finished, not passed\n\t\t\tt.Ended[id] = r\n\t\tcase \"error\":\n\t\t\tt.Ended[id] = \"error:\" + e.Result.Error.Type\n\t\tdefault:\n\t\t\tt.Ended[id] = \"other:\" + r\n\t\t}\n\tcase \"agent.custom_tool_use\":\n\t\tt.Answer(e) // a run's threads cross-post here; don't wait for an idle\n\tcase \"agent.tool_use\", \"agent.mcp_tool_use\":\n\t\tif e.EvaluatedPermission == \"ask\" {\n\t\t\tt.Answer(e)\n\t\t}\n\tcase \"session.status_idle\":\n\t\tswitch e.StopReason.Type {\n\t\tcase \"end_turn\":\n\t\t\tt.Done = len(t.Open) == 0 // paused runs can leave the session idle\n\t\tcase \"budget_reached\":\n\t\t\tt.Alert(fmt.Sprintf(\"budget reached with %d run(s) open\", len(t.Open)))\n\t\tcase \"retries_exhausted\":\n\t\t\tt.Alert(\"agent turn failed; not done\")\n\t\t}\n\tcase \"session.status_terminated\":\n\t\tt.Stopped = true\n\t}\n}\n```\n\n**重连与限制。** 重连之后，按 `workflow_run.created` 和 `workflow_run.status_ended` 过滤并列出会话事件，以重建未结束 run 的集合。run 的生命周期默认是 24 小时，而暂停不一定能让它停止计时，所以要对 `timeout_error` 告警。\n\n**权衡。** run 能让大规模审核更快，但 run 里的每个 Agent 都会消耗 token，客户端也变成了一个状态机。把工作流留给那些由很多部分组成的任务，并在系统提示里写一句话，告诉 Agent 什么时候该启动 run。",
+      "followups": [
+        "A run ends with completed, but 40 merchants have no audit file. Where do you look first?",
+        "How would you show progress per phase in the ops console?",
+        "When would you turn workflows off for this agent?"
+      ],
+      "followups_zh": [
+        "某个 run 以 completed 结束，但有 40 个商家没有审核文件。你首先去哪里查？",
+        "你会如何在运维控制台里按阶段展示进度？",
+        "什么情况下你会为这个 Agent 关闭工作流？"
+      ],
+      "vocab": [
+        {
+          "en": "workflow run",
+          "zh": "工作流运行（workflow run）"
+        },
+        {
+          "en": "primary thread",
+          "zh": "主线程"
+        },
+        {
+          "en": "open run",
+          "zh": "未结束的 run"
+        },
+        {
+          "en": "refused start",
+          "zh": "被拒绝的启动"
+        }
+      ]
+    }
+  ]
+}

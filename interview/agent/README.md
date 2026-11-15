@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 39 个模块、179 道题。
+共 40 个模块、184 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -537,3 +537,17 @@ Five new agent questions: whether a 1M-token window should replace retrieval, fi
 | 3 | Context & Memory | Hard | [One shared memory store for 3,000 merchants: preferences leak between merchants, a store was archived by mistake, and memory cannot be added mid-session](modules/daily-2026-11-15.md#q3) | 3,000 个商家共用一个记忆库：偏好在商家之间串用、一个记忆库被误归档，而且会话进行中无法再添加记忆 |
 | 4 | Agent Loop | Hard | [At xhigh effort, the catalog agent's 300-row product tables take twice as long, use twice the output tokens, and sometimes stop mid-table](modules/daily-2026-11-15.md#q4) | 在 xhigh effort 下，商品目录 agent 生成的 300 行商品表格耗时翻倍、输出 token 翻倍，有时还会在表格中间停下 |
 | 5 | Safety & Security | Senior | [Shoppers talk the support assistant into refunds and discount codes outside policy: designing defenses that hold under persuasion](modules/daily-2026-11-15.md#q5) | 顾客能说服客服助手给出超出政策的退款和折扣码：设计在软磨硬泡下依然有效的防线 |
+
+## [Daily set · Nov 16 · 每日新题 · 11 月 16 日](modules/daily-2026-11-16.md)
+
+Five new agent questions: a help assistant that stops searching after a model move, near-miss tool calls, screenshot pruning against preserved thinking, an eval that grades verification instead of claims, and following dynamic workflow runs from the client.
+
+> 五道新的 Agent 题：换模型后不再搜索的帮助助手、差一点对的工具调用、截图裁剪与保留 thinking 的冲突、给验证而非声明打分的评测，以及在客户端跟踪动态工作流的 run。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | RAG | Medium | [After the move to Claude Sonnet 5.5, the help assistant answers fee and limit questions from memory instead of searching the help center](modules/daily-2026-11-16.md#q1) | 迁移到 Claude Sonnet 5.5 之后，帮助助手凭记忆回答费用和额度类问题，而不去搜索帮助中心 |
+| 2 | Tools & MCP | Medium | [The order tools' dispatcher crashes when Claude Sonnet 5.5 calls Get_Order or passes orderId: handling near-miss tool calls](modules/daily-2026-11-16.md#q2) | 当 Claude Sonnet 5.5 调用 Get_Order 或传入 orderId 时，订单工具的分发器崩溃了：如何处理「差一点对」的工具调用 |
+| 3 | Context & Memory | Hard | [The seller-portal agent keeps only its last three screenshots, and on Claude Sonnet 5.5 long sessions fail on a new account but not on an old one](modules/daily-2026-11-16.md#q3) | 卖家后台 Agent 只保留最近三张截图，迁移到 Claude Sonnet 5.5 后，长会话在新账号上失败，在老账号上却不会 |
+| 4 | Evals & Observability | Hard | [The theme-coding agent at low effort reports fixes as done without running the tests, and the eval that grades its final message says 93%](modules/daily-2026-11-16.md#q4) | 低 effort 下的主题代码 Agent 没跑测试就报告修复完成，而按最终消息打分的评测显示 93% |
+| 5 | Multi-agent | Senior | [Dynamic workflows were turned on for the catalog-audit agent, and the integration now reports jobs done too early, cannot stop them, and loses results at the nightly archive](modules/daily-2026-11-16.md#q5) | 目录审核 Agent 开启了动态工作流之后，集成代码过早报告任务完成、停不下任务，还在每晚归档时丢失结果 |
