@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 36 天、180 道题。
+共 37 天、185 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-17](days/2026-11-17.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Senior | [Exchange-rate lookups share one upstream call through singleflight, and when one shopper closes the tab, hundreds of checkouts fail with "context canceled"](days/2026-11-17.md#q1) | 汇率查询通过 singleflight 共用一次上游调用，结果一个顾客关掉页面，几百个结账请求都以 "context canceled" 失败 |
+| 2 | System Design | Hard | [Designing the shopping cart for 100,000 storefronts: guest carts, merging carts at login, and prices that changed since an item was added](days/2026-11-17.md#q2) | 为 10 万个店铺设计购物车：访客购物车、登录时合并购物车，以及加购之后价格发生变化 |
+| 3 | Database | Medium | [The "current price" query shows an old price for some products, and the result changes after an update that changes nothing](days/2026-11-17.md#q3) | 「当前价格」查询对某些商品显示旧价格，而且在一次什么都没改的更新之后结果就变了 |
+| 4 | Middleware | Hard | [A Redis sorted-set leaderboard of best-selling products: revenue shows 0.99999999999999989, tied products swap places, and page 2 repeats a product from page 1](days/2026-11-17.md#q4) | 用 Redis 有序集合做的商品销量排行榜：销售额显示为 0.99999999999999989、并列的商品互换位置，第 2 页还重复了第 1 页的商品 |
+| 5 | Java & CS | Medium | [A supplier's variant feed crashes on rows with empty trailing columns, and every product gets one-letter tags](days/2026-11-17.md#q5) | 供应商的变体文件在末尾列为空的行上崩溃，而且每个商品都被打上了单个字母的标签 |
 
 ## [2026-11-16](days/2026-11-16.md)
 
