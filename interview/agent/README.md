@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 40 个模块、184 道题。
+共 41 个模块、189 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -551,3 +551,17 @@ Five new agent questions: a help assistant that stops searching after a model mo
 | 3 | Context & Memory | Hard | [The seller-portal agent keeps only its last three screenshots, and on Claude Sonnet 5.5 long sessions fail on a new account but not on an old one](modules/daily-2026-11-16.md#q3) | 卖家后台 Agent 只保留最近三张截图，迁移到 Claude Sonnet 5.5 后，长会话在新账号上失败，在老账号上却不会 |
 | 4 | Evals & Observability | Hard | [The theme-coding agent at low effort reports fixes as done without running the tests, and the eval that grades its final message says 93%](modules/daily-2026-11-16.md#q4) | 低 effort 下的主题代码 Agent 没跑测试就报告修复完成，而按最终消息打分的评测显示 93% |
 | 5 | Multi-agent | Senior | [Dynamic workflows were turned on for the catalog-audit agent, and the integration now reports jobs done too early, cannot stop them, and loses results at the nightly archive](modules/daily-2026-11-16.md#q5) | 目录审核 Agent 开启了动态工作流之后，集成代码过早报告任务完成、停不下任务，还在每晚归档时丢失结果 |
+
+## [Daily set · Nov 17 · 每日新题 · 11 月 17 日](modules/daily-2026-11-17.md)
+
+Five new agent questions: task budgets in an interactive assistant, SDK retries and the spend cap, skills smuggled in through a mounted repository, a cost dashboard built on the analytics API, and cutting a support agent's prompt cost without losing quality.
+
+> 五道新的 Agent 题：交互式助手里的 task budget、SDK 重试与花费上限、通过挂载仓库混进来的技能、基于分析 API 的成本看板，以及在不降低质量的前提下削减客服 Agent 的提示成本。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Agent Loop | Medium | [A task budget was added to the interactive store-setup assistant, and now it asks whether merchants' messages are prompt injections](modules/daily-2026-11-17.md#q1) | 给交互式的店铺搭建助手加上 task budget 之后，它开始怀疑商家的消息是不是提示注入 |
+| 2 | Production | Medium | [During an API incident, product-description calls hang for minutes, and on the day the spend cap is hit the job retries all night](modules/daily-2026-11-17.md#q2) | API 故障期间，商品描述的调用会卡住好几分钟；而在触达花费上限的那天，任务整夜都在重试 |
+| 3 | Safety & Security | Hard | [The theme-fixing agent mounts merchants' repositories, and a merged pull request added a skill that tells it to upload the environment file](modules/daily-2026-11-17.md#q3) | 主题修复 Agent 会挂载商家的代码仓库，而一个被合并的 PR 加了一个技能，指示它上传环境变量文件 |
+| 4 | Evals & Observability | Hard | [The nightly AI cost dashboard shows $0 for yesterday, a model filter that reports nothing, and totals that change after a day](modules/daily-2026-11-17.md#q4) | 每晚的 AI 成本看板显示昨天花费为 0 美元，一个模型筛选什么都查不到，而且总数过了一天还会变 |
+| 5 | Context & Memory | Senior | [The support agent's prompt has grown to 90K tokens of manuals, tool schemas and screenshots: cutting the cost per ticket without losing quality](modules/daily-2026-11-17.md#q5) | 客服 Agent 的提示已经膨胀到 9 万 token，里面是手册、工具 schema 和截图：如何在不降低质量的前提下降低每张工单的成本 |
