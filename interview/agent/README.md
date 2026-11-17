@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 41 个模块、189 道题。
+共 42 个模块、194 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -565,3 +565,17 @@ Five new agent questions: task budgets in an interactive assistant, SDK retries 
 | 3 | Safety & Security | Hard | [The theme-fixing agent mounts merchants' repositories, and a merged pull request added a skill that tells it to upload the environment file](modules/daily-2026-11-17.md#q3) | 主题修复 Agent 会挂载商家的代码仓库，而一个被合并的 PR 加了一个技能，指示它上传环境变量文件 |
 | 4 | Evals & Observability | Hard | [The nightly AI cost dashboard shows $0 for yesterday, a model filter that reports nothing, and totals that change after a day](modules/daily-2026-11-17.md#q4) | 每晚的 AI 成本看板显示昨天花费为 0 美元，一个模型筛选什么都查不到，而且总数过了一天还会变 |
 | 5 | Context & Memory | Senior | [The support agent's prompt has grown to 90K tokens of manuals, tool schemas and screenshots: cutting the cost per ticket without losing quality](modules/daily-2026-11-17.md#q5) | 客服 Agent 的提示已经膨胀到 9 万 token，里面是手册、工具 schema 和截图：如何在不降低质量的前提下降低每张工单的成本 |
+
+## [Daily set · Nov 18 · 每日新题 · 11 月 18 日](modules/daily-2026-11-18.md)
+
+Five new agent questions: progress notes that vanished after a model move, reading code-execution results safely, reading dense charts and drawings, shipping changes to a team of versioned agents, and moving the platform to Claude Platform on AWS.
+
+> 五道新的 Agent 题：换模型后消失的进度说明、安全地读取代码执行结果、读懂密集图表与图纸、给带版本的 Agent 团队发布改动，以及把平台迁移到 Claude Platform on AWS。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Agent Loop | Medium | [After the move to Claude Sonnet 5.5, the store-setup assistant goes silent for minutes while it works, although the old version narrated every step](modules/daily-2026-11-18.md#q1) | 迁移到 Claude Sonnet 5.5 之后，店铺搭建助手在干活时会沉默好几分钟，而旧版本每一步都会说明 |
+| 2 | Tools & MCP | Medium | [The ad-report agent moved its calculations to the code execution tool: reports say "Done" when the script crashed, and one output file was written outside the report folder](modules/daily-2026-11-18.md#q2) | 广告报表 Agent 把计算改由代码执行工具完成：脚本崩溃时报表仍写着「完成」，还有一个输出文件被写到了报表目录之外 |
+| 3 | RAG | Hard | [The spec-sheet assistant finds the right page of a supplier PDF, then reads the wrong value from its size chart or packaging drawing](modules/daily-2026-11-18.md#q3) | 规格书助手能找到供应商 PDF 中正确的那一页，却从尺码表或包装图纸上读错了数值 |
+| 4 | Multi-agent | Hard | [A prompt fix to the reviewer worker never reaches the team, a CI sync overwrites a colleague's change, and pinning the coordinator to EU inference fails to save](modules/daily-2026-11-18.md#q4) | 对审核 worker 的提示修复始终没有生效，CI 同步覆盖了同事的修改，而把协调者固定到欧盟推理区域时保存失败 |
+| 5 | Production | Senior | [Finance wants all AI spend on the AWS bill: moving the agent platform from the Claude API to Claude Platform on AWS](modules/daily-2026-11-18.md#q5) | 财务希望所有 AI 花费都走 AWS 账单：把 Agent 平台从 Claude API 迁移到 Claude Platform on AWS |

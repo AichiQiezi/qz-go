@@ -1,0 +1,201 @@
+{
+  "id": "daily-2026-11-18",
+  "order": 20261118,
+  "kind": "daily",
+  "title": "Daily set · Nov 18",
+  "title_zh": "每日新题 · 11 月 18 日",
+  "summary": "Five new agent questions: progress notes that vanished after a model move, reading code-execution results safely, reading dense charts and drawings, shipping changes to a team of versioned agents, and moving the platform to Claude Platform on AWS.",
+  "summary_zh": "五道新的 Agent 题：换模型后消失的进度说明、安全地读取代码执行结果、读懂密集图表与图纸、给带版本的 Agent 团队发布改动，以及把平台迁移到 Claude Platform on AWS。",
+  "generatedAt": "2026-11-18T06:57:36+08:00",
+  "questions": [
+    {
+      "id": "agent-daily-20261118-1",
+      "topic": "Agent Loop",
+      "difficulty": "Medium",
+      "title": "After the move to Claude Sonnet 5.5, the store-setup assistant goes silent for minutes while it works, although the old version narrated every step",
+      "title_zh": "迁移到 Claude Sonnet 5.5 之后，店铺搭建助手在干活时会沉默好几分钟，而旧版本每一步都会说明",
+      "question": "The store-setup assistant runs a tool loop that creates collections, shipping zones and tax rules while a merchant watches. On Claude Sonnet 5 it wrote short notes between tool calls, such as \"Creating the EU shipping zone now\", and the UI showed them. On Claude Sonnet 5.5 the UI shows nothing between the merchant's message and the final summary, sometimes for several minutes, and merchants close the tab thinking it froze. The system prompt still contains \"hold all findings for the final response\".\n\nExplain what changed and fix the experience.",
+      "question_zh": "店铺搭建助手运行一个工具循环，在商家看着的时候创建商品分组、配送区域和税费规则。在 Claude Sonnet 5 上，它会在工具调用之间写一些简短的说明，比如「正在创建欧盟配送区域」，界面会把它们显示出来。在 Claude Sonnet 5.5 上，从商家发消息到最终总结之间，界面什么都不显示，有时长达好几分钟，商家以为卡死了就关掉了页面。系统提示里还写着「把所有发现留到最终回复里」。\n\n解释发生了什么变化，并修复这个体验。",
+      "answer": "**The core idea.** The model did not stop narrating; the notes moved. On Claude Sonnet 5.5, text between tool calls that is longer than a sentence or two comes back as progress-update `thinking` blocks, and under the default `display: \"omitted\"` those blocks are empty. A client that renders only `text` blocks goes quiet. No request fails, so nothing in the logs points at it.\n\n- **Show the notes.** With adaptive thinking, set `thinking.display` to `\"updates\"` (beta `thinking-display-updates-2026-08-18`) to get the progress notes alone, or `\"summarized\"` to get them mixed with reasoning summaries. With `between_tools`, the notes already come back with their text.\n- **Render by type and order.** Show each non-empty `thinking` block before the `tool_use` that follows it, and pass every block back unchanged on the next request.\n- **Fix the prompt.** Remove \"hold all findings for the final response\": the model follows it. If updates are wanted at predictable points, say when and what they should contain.\n- **A send-message tool** helps when the model must show something word for word mid-turn, such as a question. Declare it in the first request of the session so the `tools` list never changes later.\n\n**If turns still go quiet,** the harness can count consecutive tool steps with nothing shown and append a one-turn reminder as a turn-scoped system message (`clear_at: \"next_user_message\"`, beta `mid-conversation-system-clear-at-2026-08-21`). The guide suggests about five silent steps and stopping after two or three reminders, because text after every tool result can make the model suspect a prompt injection. The reminder is appended, never inserted and deleted, so the cache and preserved thinking stay intact:\n\n```go\nconst nudge = \"The user hasn't heard from you in a while - say in a few words what you're doing, then continue.\"\n\ntype quietTracker struct {\n\tsilentSteps, reminders int\n}\n\n// show renders what the merchant should see from one response, in order, and\n// reports whether anything was shown.\nfunc show(msg *anthropic.BetaMessage, render func(string)) bool {\n\tshown := false\n\tfor _, b := range msg.Content {\n\t\tswitch v := b.AsAny().(type) {\n\t\tcase anthropic.BetaThinkingBlock: // progress notes under display \"updates\"\n\t\t\tif v.Thinking != \"\" {\n\t\t\t\trender(v.Thinking)\n\t\t\t\tshown = true\n\t\t\t}\n\t\tcase anthropic.BetaTextBlock:\n\t\t\trender(v.Text)\n\t\t\tshown = true\n\t\t}\n\t}\n\treturn shown\n}\n\n// afterStep appends a one-turn reminder after five silent tool steps, at most three times.\nfunc (q *quietTracker) afterStep(history []anthropic.BetaMessageParam, shown bool) []anthropic.BetaMessageParam {\n\tif shown {\n\t\tq.silentSteps = 0\n\t\treturn history\n\t}\n\tq.silentSteps++\n\tif q.silentSteps < 5 || q.reminders >= 3 {\n\t\treturn history\n\t}\n\tq.silentSteps, q.reminders = 0, q.reminders+1\n\treturn append(history, anthropic.BetaMessageParam{OfSystem: &anthropic.BetaSystemMessageParam{\n\t\tClearAt: anthropic.BetaSystemMessageParamClearAtNextUserMessage,\n\t\tContent: []anthropic.BetaSystemMessageParamContentUnion{{OfText: &anthropic.BetaTextBlockParam{Text: nudge}}},\n\t}})\n}\n```\n\n**Trade-offs.** More updates cost a few output tokens and can feel chatty, so tune the cadence in the prompt. Silence is more expensive: an abandoned setup wastes the whole run.",
+      "answer_zh": "**核心思想。** 模型并没有停止说明，只是说明换了位置。在 Claude Sonnet 5.5 上，工具调用之间超过一两句话的文字会以进度更新类型的 `thinking` 块返回，而在默认的 `display: \"omitted\"` 下，这些块是空的。只渲染 `text` 块的客户端就会变得沉默。没有任何请求失败，所以日志里看不出问题。\n\n- **把说明显示出来。** 使用 adaptive thinking 时，把 `thinking.display` 设为 `\"updates\"`（beta `thinking-display-updates-2026-08-18`）只获取进度说明，或设为 `\"summarized\"` 获取混合了推理摘要的内容。使用 `between_tools` 时，这些说明本来就会带着文字返回。\n- **按类型和顺序渲染。** 在每个非空 `thinking` 块之后的 `tool_use` 之前把它显示出来，并在下一次请求中原样回传所有块。\n- **修改提示。** 删掉「把所有发现留到最终回复里」：模型会照做。如果希望在可预期的节点给出更新，就写明在什么时候、包含什么内容。\n- **一个发送消息的工具** 在模型需要在轮次中途逐字展示内容（比如一个问题）时很有用。在会话的第一个请求里就声明它，这样 `tools` 列表之后就不会再变。\n\n**如果轮次仍然沉默，** 框架可以统计连续多少个工具步骤没有任何显示，然后追加一条只作用一轮的提醒，作为限定轮次的系统消息（`clear_at: \"next_user_message\"`，beta `mid-conversation-system-clear-at-2026-08-21`）。指南建议大约五个沉默步骤后提醒一次，并在两三次提醒后停止，因为每个工具结果后面都跟一段文字，可能让模型怀疑是提示注入。提醒是追加的，从不插入后再删除，所以缓存和保留的 thinking 都不受影响：\n\n```go\nconst nudge = \"The user hasn't heard from you in a while - say in a few words what you're doing, then continue.\"\n\ntype quietTracker struct {\n\tsilentSteps, reminders int\n}\n\n// show renders what the merchant should see from one response, in order, and\n// reports whether anything was shown.\nfunc show(msg *anthropic.BetaMessage, render func(string)) bool {\n\tshown := false\n\tfor _, b := range msg.Content {\n\t\tswitch v := b.AsAny().(type) {\n\t\tcase anthropic.BetaThinkingBlock: // progress notes under display \"updates\"\n\t\t\tif v.Thinking != \"\" {\n\t\t\t\trender(v.Thinking)\n\t\t\t\tshown = true\n\t\t\t}\n\t\tcase anthropic.BetaTextBlock:\n\t\t\trender(v.Text)\n\t\t\tshown = true\n\t\t}\n\t}\n\treturn shown\n}\n\n// afterStep appends a one-turn reminder after five silent tool steps, at most three times.\nfunc (q *quietTracker) afterStep(history []anthropic.BetaMessageParam, shown bool) []anthropic.BetaMessageParam {\n\tif shown {\n\t\tq.silentSteps = 0\n\t\treturn history\n\t}\n\tq.silentSteps++\n\tif q.silentSteps < 5 || q.reminders >= 3 {\n\t\treturn history\n\t}\n\tq.silentSteps, q.reminders = 0, q.reminders+1\n\treturn append(history, anthropic.BetaMessageParam{OfSystem: &anthropic.BetaSystemMessageParam{\n\t\tClearAt: anthropic.BetaSystemMessageParamClearAtNextUserMessage,\n\t\tContent: []anthropic.BetaSystemMessageParamContentUnion{{OfText: &anthropic.BetaTextBlockParam{Text: nudge}}},\n\t}})\n}\n```\n\n**权衡。** 更多的更新会多花一些输出 token，也可能显得啰嗦，所以要在提示里调整节奏。沉默的代价更高：被放弃的搭建会浪费整次运行。",
+      "followups": [
+        "Your mobile app only renders text blocks and ships monthly. What do you do until the next release?",
+        "How would you measure the longest silent stretch per session?"
+      ],
+      "followups_zh": [
+        "你的移动端 App 只渲染 text 块，每月才发布一次。在下次发布前你怎么办？",
+        "你会如何统计每个会话中最长的沉默时长？"
+      ],
+      "vocab": [
+        {
+          "en": "progress update",
+          "zh": "进度更新"
+        },
+        {
+          "en": "turn-scoped reminder",
+          "zh": "限定轮次的提醒"
+        },
+        {
+          "en": "render order",
+          "zh": "渲染顺序"
+        },
+        {
+          "en": "silent stretch",
+          "zh": "沉默时段"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261118-2",
+      "topic": "Tools & MCP",
+      "difficulty": "Medium",
+      "title": "The ad-report agent moved its calculations to the code execution tool: reports say \"Done\" when the script crashed, and one output file was written outside the report folder",
+      "title_zh": "广告报表 Agent 把计算改由代码执行工具完成：脚本崩溃时报表仍写着「完成」，还有一个输出文件被写到了报表目录之外",
+      "question": "The ad-report agent used to compute ROAS and spend summaries with a home-made Python runner. The team switched to Anthropic's server-side code execution tool. Since then, some reports show numbers the merchant's data does not support, because the agent's final text said \"Done\" after a script raised `KeyError`; the harness logs never show any tool results, because it still looks for a block type from the old runner; and a generated file named `../../reports/shared/roas.xlsx` was saved one level above the merchant's folder.\n\nExplain each problem and fix the harness.",
+      "question_zh": "广告报表 Agent 以前用一个自建的 Python 执行器计算 ROAS 和花费汇总。团队改用了 Anthropic 的服务端代码执行工具。从那以后：有些报表里的数字和商家的数据对不上，因为脚本抛出 `KeyError` 之后，Agent 的最终文本仍然写着「完成」；框架日志里从来看不到任何工具结果，因为它还在找旧执行器的块类型；还有一个名为 `../../reports/shared/roas.xlsx` 的生成文件，被保存到了商家目录的上一级。\n\n解释每一个问题，并修复框架。",
+      "answer": "**The core idea.** With a server-side tool, Anthropic runs the code and the results come back as content blocks in the same response. Your harness no longer executes anything, but it still has to read those blocks correctly and must not trust the model's summary over the run's own exit status.\n\n- **The block types.** The tool gives the model `bash_code_execution` and `text_editor_code_execution`. Calls appear as `server_tool_use` blocks and results as `bash_code_execution_tool_result` and `text_editor_code_execution_tool_result`, not as a bare `code_execution_tool_result`.\n- **Two kinds of failure.** The tool itself can fail, with an error object and a code such as a timeout, or the script can run and exit non-zero, with the reason in `stderr`. Check `return_code` before using `stdout`.\n- **File names come from the model.** Sanitize them with a base-name function before writing downloaded files, and write only into a dedicated output directory.\n\n```go\ntype Run struct {\n\tOK      bool\n\tStdout  string\n\tProblem string   // why the run cannot be trusted\n\tFileIDs []string // files the script wrote, to fetch through the Files API\n}\n\n// codeRuns reads every shell run in a response. A run is trusted only when\n// the tool itself succeeded and the script exited with code 0.\nfunc codeRuns(msg *anthropic.Message) []Run {\n\tvar runs []Run\n\tfor _, b := range msg.Content {\n\t\tr, ok := b.AsAny().(anthropic.BashCodeExecutionToolResultBlock)\n\t\tif !ok {\n\t\t\tcontinue\n\t\t}\n\t\tif r.Content.Type == \"bash_code_execution_tool_result_error\" {\n\t\t\truns = append(runs, Run{Problem: \"tool error: \" + string(r.Content.ErrorCode)})\n\t\t\tcontinue\n\t\t}\n\t\tres := r.Content.AsResponseBashCodeExecutionResultBlock()\n\t\trun := Run{OK: res.ReturnCode == 0, Stdout: res.Stdout}\n\t\tif !run.OK {\n\t\t\trun.Problem = fmt.Sprintf(\"exit %d: %s\", res.ReturnCode, res.Stderr)\n\t\t}\n\t\tfor _, f := range res.Content {\n\t\t\trun.FileIDs = append(run.FileIDs, f.FileID)\n\t\t}\n\t\truns = append(runs, run)\n\t}\n\treturn runs\n}\n\n// safeName keeps a model-chosen file name inside the report directory.\nfunc safeName(dir, name string) string {\n\treturn filepath.Join(dir, filepath.Base(filepath.Clean(\"/\"+name)))\n}\n```\n\nIn a local test against a sample response, the reader flagged the `KeyError` run with exit code 1, flagged a tool error, kept the file ID from the successful run, and turned `../../etc/cron.d/x` into a file inside the report directory.\n\n- **Gate the report:** publish numbers only when every run behind them succeeded; otherwise mark the report failed, whatever the final text says.\n- **Don't double the sandbox:** with the newer web search and web fetch tools, which run code under the hood for filtering, do not also declare code execution; a second environment confuses the model.\n- **The sandbox has no internet access,** so the data must come in as uploaded files, not URLs.\n\n**Trade-offs.** A hosted sandbox removes the runner you had to secure and patch, but container time is billed and the environment is fixed; check the pricing page and keep heavy jobs in your own pipeline.",
+      "answer_zh": "**核心思想。** 使用服务端工具时，代码由 Anthropic 执行，结果作为内容块出现在同一个响应里。你的框架不再执行任何东西，但它仍然必须正确读取这些块，并且不能用模型的总结代替运行本身的退出状态。\n\n- **块类型。** 这个工具会给模型提供 `bash_code_execution` 和 `text_editor_code_execution`。调用以 `server_tool_use` 块出现，结果以 `bash_code_execution_tool_result` 和 `text_editor_code_execution_tool_result` 出现，而不是单独的 `code_execution_tool_result`。\n- **两类失败。** 工具本身可能失败，返回带错误码（比如超时）的错误对象；也可能脚本运行了但以非零码退出，原因在 `stderr` 里。在使用 `stdout` 之前先检查 `return_code`。\n- **文件名来自模型。** 在写入下载的文件之前，用取基本文件名的函数清理它们，并且只写入专门的输出目录。\n\n```go\ntype Run struct {\n\tOK      bool\n\tStdout  string\n\tProblem string   // why the run cannot be trusted\n\tFileIDs []string // files the script wrote, to fetch through the Files API\n}\n\n// codeRuns reads every shell run in a response. A run is trusted only when\n// the tool itself succeeded and the script exited with code 0.\nfunc codeRuns(msg *anthropic.Message) []Run {\n\tvar runs []Run\n\tfor _, b := range msg.Content {\n\t\tr, ok := b.AsAny().(anthropic.BashCodeExecutionToolResultBlock)\n\t\tif !ok {\n\t\t\tcontinue\n\t\t}\n\t\tif r.Content.Type == \"bash_code_execution_tool_result_error\" {\n\t\t\truns = append(runs, Run{Problem: \"tool error: \" + string(r.Content.ErrorCode)})\n\t\t\tcontinue\n\t\t}\n\t\tres := r.Content.AsResponseBashCodeExecutionResultBlock()\n\t\trun := Run{OK: res.ReturnCode == 0, Stdout: res.Stdout}\n\t\tif !run.OK {\n\t\t\trun.Problem = fmt.Sprintf(\"exit %d: %s\", res.ReturnCode, res.Stderr)\n\t\t}\n\t\tfor _, f := range res.Content {\n\t\t\trun.FileIDs = append(run.FileIDs, f.FileID)\n\t\t}\n\t\truns = append(runs, run)\n\t}\n\treturn runs\n}\n\n// safeName keeps a model-chosen file name inside the report directory.\nfunc safeName(dir, name string) string {\n\treturn filepath.Join(dir, filepath.Base(filepath.Clean(\"/\"+name)))\n}\n```\n\n在用一个示例响应做的本地测试中，读取函数标出了以退出码 1 结束的 `KeyError` 运行，标出了一个工具错误，保留了成功运行产生的文件 ID，并把 `../../etc/cron.d/x` 变成了报表目录内的一个文件。\n\n- **给报表把关：** 只有当背后的每一次运行都成功时才发布数字；否则无论最终文本怎么说，都把报表标为失败。\n- **不要叠加沙箱：** 使用较新的 web search 和 web fetch 工具时（它们在底层运行代码做过滤），不要再单独声明代码执行；第二个执行环境会让模型困惑。\n- **沙箱没有互联网访问，** 所以数据必须以上传文件的形式进入，而不是 URL。\n\n**权衡。** 托管沙箱省掉了你原本要加固和打补丁的执行器，但容器时间要计费，环境也是固定的；查看定价页面，把重型任务留在你自己的流水线里。",
+      "followups": [
+        "The script succeeded but printed a warning to stderr. Is the run trusted?",
+        "How would you let a merchant's next report reuse the files from this one?"
+      ],
+      "followups_zh": [
+        "脚本成功了，但向 stderr 打印了一条警告。这次运行可信吗？",
+        "你会如何让商家的下一份报表复用这一份的文件？"
+      ],
+      "vocab": [
+        {
+          "en": "server-side tool",
+          "zh": "服务端工具"
+        },
+        {
+          "en": "exit code",
+          "zh": "退出码"
+        },
+        {
+          "en": "path traversal",
+          "zh": "路径穿越"
+        },
+        {
+          "en": "sandbox",
+          "zh": "沙箱"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261118-3",
+      "topic": "RAG",
+      "difficulty": "Hard",
+      "title": "The spec-sheet assistant finds the right page of a supplier PDF, then reads the wrong value from its size chart or packaging drawing",
+      "title_zh": "规格书助手能找到供应商 PDF 中正确的那一页，却从尺码表或包装图纸上读错了数值",
+      "question": "Merchants ask questions like \"What is the chest width of size M?\" or \"Will the box fit a 30 cm shelf?\". The assistant retrieves the right page from supplier PDFs, renders it as an image, and asks Claude Sonnet 5.5 at `low` effort. Retrieval is fine; the answers are wrong for dense size charts and dimensioned packaging drawings. To save tokens, the team also downscaled every page to a small width.\n\nExplain the failure and redesign the reading step.",
+      "question_zh": "商家会问「M 码的胸宽是多少？」或者「这个盒子放得进 30 厘米的架子吗？」这样的问题。助手从供应商的 PDF 中检索出正确的页面，把它渲染成图片，然后以 `low` effort 交给 Claude Sonnet 5.5。检索没有问题；但对于密集的尺码表和带尺寸标注的包装图纸，答案是错的。为了节省 token，团队还把每一页都缩小到了较小的宽度。\n\n解释失败原因，并重新设计读取这一步。",
+      "answer": "**The core idea.** Retrieval only finds the page; reading a dense chart or a technical drawing is its own problem. The model reads them far better when it can crop and zoom, and when the image it gets is sharp enough to read.\n\n**What the guides say.** For Claude Sonnet 5.5, give the model a way to crop, zoom, or run code on the image. On charts, such tools helped at every effort level and more than raising effort did: with tools at `high` it read charts more accurately than without them at `max`, at a fraction of the cost. On technical drawings, the tools helped only from `high` up, most at `xhigh` and `max`. For Claude Opus 5.5, the guide says it reads charts much better without tooling, and that for the densest inputs higher-resolution images, most of all for technical drawings, and image tools still add accuracy.\n\n**Why the downscaling hurt.** Image cost scales with resolution, so shrinking pages saved tokens, but small digits on a size chart and dimension labels on a drawing became unreadable. The answer was not in the image any more.\n\n- **Two images, not one:** send a moderate overview of the page, and keep the full-resolution render on your side for a crop tool.\n- **A crop tool:** the model names a region in the overview's pixel space and gets that region back at full resolution, so it can read the M row or a dimension label.\n- **Route by page type:** chart questions can stay at `low` or `medium` with tools; drawing questions get `high` or above, or the stronger model.\n\n```go\n// cropTool backs a \"crop_page\" tool: the model names a region of a page image in\n// that image's own pixels and gets that region back at full resolution.\nfunc cropTool(page image.Image, x, y, w, h int) ([]byte, error) {\n\tr := image.Rect(x, y, x+w, y+h)\n\tif w <= 0 || h <= 0 || !r.In(page.Bounds()) {\n\t\treturn nil, fmt.Errorf(\"region %v is outside the page %v\", r, page.Bounds())\n\t}\n\tout := image.NewRGBA(image.Rect(0, 0, w, h))\n\tdraw.Draw(out, out.Bounds(), page, r.Min, draw.Src)\n\tvar buf bytes.Buffer\n\tif err := png.Encode(&buf, out); err != nil {\n\t\treturn nil, err\n\t}\n\treturn buf.Bytes(), nil // returned as an image block in the tool_result\n}\n```\n\nScale the coordinates if the overview is smaller than the full render. In a local test, a crop returned the requested region at full size, and a region outside the page got an error the model can correct.\n\n**Prove it.** Build an eval from real chart and drawing questions with values checked by a person, and compare cost per correct answer across the arms: today's setup, crop tool at the current effort, and higher effort for drawings. Ask the model to quote the row or label it read, so a reviewer can check it on the page.\n\n**Trade-offs.** Each crop is another tool turn and another image, so latency rises; a misread size chart costs a return.",
+      "answer_zh": "**核心思想。** 检索只负责找到页面；读懂密集的图表或技术图纸是另一个问题。当模型能够裁剪和放大，并且拿到的图片清晰到足以辨认时，它读得要好得多。\n\n**指南怎么说。** 对于 Claude Sonnet 5.5，要给模型提供裁剪、放大或在图片上运行代码的手段。在图表上，这类工具在每个 effort 档位上都有帮助，而且比提高 effort 的帮助更大：带工具的 `high` 读图表比不带工具的 `max` 更准确，成本只是其一小部分。在技术图纸上，工具只在 `high` 及以上才有帮助，在 `xhigh` 和 `max` 上最明显。对于 Claude Opus 5.5，指南说它不借助工具也能把图表读得好得多；但对于最密集的输入，更高分辨率的图片（尤其是技术图纸）和图像工具仍然能提高准确度。\n\n**为什么缩小图片有害。** 图片成本随分辨率增长，所以缩小页面确实省了 token，但尺码表上的小数字和图纸上的尺寸标注变得无法辨认。答案已经不在图片里了。\n\n- **两张图而不是一张：** 发送一张中等分辨率的页面概览，把全分辨率渲染图留在你这边供裁剪工具使用。\n- **裁剪工具：** 模型在概览图的像素空间中指定一个区域，然后拿回该区域的全分辨率图像，从而能读出 M 码那一行或某个尺寸标注。\n- **按页面类型分流：** 图表类问题配合工具可以保持在 `low` 或 `medium`；图纸类问题使用 `high` 及以上，或换用更强的模型。\n\n```go\n// cropTool backs a \"crop_page\" tool: the model names a region of a page image in\n// that image's own pixels and gets that region back at full resolution.\nfunc cropTool(page image.Image, x, y, w, h int) ([]byte, error) {\n\tr := image.Rect(x, y, x+w, y+h)\n\tif w <= 0 || h <= 0 || !r.In(page.Bounds()) {\n\t\treturn nil, fmt.Errorf(\"region %v is outside the page %v\", r, page.Bounds())\n\t}\n\tout := image.NewRGBA(image.Rect(0, 0, w, h))\n\tdraw.Draw(out, out.Bounds(), page, r.Min, draw.Src)\n\tvar buf bytes.Buffer\n\tif err := png.Encode(&buf, out); err != nil {\n\t\treturn nil, err\n\t}\n\treturn buf.Bytes(), nil // returned as an image block in the tool_result\n}\n```\n\n如果概览图比全分辨率渲染图小，要对坐标做换算。在本地测试中，裁剪返回了所请求区域的完整尺寸图像，而超出页面范围的区域得到了一个模型可以据此纠正的错误。\n\n**证明它有效。** 用真实的图表和图纸问题构建评测，数值由人工核对；然后比较几组方案的「每个正确答案的成本」：现有方案、在当前 effort 下加裁剪工具、以及对图纸使用更高 effort。要求模型引用它读到的那一行或那个标注，方便审核人员在页面上核对。\n\n**权衡。** 每次裁剪都是一次额外的工具轮次和一张额外的图片，所以延迟会增加；但读错尺码表的代价是一次退货。",
+      "followups": [
+        "The supplier PDF is a scan with a slight rotation. What changes in the tool?",
+        "Would you extract every size chart to a table at ingestion time instead? When?"
+      ],
+      "followups_zh": [
+        "供应商的 PDF 是一份略有倾斜的扫描件。工具需要做什么改变？",
+        "你会不会改为在入库时就把每张尺码表提取成表格？什么情况下这样做？"
+      ],
+      "vocab": [
+        {
+          "en": "technical drawing",
+          "zh": "技术图纸"
+        },
+        {
+          "en": "crop tool",
+          "zh": "裁剪工具"
+        },
+        {
+          "en": "full-resolution render",
+          "zh": "全分辨率渲染图"
+        },
+        {
+          "en": "cost per correct answer",
+          "zh": "每个正确答案的成本"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261118-4",
+      "topic": "Multi-agent",
+      "difficulty": "Hard",
+      "title": "A prompt fix to the reviewer worker never reaches the team, a CI sync overwrites a colleague's change, and pinning the coordinator to EU inference fails to save",
+      "title_zh": "对审核 worker 的提示修复始终没有生效，CI 同步覆盖了同事的修改，而把协调者固定到欧盟推理区域时保存失败",
+      "question": "The catalog-audit team on Managed Agents is a coordinator with two workers, a reviewer and a reader. Three incidents this week: a prompt fix to the reviewer was saved, but sessions kept behaving the old way; a CI job that syncs checked-in agent definitions silently undid a teammate's change made an hour earlier; and setting `inference_geo` on the coordinator for an EU merchant failed with a 400. A fourth question: an engineer tested a new instruction with a session-level override, and the workers ignored it.\n\nExplain each one and design how the team ships agent changes.",
+      "question_zh": "Managed Agents 上的目录审核团队由一个协调者和两个 worker 组成：一个审核者和一个读取者。这周发生了三件事：审核者的提示修复已经保存，但会话的行为还是老样子；一个同步仓库中 Agent 定义的 CI 任务，悄悄撤销了同事一小时前做的修改；为某个欧盟商家在协调者上设置 `inference_geo` 时返回了 400。还有第四个问题：一位工程师用会话级覆盖测试了一条新指令，而 worker 完全没理会它。\n\n逐一解释，并设计团队发布 Agent 改动的方式。",
+      "answer": "**The core idea.** Agents are versioned configs. Every update that changes an agent creates a new immutable version, and each place that refers to an agent decides which version it gets. Most surprises come from one of those references still pointing at an old version.\n\n- **The fix that never arrived.** Sessions keep the version they started with. A roster entry like `{\"type\": \"agent\", \"id\": ...}` without a version pins the latest version at the time the coordinator was saved, and a listed agent stays at its listed version until an update to the coordinator sends the list again, naming the new version or no version. Updating the reviewer alone changes nothing for the team.\n- **The silent overwrite.** `version` on an update is optional. Without it, the update applies unconditionally and the most recent write wins with no error to either caller. With it, a mismatch returns 409, so the CI job re-reads and either merges or fails loudly. Array fields such as `tools` are replaced wholesale, which makes an overwrite larger than it looks.\n- **The 400.** Inference geography pins must be uniform across the team: the coordinator and every roster member all set to the same value, or all unset. Pin all of them in one release.\n- **The ignored override.** Session overrides apply to the coordinator and its `self` copies only. Roster agents referenced by ID always use their own configuration.\n\n**How to ship changes.** Keep agent definitions in the repository and sync them with `ant apply` or one CI job that sends `version` on every update. Pin roster members explicitly, and release a worker change by updating the worker and then the coordinator's list in the same change:\n\n```json\n\"multiagent\": {\n  \"type\": \"multiagent_20261001\",\n  \"subagents\": {\n    \"type\": \"enabled\",\n    \"predefined_agents\": [\n      {\"type\": \"agent\", \"id\": \"agent_reviewer\", \"version\": 7},\n      {\"type\": \"agent\", \"id\": \"agent_reader\", \"version\": 12},\n      {\"type\": \"self\"}\n    ],\n    \"inline_agents\": {\"type\": \"disabled\"}\n  }\n}\n```\n\n- **Watch the model object:** supplying `model` without `inference_geo` clears the geography pin, and changing the model ID resets an omitted `effort` to the new model's default.\n- **Roll forward and back by pin:** new sessions can be pinned to a known-good coordinator version while a regression is investigated.\n- **Never archive to clean up.** Archiving is permanent and new sessions can no longer reference the agent.\n\n**Trade-offs.** Explicit pins make every worker change a two-step release, which is the point: the team changes only when someone decides it should. Unpinned references are simpler but make behavior depend on save order.",
+      "answer_zh": "**核心思想。** Agent 是带版本的配置。每次修改 Agent 的更新都会生成一个新的、不可变的版本，而每个引用 Agent 的地方都决定了它拿到哪个版本。大多数意外都来自某个引用仍然指向旧版本。\n\n- **迟迟没生效的修复。** 会话会保持它开始时的版本。像 `{\"type\": \"agent\", \"id\": ...}` 这样不带版本的花名册条目，会固定在保存协调者那一刻的最新版本；而被列出的 Agent 会一直停留在列出时的版本，直到某次对协调者的更新重新发送这个列表，写明新版本或不写版本。单独更新审核者，对整个团队没有任何影响。\n- **悄无声息的覆盖。** 更新时的 `version` 是可选的。不带它时，更新会无条件生效，最后一次写入胜出，双方都收不到错误。带上它时，版本不匹配会返回 409，于是 CI 任务会重新读取，然后合并或明确报错。`tools` 之类的数组字段会被整体替换，这让覆盖的范围比看起来更大。\n- **那个 400。** 推理地域的固定必须在整个团队中保持一致：协调者和每个花名册成员要么都设成同一个值，要么都不设置。在同一次发布中把它们全部固定。\n- **被忽略的覆盖。** 会话级覆盖只作用于协调者及其 `self` 副本。按 ID 引用的花名册 Agent 永远使用它们自己的配置。\n\n**如何发布改动。** 把 Agent 定义放在仓库里，用 `ant apply` 或一个每次更新都带上 `version` 的 CI 任务来同步。显式固定花名册成员的版本；发布 worker 的改动时，在同一次变更中先更新 worker，再更新协调者的列表：\n\n```json\n\"multiagent\": {\n  \"type\": \"multiagent_20261001\",\n  \"subagents\": {\n    \"type\": \"enabled\",\n    \"predefined_agents\": [\n      {\"type\": \"agent\", \"id\": \"agent_reviewer\", \"version\": 7},\n      {\"type\": \"agent\", \"id\": \"agent_reader\", \"version\": 12},\n      {\"type\": \"self\"}\n    ],\n    \"inline_agents\": {\"type\": \"disabled\"}\n  }\n}\n```\n\n- **留意 model 对象：** 提供 `model` 却不带 `inference_geo`，会清除地域固定；而更换模型 ID 时，没写的 `effort` 会被重置为新模型的默认值。\n- **通过固定版本前进或回退：** 排查回归问题时，可以把新会话固定到一个已知良好的协调者版本上。\n- **绝不要为了清理而归档。** 归档是永久性的，之后新会话无法再引用这个 Agent。\n\n**权衡。** 显式固定版本让每次 worker 改动都变成两步发布，而这正是目的：只有当有人决定时，团队行为才会改变。不固定版本的引用更简单，但会让行为取决于保存的先后顺序。",
+      "followups": [
+        "A running session must pick up the reviewer fix today. What are your options?",
+        "How would you record which agent versions produced a given audit report?",
+        "Two engineers edit different agents of the same team at once. What can still go wrong?"
+      ],
+      "followups_zh": [
+        "一个正在运行的会话今天就必须用上审核者的修复。你有哪些选择？",
+        "你会如何记录某份审核报告是由哪些 Agent 版本产生的？",
+        "两名工程师同时修改同一团队中的不同 Agent。还会出什么问题？"
+      ],
+      "vocab": [
+        {
+          "en": "agent version",
+          "zh": "Agent 版本"
+        },
+        {
+          "en": "roster",
+          "zh": "花名册（roster）"
+        },
+        {
+          "en": "optimistic concurrency",
+          "zh": "乐观并发控制"
+        },
+        {
+          "en": "inference geography",
+          "zh": "推理地域"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261118-5",
+      "topic": "Production",
+      "difficulty": "Senior",
+      "title": "Finance wants all AI spend on the AWS bill: moving the agent platform from the Claude API to Claude Platform on AWS",
+      "title_zh": "财务希望所有 AI 花费都走 AWS 账单：把 Agent 平台从 Claude API 迁移到 Claude Platform on AWS",
+      "question": "Your agent platform calls the Claude API directly: Messages API traffic from several Go services, Managed Agents sessions including some on a self-hosted sandbox, a cost dashboard on the usage analytics API, and fast mode for the largest merchants' chat. Finance and security want everything billed through AWS and controlled with IAM. One engineer proposes Amazon Bedrock; another proposes Claude Platform on AWS.\n\nChoose, and plan the migration.",
+      "question_zh": "你的 Agent 平台直接调用 Claude API：多个 Go 服务发出的 Messages API 流量、Managed Agents 会话（其中一部分运行在自托管沙箱上）、一个基于用量分析 API 的成本看板，以及为最大商家的聊天开启的快速模式。财务和安全团队希望所有费用都通过 AWS 结算，并用 IAM 控制。一位工程师提议使用 Amazon Bedrock；另一位提议使用 Claude Platform on AWS。\n\n做出选择，并规划迁移。",
+      "answer": "**The core idea.** Claude Platform on AWS is operated by Anthropic and matches the first-party API with same-day parity, while authentication, access control and billing go through AWS. Amazon Bedrock is operated by AWS, with its own release schedule, a feature subset and `anthropic.`-prefixed model IDs. A platform that depends on Managed Agents and current features fits the first.\n\n**The client.** Model IDs stay bare, such as `claude-opus-5-5`. The client needs an AWS region and a workspace ID, and neither has a default. Requests are signed with SigV4 through the standard AWS credential chain. In the Go SDK the AWS client is its own type, so code that takes `anthropic.Client` must change; depending on the message service instead keeps the agent code identical on both platforms:\n\n```go\n// messages is all the agent code needs, so it runs unchanged on either client.\ntype messages interface {\n\tNew(ctx context.Context, p anthropic.MessageNewParams, opts ...option.RequestOption) (*anthropic.Message, error)\n}\n\nfunc newMessages(ctx context.Context) (messages, error) {\n\tif os.Getenv(\"CLAUDE_PLATFORM\") != \"aws\" {\n\t\tc := anthropic.NewClient()\n\t\treturn &c.Messages, nil\n\t}\n\t// Region and workspace have no defaults: a missing one fails here, before any request.\n\tc, err := anthropicaws.NewClient(ctx, anthropicaws.ClientConfig{\n\t\tAWSRegion:   os.Getenv(\"AWS_REGION\"),\n\t\tWorkspaceID: os.Getenv(\"ANTHROPIC_AWS_WORKSPACE_ID\"),\n\t})\n\tif err != nil {\n\t\treturn nil, fmt.Errorf(\"claude platform on aws: %w\", err)\n\t}\n\treturn &c.Messages, nil\n}\n```\n\nIn a local test, a missing workspace ID or region failed at construction with a clear message, before any request. A 403 from the endpoint means the request arrived: check for a wrong workspace ID or a missing IAM action.\n\n**What differs, from the platform table and the platform guide:**\n\n- **Fast mode** is not available there, so the large merchants' chat needs a decision: stay on the Claude API for that route, or drop fast mode after measuring latency.\n- **Managed Agents:** a session can run without user events for at most 6 hours before it needs reauthentication; sessions on self-hosted environments cannot attach memory stores; self-hosted workers authenticate with IAM or an AWS-Console API key plus a managed policy, not Console environment keys.\n- **Cost reporting:** analytics calls are authorized by IAM actions, and each request covers only the workspaces in its endpoint's region, so query every region and add them up. The legacy usage and cost reports are not offered there.\n- **Short-term API keys** exist for places where SigV4 is impractical; they last at most 12 hours.\n\n**The plan.** Inventory every feature each service uses against the platform table. Create workspaces per region and environment, and IAM roles per service. Switch one low-risk service behind a flag, compare errors, latency and cost, then move the rest. Recreate Managed Agents resources in the new workspaces, and keep self-hosted sessions that need memory on cloud environments. Keep the Claude API credentials until the old traffic is gone.\n\n**Trade-offs.** One AWS bill and IAM-based access cost a migration and a few gaps, such as fast mode. Bedrock would add a feature mask the platform does not need.",
+      "answer_zh": "**核心思想。** Claude Platform on AWS 由 Anthropic 运营，与第一方 API 保持同日同步，而认证、访问控制和计费都走 AWS。Amazon Bedrock 由 AWS 运营，有自己的发布节奏、只提供部分功能，模型 ID 带 `anthropic.` 前缀。一个依赖 Managed Agents 和最新功能的平台，更适合前者。\n\n**客户端。** 模型 ID 保持不带前缀，比如 `claude-opus-5-5`。客户端需要一个 AWS 区域和一个 workspace ID，两者都没有默认值。请求通过标准的 AWS 凭证链用 SigV4 签名。在 Go SDK 中，AWS 客户端是一个独立的类型，所以接收 `anthropic.Client` 的代码必须修改；改为依赖消息服务，就能让 Agent 代码在两个平台上保持一致：\n\n```go\n// messages is all the agent code needs, so it runs unchanged on either client.\ntype messages interface {\n\tNew(ctx context.Context, p anthropic.MessageNewParams, opts ...option.RequestOption) (*anthropic.Message, error)\n}\n\nfunc newMessages(ctx context.Context) (messages, error) {\n\tif os.Getenv(\"CLAUDE_PLATFORM\") != \"aws\" {\n\t\tc := anthropic.NewClient()\n\t\treturn &c.Messages, nil\n\t}\n\t// Region and workspace have no defaults: a missing one fails here, before any request.\n\tc, err := anthropicaws.NewClient(ctx, anthropicaws.ClientConfig{\n\t\tAWSRegion:   os.Getenv(\"AWS_REGION\"),\n\t\tWorkspaceID: os.Getenv(\"ANTHROPIC_AWS_WORKSPACE_ID\"),\n\t})\n\tif err != nil {\n\t\treturn nil, fmt.Errorf(\"claude platform on aws: %w\", err)\n\t}\n\treturn &c.Messages, nil\n}\n```\n\n在本地测试中，缺少 workspace ID 或区域时，在构造阶段就以清晰的错误信息失败，不会发出任何请求。如果端点返回 403，说明请求已经到达：检查 workspace ID 是否填错，或者是否缺少 IAM 操作权限。\n\n**有哪些不同（来自平台对照表和平台指南）：**\n\n- **快速模式** 在那里不可用，所以大商家的聊天需要做决定：这条路由继续留在 Claude API 上，或者在测量延迟后放弃快速模式。\n- **Managed Agents：** 一个会话在没有用户事件的情况下最多运行 6 小时，之后需要重新认证；自托管环境上的会话不能挂载记忆库；自托管 worker 用 IAM 或 AWS 控制台的 API key 加一个托管策略来认证，而不是 Console 的环境密钥。\n- **成本报表：** 分析接口的调用由 IAM 操作授权，而且每个请求只覆盖其端点所在区域的 workspace，所以要查询每个区域再加总。旧版的用量和成本报表在那里不提供。\n- **短期 API key** 用于 SigV4 不方便的场景；有效期最长 12 小时。\n\n**迁移计划。** 对照平台对照表，盘点每个服务用到的功能。按区域和环境创建 workspace，按服务创建 IAM 角色。先把一个低风险服务放在开关后面切换，比较错误率、延迟和成本，再迁移其余服务。在新的 workspace 中重建 Managed Agents 资源；需要记忆库的自托管会话改用云端环境。在旧流量完全清零之前，保留 Claude API 的凭据。\n\n**权衡。** 获得统一的 AWS 账单和基于 IAM 的访问控制，代价是一次迁移和少数功能缺失，比如快速模式。Bedrock 则会给平台带来一层并不需要的功能限制。",
+      "followups": [
+        "A long nightly audit session stops after six hours on the new platform. What do you change?",
+        "How do you prove cost parity between the two platforms during the switch?",
+        "Which service would you move first, and why?"
+      ],
+      "followups_zh": [
+        "一个很长的夜间审核会话在新平台上运行六小时后停了下来。你要改什么？",
+        "在切换期间，你如何证明两个平台的成本一致？",
+        "你会先迁移哪个服务？为什么？"
+      ],
+      "vocab": [
+        {
+          "en": "same-day parity",
+          "zh": "同日功能同步"
+        },
+        {
+          "en": "SigV4 signing",
+          "zh": "SigV4 签名"
+        },
+        {
+          "en": "workspace",
+          "zh": "工作区（workspace）"
+        },
+        {
+          "en": "feature inventory",
+          "zh": "功能盘点"
+        }
+      ]
+    }
+  ]
+}
