@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 37 天、185 道题。
+共 38 天、190 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-18](days/2026-11-18.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Medium | [A webhook middleware checks the HMAC signature, and then every order webhook fails to decode with EOF](days/2026-11-18.md#q1) | Webhook 中间件校验完 HMAC 签名后，所有订单 webhook 在解码时都报 EOF |
+| 2 | System Design | Hard | [Bulk-editing prices for 500,000 products with a preview and an undo button that does not overwrite later changes](days/2026-11-18.md#q2) | 对 50 万个商品批量改价：要有预览，还要有不会覆盖后续修改的撤销按钮 |
+| 3 | Database | Senior | [A sync worker calls the Meta API inside a database transaction, and during a Meta slowdown checkouts hang and the connection pool runs dry](days/2026-11-18.md#q3) | 同步 worker 在数据库事务里调用 Meta API，Meta 一变慢，结账就卡住，连接池也被耗尽 |
+| 4 | Middleware | Hard | [During flash sales, the WebSocket gateway's Redis Pub/Sub subscription keeps getting disconnected, and shoppers miss price updates](days/2026-11-18.md#q4) | 限时促销期间，WebSocket 网关的 Redis Pub/Sub 订阅不断被断开，顾客错过了价格更新 |
+| 5 | Java & CS | Medium | [Removing a sold-out SKU from a list deletes the wrong one, and a set of paused campaign IDs never matches](days/2026-11-18.md#q5) | 从列表中移除售罄的 SKU 时删错了一个，而一个存放已暂停广告活动 ID 的集合永远匹配不上 |
 
 ## [2026-11-17](days/2026-11-17.md)
 
