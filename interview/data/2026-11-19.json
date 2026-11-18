@@ -1,0 +1,193 @@
+{
+  "date": "2026-11-19",
+  "generatedAt": "2026-11-19T06:45:19+08:00",
+  "questions": [
+    {
+      "id": "20261119-1",
+      "topic": "Go",
+      "difficulty": "Hard",
+      "title": "US shoppers see euro prices after a German storefront request, because the product cache hands out shared pointers",
+      "title_zh": "德国店铺的请求之后，美国顾客看到了欧元价格，因为商品缓存交出去的是共享指针",
+      "question": "A product cache stores `map[string]*Product` behind a `sync.RWMutex`, and `Get` returns the pointer from the map. The storefront handler converts the price for the shopper's market in place and appends a \"sale\" tag before rendering. Since a German launch, US shoppers sometimes see the converted price and the wrong tags, and under load the service occasionally crashes with `concurrent map writes` although the cache's own map is always locked.\n\nExplain both symptoms and fix the cache.",
+      "question_zh": "一个商品缓存在 `sync.RWMutex` 保护下存放 `map[string]*Product`，`Get` 直接返回 map 里的指针。店铺前台的处理函数会就地把价格换算成顾客所在市场的价格，并在渲染前追加一个「sale」标签。自从德国站上线后，美国顾客有时会看到换算后的价格和错误的标签；高负载时服务偶尔还会因为 `concurrent map writes` 崩溃，尽管缓存自己的 map 每次都加了锁。\n\n解释这两个现象，并修复缓存。",
+      "answer": "**Why.** The lock protects the cache's map, not the `Product` values it points to. Every caller gets the same pointer, so a write by one request is a write to the cached object that every later request reads. The `Prices` map inside the product is also shared, and two requests writing it at once is exactly a concurrent map write. In a local test, after one request converted the price and replaced the tags, the next reader saw 9200 and `[sale]` instead of 10000 and `[wool]`, and `go run -race` reported data races.\n\n**Two ways to fix it.** Either the cache returns copies, or the cached values are treated as immutable and every change produces a new value. Copying on read is the smaller change:\n\n```go\n// clone copies everything a caller might change, including slices and maps.\nfunc (p *Product) clone() *Product {\n\tcp := *p\n\tcp.Tags = append([]string(nil), p.Tags...)\n\tcp.Prices = maps.Clone(p.Prices)\n\treturn &cp\n}\n\nfunc (c *Cache) Get(id string) (*Product, bool) {\n\tc.mu.RLock()\n\tp, ok := c.m[id]\n\tc.mu.RUnlock()\n\tif !ok {\n\t\treturn nil, false\n\t}\n\treturn p.clone(), true\n}\n```\n\n- **Copy deeply enough.** Copying the struct copies only the slice and map headers, which still point at shared storage. Slices and maps inside must be cloned too, and so must any nested pointers. With the clone, the same test printed 10000 and `[wool]` with no race reported.\n- **Keep per-request data out of the product.** Converted prices and display tags belong in a view model built for the response, not in the domain object.\n- **Immutable values for hot paths.** Store values and replace whole entries on update. Readers then share safely without copying, as long as nobody writes through them; unexported fields with getters help enforce that.\n\n**Trade-offs.** Deep copies cost allocations on every read, which matters for large products on hot pages; immutability costs discipline and a full replace on every update. Run the tests with `-race` in CI either way, because this class of bug passes ordinary tests.",
+      "answer_zh": "**原因。** 锁保护的是缓存的 map，而不是 map 里指针所指向的 `Product` 值。每个调用方拿到的都是同一个指针，所以一个请求的写入，就是对缓存对象的写入，之后所有请求都会读到它。商品内部的 `Prices` map 也是共享的，两个请求同时写它，正是并发写 map。在本地测试中，一个请求换算了价格并替换了标签之后，下一个读取者看到的是 9200 和 `[sale]`，而不是 10000 和 `[wool]`；`go run -race` 也报告了数据竞争。\n\n**两种修复方式。** 要么缓存返回副本，要么把缓存值当作不可变的，每次修改都产生一个新值。读取时复制是改动较小的方案：\n\n```go\n// clone copies everything a caller might change, including slices and maps.\nfunc (p *Product) clone() *Product {\n\tcp := *p\n\tcp.Tags = append([]string(nil), p.Tags...)\n\tcp.Prices = maps.Clone(p.Prices)\n\treturn &cp\n}\n\nfunc (c *Cache) Get(id string) (*Product, bool) {\n\tc.mu.RLock()\n\tp, ok := c.m[id]\n\tc.mu.RUnlock()\n\tif !ok {\n\t\treturn nil, false\n\t}\n\treturn p.clone(), true\n}\n```\n\n- **复制要足够深。** 复制结构体只会复制切片和 map 的头部，它们仍然指向共享的底层存储。内部的切片和 map 也必须克隆，任何嵌套的指针也一样。加上克隆后，同样的测试输出 10000 和 `[wool]`，也没有再报告竞争。\n- **不要把请求级数据放进商品对象。** 换算后的价格和展示用标签属于为响应构建的视图模型，而不属于领域对象。\n- **热点路径用不可变值。** 存储值，更新时整体替换条目。这样读取方可以安全共享而无需复制，前提是没有人通过它们写入；用未导出字段加 getter 有助于强制这一点。\n\n**权衡。** 深拷贝会在每次读取时产生内存分配，这对热门页面上的大商品对象有影响；不可变方案需要纪律，并且每次更新都要整体替换。无论哪种方案，都要在 CI 中用 `-race` 跑测试，因为这类 bug 能通过普通测试。",
+      "followups": [
+        "Would returning Product by value instead of *Product fix it?",
+        "How would you find every other place that mutates cached objects?"
+      ],
+      "followups_zh": [
+        "把返回值从 *Product 改为 Product 值类型，能修复这个问题吗？",
+        "你会如何找出其他所有修改缓存对象的地方？"
+      ],
+      "vocab": [
+        {
+          "en": "shared pointer",
+          "zh": "共享指针"
+        },
+        {
+          "en": "deep copy",
+          "zh": "深拷贝"
+        },
+        {
+          "en": "data race",
+          "zh": "数据竞争"
+        },
+        {
+          "en": "immutable value",
+          "zh": "不可变值"
+        }
+      ]
+    },
+    {
+      "id": "20261119-2",
+      "topic": "System Design",
+      "difficulty": "Medium",
+      "title": "Letting merchants create API keys for their own scripts: storage, scopes, rotation and leaked keys",
+      "title_zh": "让商家为自己的脚本创建 API key：存储、权限范围、轮换与泄露处理",
+      "question": "Larger merchants want to call the platform's Admin API from their own scripts and ERP connectors, without building an OAuth app. Today support creates a static token by hand and stores it in plain text, it has full access, and nobody knows which tokens are still in use.\n\nDesign self-service API keys.",
+      "question_zh": "较大的商家希望从自己的脚本和 ERP 连接器调用平台的 Admin API，而不用开发一个 OAuth 应用。目前是客服手工创建一个静态 token 并以明文存储，它拥有全部权限，也没人知道哪些 token 还在使用。\n\n设计自助式的 API key。",
+      "answer": "**Treat a key like a password.** Generate it with a cryptographic random source, show it to the merchant once, and store only a hash. A short, non-secret part of the key serves as a lookup ID that can be indexed and shown in the UI and logs. A recognizable prefix lets secret scanners and support spot keys at a glance:\n\n```go\nconst keyPrefix = \"shk_live_\"\n\n// newKey returns the secret shown to the merchant once, plus what the database stores.\nfunc newKey() (secret, lookupID, hash string) {\n\tb := make([]byte, 32)\n\trand.Read(b)\n\tsecret = keyPrefix + base64.RawURLEncoding.EncodeToString(b)\n\tlookupID = secret[:len(keyPrefix)+8] // indexed, safe to show in the UI and logs\n\tsum := sha256.Sum256([]byte(secret))\n\treturn secret, lookupID, hex.EncodeToString(sum[:])\n}\n\n// verify finds the row by lookupID, then compares hashes in constant time.\nfunc verify(presented, storedHash string) bool {\n\tif !strings.HasPrefix(presented, keyPrefix) {\n\t\treturn false\n\t}\n\tsum := sha256.Sum256([]byte(presented))\n\treturn subtle.ConstantTimeCompare([]byte(hex.EncodeToString(sum[:])), []byte(storedHash)) == 1\n}\n```\n\nA fast hash such as SHA-256 is fine here because the key is long and random, unlike a human password; compare in constant time after finding the row by lookup ID.\n\n- **Scopes:** each key gets the smallest set of permissions it needs, such as read orders or write inventory, chosen at creation and checked on every request. A key belongs to one store.\n- **Visibility:** record who created each key, when it was last used and from where, so merchants can find and delete unused keys.\n- **Rotation with overlap:** a merchant creates a second key, moves the integration, then revokes the first. Optional expiry dates nudge them to do it.\n- **Revocation and leaks:** revoking takes effect immediately; if keys are cached at the edge, the cache must be short-lived or invalidated. When a key shows up in a public repository or a log, revoke it and notify the merchant.\n- **Limits:** rate-limit per key and per store, so one runaway script cannot starve the merchant's other integrations.\n\n**Trade-offs.** API keys are simpler than OAuth for a merchant's own scripts, but they carry no user identity and are easier to leak. Keep OAuth for third-party apps that act for many merchants, and keep keys narrow in scope.",
+      "answer_zh": "**像对待密码一样对待 key。** 用密码学安全的随机源生成，只向商家展示一次，只存储它的哈希。key 中一小段不保密的部分作为查找 ID，可以建索引，也可以显示在界面和日志里。一个可识别的前缀能让密钥扫描工具和客服一眼认出它：\n\n```go\nconst keyPrefix = \"shk_live_\"\n\n// newKey returns the secret shown to the merchant once, plus what the database stores.\nfunc newKey() (secret, lookupID, hash string) {\n\tb := make([]byte, 32)\n\trand.Read(b)\n\tsecret = keyPrefix + base64.RawURLEncoding.EncodeToString(b)\n\tlookupID = secret[:len(keyPrefix)+8] // indexed, safe to show in the UI and logs\n\tsum := sha256.Sum256([]byte(secret))\n\treturn secret, lookupID, hex.EncodeToString(sum[:])\n}\n\n// verify finds the row by lookupID, then compares hashes in constant time.\nfunc verify(presented, storedHash string) bool {\n\tif !strings.HasPrefix(presented, keyPrefix) {\n\t\treturn false\n\t}\n\tsum := sha256.Sum256([]byte(presented))\n\treturn subtle.ConstantTimeCompare([]byte(hex.EncodeToString(sum[:])), []byte(storedHash)) == 1\n}\n```\n\n这里用 SHA-256 这样的快速哈希就够了，因为 key 又长又随机，不像人设的密码；按查找 ID 找到记录后，再用常量时间比较。\n\n- **权限范围：** 每个 key 只获得所需的最小权限集合，比如读取订单或写入库存，在创建时选定，并在每次请求时检查。一个 key 只属于一个店铺。\n- **可见性：** 记录每个 key 由谁创建、最后一次在何时何地被使用，方便商家找出并删除不用的 key。\n- **带重叠期的轮换：** 商家先创建第二个 key，把集成切换过去，再吊销第一个。可选的过期时间会促使他们这样做。\n- **吊销与泄露：** 吊销立即生效；如果 key 在边缘节点有缓存，缓存必须很短或能被主动失效。当某个 key 出现在公开仓库或日志中时，吊销它并通知商家。\n- **限流：** 按 key 和按店铺分别限流，这样一个失控的脚本不会拖垮商家的其他集成。\n\n**权衡。** 对商家自己的脚本来说，API key 比 OAuth 简单，但它不携带用户身份，也更容易泄露。面向许多商家的第三方应用仍然使用 OAuth，而 API key 要保持较窄的权限范围。",
+      "followups": [
+        "A merchant lost the key right after creating it. What do you do?",
+        "Should a staff member's key keep working after they leave the merchant's team?"
+      ],
+      "followups_zh": [
+        "商家刚创建完 key 就弄丢了。你怎么处理？",
+        "员工离开商家团队后，他创建的 key 还应该继续有效吗？"
+      ],
+      "vocab": [
+        {
+          "en": "lookup ID",
+          "zh": "查找 ID"
+        },
+        {
+          "en": "scope",
+          "zh": "权限范围"
+        },
+        {
+          "en": "key rotation",
+          "zh": "密钥轮换"
+        },
+        {
+          "en": "revocation",
+          "zh": "吊销"
+        }
+      ]
+    },
+    {
+      "id": "20261119-3",
+      "topic": "Database",
+      "difficulty": "Medium",
+      "title": "A bulk price import with UPDATE ... FROM sets a different price each run when the supplier file lists a SKU twice",
+      "title_zh": "当供应商文件里同一个 SKU 出现两次时，用 UPDATE ... FROM 做的批量改价每次运行结果都不一样",
+      "question": "Supplier price files are loaded into a `staging(line, sku, price_cents)` table, then applied with `UPDATE products p SET price_cents = s.price_cents FROM staging s WHERE s.sku = p.sku`. Some suppliers list a SKU twice, for example an old line and a correction further down. The import never fails, but the resulting price for those SKUs is sometimes the old one and sometimes the correction.\n\nExplain the behavior and fix the import.",
+      "question_zh": "供应商的价格文件先导入 `staging(line, sku, price_cents)` 表，再用 `UPDATE products p SET price_cents = s.price_cents FROM staging s WHERE s.sku = p.sku` 应用。有些供应商会把同一个 SKU 列两次，比如一行旧价格，后面又有一行更正。导入从不失败，但这些 SKU 最终的价格有时是旧的，有时是更正后的。\n\n解释这种行为，并修复导入流程。",
+      "answer": "**Why.** When the `FROM` join matches several source rows for one target row, Postgres updates the target only once, using one of the matching rows, and which one is not defined. There is no error and no warning. In a local test, the same file in a different physical order changed the result from 1100 to 900, and `RETURNING` showed one row per product, so nothing in the output hinted at the duplicate.\n\n**The fix: decide, or refuse.**\n\n```sql\n-- 1. Refuse ambiguous files: list SKUs that appear more than once.\nSELECT sku, count(*) FROM staging GROUP BY sku HAVING count(*) > 1;\n\n-- 2. Or decide explicitly which line wins (here: the last line in the file).\nUPDATE products p\nSET price_cents = s.price_cents\nFROM (SELECT DISTINCT ON (sku) sku, price_cents\n      FROM staging ORDER BY sku, line DESC) s\nWHERE s.sku = p.sku;\n\n-- 3. MERGE fails loudly instead of picking one.\nMERGE INTO products p USING staging s ON s.sku = p.sku\nWHEN MATCHED THEN UPDATE SET price_cents = s.price_cents;\n```\n\n- **Validate the file first.** A duplicate SKU usually means a supplier error, so report it with the line numbers and let a person decide, or apply a documented rule such as \"the last line wins\".\n- **`MERGE` refuses ambiguity.** In the test it failed with \"MERGE command cannot affect row a second time\", which is the behavior you want when duplicates should never happen.\n- **Keep the line number.** Without it, \"last line wins\" cannot be expressed, because table order is not file order.\n\n**Trade-offs.** Refusing the whole file is safe but delays every other price; applying the clean rows and holding back the duplicated SKUs is friendlier but needs a clear report so nothing is silently skipped.",
+      "answer_zh": "**原因。** 当 `FROM` 连接为同一个目标行匹配到多条源行时，Postgres 只会更新目标行一次，使用的是其中某一条匹配行，而具体是哪一条并没有定义。不会报错，也没有警告。在本地测试中，同一份文件只是物理顺序不同，结果就从 1100 变成了 900；`RETURNING` 对每个商品只返回一行，所以输出中没有任何迹象表明存在重复。\n\n**修复：要么明确决定，要么拒绝。**\n\n```sql\n-- 1. Refuse ambiguous files: list SKUs that appear more than once.\nSELECT sku, count(*) FROM staging GROUP BY sku HAVING count(*) > 1;\n\n-- 2. Or decide explicitly which line wins (here: the last line in the file).\nUPDATE products p\nSET price_cents = s.price_cents\nFROM (SELECT DISTINCT ON (sku) sku, price_cents\n      FROM staging ORDER BY sku, line DESC) s\nWHERE s.sku = p.sku;\n\n-- 3. MERGE fails loudly instead of picking one.\nMERGE INTO products p USING staging s ON s.sku = p.sku\nWHEN MATCHED THEN UPDATE SET price_cents = s.price_cents;\n```\n\n- **先校验文件。** 重复的 SKU 通常意味着供应商出错了，所以把它连同行号一起报告出来，让人来决定；或者应用一条明文规定的规则，比如「最后一行为准」。\n- **`MERGE` 会拒绝歧义。** 在测试中它报错「MERGE command cannot affect row a second time」，当重复本来就不该出现时，这正是你想要的行为。\n- **保留行号。** 没有行号就无法表达「最后一行为准」，因为表中的顺序并不是文件中的顺序。\n\n**权衡。** 拒绝整个文件很安全，但会推迟其他所有价格的更新；应用干净的行、扣下重复的 SKU 更友好，但需要一份清晰的报告，确保没有任何内容被悄悄跳过。",
+      "followups": [
+        "Would a unique constraint on staging.sku be a good idea? What would it change?",
+        "How would you make the import idempotent if it is retried halfway through?"
+      ],
+      "followups_zh": [
+        "给 staging.sku 加唯一约束是个好主意吗？会改变什么？",
+        "如果导入中途重试，你会如何让它保持幂等？"
+      ],
+      "vocab": [
+        {
+          "en": "staging table",
+          "zh": "暂存表"
+        },
+        {
+          "en": "duplicate key",
+          "zh": "重复键"
+        },
+        {
+          "en": "nondeterministic update",
+          "zh": "结果不确定的更新"
+        },
+        {
+          "en": "tiebreak rule",
+          "zh": "取舍规则"
+        }
+      ]
+    },
+    {
+      "id": "20261119-4",
+      "topic": "Middleware",
+      "difficulty": "Senior",
+      "title": "Merchants' custom product attributes become Elasticsearch fields, and new products start failing to index once one big merchant imports its catalog",
+      "title_zh": "商家自定义的商品属性被映射成 Elasticsearch 字段，某个大商家导入商品目录后，新商品开始索引失败",
+      "question": "Product search uses one Elasticsearch index shared by all merchants, with dynamic mapping. Each merchant can define custom attributes such as \"Fabric weight\" or \"Battery life\", and the indexer writes them as top-level fields named after the attribute. After a large merchant imported thousands of distinct attribute names, new documents for every merchant start failing to index with a mapping error, and the cluster's master node becomes slow.\n\nExplain what happened and redesign how attributes are indexed.",
+      "question_zh": "商品搜索使用所有商家共享的一个 Elasticsearch 索引，并开启了动态映射。每个商家都可以定义自定义属性，比如「面料克重」或「电池续航」，索引程序把它们写成以属性名命名的顶层字段。在一个大商家导入了数千个不同的属性名之后，所有商家的新文档都开始因映射错误而索引失败，集群的主节点也变慢了。\n\n解释发生了什么，并重新设计属性的索引方式。",
+      "answer": "**Why.** With dynamic mapping, every new field name adds a field to the index mapping. Elasticsearch caps the number of fields per index, 1,000 by default, so once the shared index reaches the cap, any document that would add a field is rejected, whichever merchant it belongs to. Before the cap, the cost already shows: the mapping is part of the cluster state, and every new field means a mapping update the master node has to publish to the cluster. This failure is usually called a mapping explosion.\n\n**The design: attributes are data, not schema.** Store them as a list of name and value pairs in one nested field, so the mapping stays fixed no matter how many attribute names merchants invent:\n\n```json\n\"attributes\": {\n  \"type\": \"nested\",\n  \"properties\": {\n    \"name\":  { \"type\": \"keyword\" },\n    \"value\": { \"type\": \"keyword\" }\n  }\n}\n```\n\n- **Querying:** a filter like \"Fabric weight is 200 gsm\" becomes a nested query that matches name and value in the same pair. For numeric ranges, add a numeric value field alongside the keyword one.\n- **Lock down the mapping:** set `dynamic` to `strict` or `false` on the product index, so a new top-level field is either rejected loudly or stored without being indexed, instead of growing the mapping.\n- **Promote the few that matter:** attributes that many merchants filter on, such as color and size, can become real, typed fields chosen by the platform, not by merchants.\n- **Isolation:** consider separate indices for the largest merchants, so one tenant's data shape and volume cannot block everyone else.\n\n**Migration.** Create the new index with the fixed mapping, reindex into it, and switch an alias, as with any mapping change. Until then, raising the field limit only postpones the failure and makes the cluster state heavier.\n\n**Trade-offs.** Nested queries cost more than plain field queries, and each nested pair is stored as a hidden document, which adds to the index size. Promoting common attributes keeps the frequent queries fast.",
+      "answer_zh": "**原因。** 在动态映射下，每出现一个新的字段名，就会往索引映射里加一个字段。Elasticsearch 对每个索引的字段数量有上限，默认是 1,000，所以一旦共享索引达到上限，任何会新增字段的文档都会被拒绝，无论它属于哪个商家。在达到上限之前，代价就已经显现：映射是集群状态的一部分，每个新字段都意味着一次需要主节点发布到整个集群的映射更新。这种故障通常叫做映射爆炸。\n\n**设计：属性是数据，而不是模式。** 把它们存成一个嵌套字段里的「名称与值」对列表，这样无论商家发明多少属性名，映射都保持不变：\n\n```json\n\"attributes\": {\n  \"type\": \"nested\",\n  \"properties\": {\n    \"name\":  { \"type\": \"keyword\" },\n    \"value\": { \"type\": \"keyword\" }\n  }\n}\n```\n\n- **查询：** 像「面料克重为 200 gsm」这样的筛选，变成一个嵌套查询，在同一个键值对里同时匹配名称和值。对于数值范围，在关键字值字段旁边再加一个数值字段。\n- **锁定映射：** 在商品索引上把 `dynamic` 设为 `strict` 或 `false`，这样新的顶层字段要么被明确拒绝，要么只存储不索引，而不会让映射继续膨胀。\n- **把少数重要的属性提升为正式字段：** 许多商家都会用来筛选的属性（比如颜色和尺码）可以成为由平台而不是商家决定的、带类型的正式字段。\n- **隔离：** 考虑为最大的几个商家使用单独的索引，这样一个租户的数据结构和数据量不会阻塞其他所有人。\n\n**迁移。** 和任何映射变更一样：用固定映射创建新索引，把数据重新索引进去，然后切换别名。在此之前，调高字段上限只会推迟故障，并让集群状态更重。\n\n**权衡。** 嵌套查询比普通字段查询开销更大，而且每个嵌套键值对都会作为一个隐藏文档存储，会增大索引体积。把常用属性提升为正式字段，可以让高频查询保持快速。",
+      "followups": [
+        "How would you support faceted counts per attribute value with the nested design?",
+        "A merchant names an attribute \"price\". What can go wrong in each design?",
+        "Would the flattened field type be an alternative? What do you give up?"
+      ],
+      "followups_zh": [
+        "在嵌套设计下，你会如何支持按属性值统计的分面计数？",
+        "某个商家把一个属性命名为「price」。在两种设计下分别可能出什么问题？",
+        "flattened 字段类型能作为替代方案吗？你会失去什么？"
+      ],
+      "vocab": [
+        {
+          "en": "dynamic mapping",
+          "zh": "动态映射"
+        },
+        {
+          "en": "mapping explosion",
+          "zh": "映射爆炸"
+        },
+        {
+          "en": "cluster state",
+          "zh": "集群状态"
+        },
+        {
+          "en": "nested field",
+          "zh": "嵌套字段"
+        }
+      ]
+    },
+    {
+      "id": "20261119-5",
+      "topic": "Java & CS",
+      "difficulty": "Hard",
+      "title": "Variant lookups by a record key miss products that are clearly in stock: records with array and mutable list components",
+      "title_zh": "用 record 作为键查询变体，明明有库存的商品却查不到：带数组和可变列表组件的 record",
+      "question": "The inventory service moved its key classes to records. `record VariantKey(String productId, String[] options)` is used to deduplicate variants, and later `record VariantKey(String productId, List<String> options)` became the key of a `Map<VariantKey, Integer>` for stock. Now duplicate variants survive deduplication, and some stock lookups return null although the variant is in the map; iterating the map shows the entry is there.\n\nExplain both bugs and fix the key.",
+      "question_zh": "库存服务把它的键类都改成了 record。`record VariantKey(String productId, String[] options)` 用来给变体去重；后来 `record VariantKey(String productId, List<String> options)` 又成了库存 `Map<VariantKey, Integer>` 的键。现在重复的变体逃过了去重，有些库存查询返回 null，尽管该变体就在 map 里；遍历 map 能看到这个条目。\n\n解释这两个 bug，并修复这个键。",
+      "answer": "**Arrays compare by identity.** A record's generated `equals` and `hashCode` use each component's own `equals` and `hashCode`. For an array that is object identity, so two keys with the same options are different. In a local test, two keys built from equal arrays were not equal, a set kept both, and `toString` printed `[Ljava.lang.String;@...` instead of the options.\n\n**Records are shallowly immutable.** A `List` component is compared by content, which is why it seemed to fix the first bug, but the record holds a reference to the caller's list. When the caller reused and changed that list after inserting the key, the key's hash code changed while the entry stayed in the bucket for the old hash. In the test, the entry was then unreachable by the old options, the new options, or the key object itself, and was visible only by iterating.\n\n**The fix:** take an immutable copy in the compact constructor:\n\n```java\nrecord VariantKey(String productId, List<String> options) {\n    VariantKey {\n        options = List.copyOf(options);   // immutable copy; also rejects nulls\n    }\n}\n// For an array component, override equals, hashCode and toString with\n// Arrays.equals / Arrays.hashCode / Arrays.toString, or avoid arrays entirely.\n```\n\n- With `List.copyOf`, changing the caller's list after insertion no longer affects the key, and the test found the entry by its original options; the accessor also returned an unmodifiable list.\n- A useful rule: a type used as a hash key should have only immutable components, and its hash code must never change while it is in a map or set.\n- Canonicalize before building the key: sort or normalize options, so `[M, red]` and `[red, M]` mean the same variant when the business says they do.\n\n**Trade-offs.** Copying on construction costs an allocation per key, which is negligible next to a lost stock entry; a string key such as `p1|red|M` is cheaper still, but loses type safety and needs careful escaping.",
+      "answer_zh": "**数组按引用比较。** record 自动生成的 `equals` 和 `hashCode` 使用每个组件自己的 `equals` 和 `hashCode`。对数组来说就是对象引用，所以两个选项相同的键是不相等的。在本地测试中，用内容相同的数组构造的两个键不相等，集合把两个都保留了，`toString` 打印出的是 `[Ljava.lang.String;@...` 而不是选项。\n\n**record 只是浅层不可变。** `List` 组件按内容比较，所以它看似修复了第一个 bug，但 record 持有的是调用方那个列表的引用。当调用方在插入键之后复用并修改了这个列表，键的哈希值就变了，而条目仍然留在旧哈希对应的桶里。在测试中，这之后无论用旧选项、新选项，还是用键对象本身都查不到该条目，只有遍历时才能看到。\n\n**修复方法：** 在紧凑构造器中保存一份不可变副本：\n\n```java\nrecord VariantKey(String productId, List<String> options) {\n    VariantKey {\n        options = List.copyOf(options);   // immutable copy; also rejects nulls\n    }\n}\n// For an array component, override equals, hashCode and toString with\n// Arrays.equals / Arrays.hashCode / Arrays.toString, or avoid arrays entirely.\n```\n\n- 使用 `List.copyOf` 后，插入之后再修改调用方的列表就不会影响键了，测试中按原来的选项能找到该条目；访问器返回的也是不可修改的列表。\n- 一条有用的规则：用作哈希键的类型只应包含不可变组件，并且只要它还在 map 或 set 中，它的哈希值就绝不能改变。\n- 构造键之前先做规范化：对选项排序或标准化，这样当业务上认为 `[M, red]` 和 `[red, M]` 是同一个变体时，它们就会相等。\n\n**权衡。** 构造时复制会让每个键多一次内存分配，但与丢失一条库存记录相比可以忽略不计；用 `p1|red|M` 这样的字符串作为键更省，但会失去类型安全，还需要小心处理转义。",
+      "followups": [
+        "Why does the entry still show up when you iterate over the map?",
+        "How would you detect mutable record components in code review or with a tool?"
+      ],
+      "followups_zh": [
+        "为什么遍历 map 时这个条目仍然能看到？",
+        "你会如何在代码审查中或借助工具发现可变的 record 组件？"
+      ],
+      "vocab": [
+        {
+          "en": "record",
+          "zh": "记录类（record）"
+        },
+        {
+          "en": "compact constructor",
+          "zh": "紧凑构造器"
+        },
+        {
+          "en": "shallow immutability",
+          "zh": "浅层不可变"
+        },
+        {
+          "en": "hash key",
+          "zh": "哈希键"
+        }
+      ]
+    }
+  ]
+}

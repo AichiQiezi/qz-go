@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 38 天、190 道题。
+共 39 天、195 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-19](days/2026-11-19.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Hard | [US shoppers see euro prices after a German storefront request, because the product cache hands out shared pointers](days/2026-11-19.md#q1) | 德国店铺的请求之后，美国顾客看到了欧元价格，因为商品缓存交出去的是共享指针 |
+| 2 | System Design | Medium | [Letting merchants create API keys for their own scripts: storage, scopes, rotation and leaked keys](days/2026-11-19.md#q2) | 让商家为自己的脚本创建 API key：存储、权限范围、轮换与泄露处理 |
+| 3 | Database | Medium | [A bulk price import with UPDATE ... FROM sets a different price each run when the supplier file lists a SKU twice](days/2026-11-19.md#q3) | 当供应商文件里同一个 SKU 出现两次时，用 UPDATE ... FROM 做的批量改价每次运行结果都不一样 |
+| 4 | Middleware | Senior | [Merchants' custom product attributes become Elasticsearch fields, and new products start failing to index once one big merchant imports its catalog](days/2026-11-19.md#q4) | 商家自定义的商品属性被映射成 Elasticsearch 字段，某个大商家导入商品目录后，新商品开始索引失败 |
+| 5 | Java & CS | Hard | [Variant lookups by a record key miss products that are clearly in stock: records with array and mutable list components](days/2026-11-19.md#q5) | 用 record 作为键查询变体，明明有库存的商品却查不到：带数组和可变列表组件的 record |
 
 ## [2026-11-18](days/2026-11-18.md)
 
