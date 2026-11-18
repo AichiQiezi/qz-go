@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 42 个模块、194 道题。
+共 43 个模块、199 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -579,3 +579,17 @@ Five new agent questions: progress notes that vanished after a model move, readi
 | 3 | RAG | Hard | [The spec-sheet assistant finds the right page of a supplier PDF, then reads the wrong value from its size chart or packaging drawing](modules/daily-2026-11-18.md#q3) | 规格书助手能找到供应商 PDF 中正确的那一页，却从尺码表或包装图纸上读错了数值 |
 | 4 | Multi-agent | Hard | [A prompt fix to the reviewer worker never reaches the team, a CI sync overwrites a colleague's change, and pinning the coordinator to EU inference fails to save](modules/daily-2026-11-18.md#q4) | 对审核 worker 的提示修复始终没有生效，CI 同步覆盖了同事的修改，而把协调者固定到欧盟推理区域时保存失败 |
 | 5 | Production | Senior | [Finance wants all AI spend on the AWS bill: moving the agent platform from the Claude API to Claude Platform on AWS](modules/daily-2026-11-18.md#q5) | 财务希望所有 AI 花费都走 AWS 账单：把 Agent 平台从 Claude API 迁移到 Claude Platform on AWS |
+
+## [Daily set · Nov 19 · 每日新题 · 11 月 19 日](modules/daily-2026-11-19.md)
+
+Five new agent questions: a webhook endpoint that was silently disabled, promoting actions from bash to dedicated tools, cache breakpoints and TTLs for a slow chat, cleaning up the team's API credentials, and generator-grader loops with Managed Agents outcomes.
+
+> 五道新的 Agent 题：被悄悄停用的 webhook 端点、把操作从 bash 提升为专用工具、慢节奏聊天的缓存断点与 TTL、清理团队的 API 凭据，以及基于 Managed Agents outcome 的生成–评审循环。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Evals & Observability | Medium | [The agent-jobs dashboard stopped updating on Tuesday: the Managed Agents webhook endpoint was disabled, and the missed events never came back](modules/daily-2026-11-19.md#q1) | Agent 任务看板从周二起不再更新：Managed Agents 的 webhook 端点被停用了，错过的事件再也没有回来 |
+| 2 | Tools & MCP | Medium | [The ad-ops agent has one bash tool: approvals are impossible to enforce, reads run one at a time, and a pause request went out without the merchant's yes](modules/daily-2026-11-19.md#q2) | 广告运营 Agent 只有一个 bash 工具：无法强制审批，读取操作只能逐个执行，还有一次暂停请求在商家没同意的情况下就发出去了 |
+| 3 | Context & Memory | Hard | [The merchant help chat pays cache write premiums on every turn, and switching everything to the 1-hour TTL made the bill go up](modules/daily-2026-11-19.md#q3) | 商家帮助聊天在每一轮都支付缓存写入溢价，把所有地方改成 1 小时 TTL 后账单反而上涨了 |
+| 4 | Safety & Security | Hard | [One API key shared in a .env file, admin scopes used for everyday tests, and a developer's login copied into a container image: cleaning up credentials for the agent team](modules/daily-2026-11-19.md#q4) | 一个共享在 .env 文件里的 API key、日常测试用的是管理员权限、开发者的登录凭据被复制进了容器镜像：为 Agent 团队清理凭据 |
+| 5 | Multi-agent | Senior | [Weekly feed-health reports built with Managed Agents outcomes: the grader loop never settles, reports marked "done" failed their rubric, and ops keeps typing "keep going"](modules/daily-2026-11-19.md#q5) | 用 Managed Agents outcome 生成每周商品源健康报告：评审循环一直不收敛，标为「完成」的报告其实没通过评分标准，运维还在不停地输入「继续」 |

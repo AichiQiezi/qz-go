@@ -1,0 +1,201 @@
+{
+  "id": "daily-2026-11-19",
+  "order": 20261119,
+  "kind": "daily",
+  "title": "Daily set · Nov 19",
+  "title_zh": "每日新题 · 11 月 19 日",
+  "summary": "Five new agent questions: a webhook endpoint that was silently disabled, promoting actions from bash to dedicated tools, cache breakpoints and TTLs for a slow chat, cleaning up the team's API credentials, and generator-grader loops with Managed Agents outcomes.",
+  "summary_zh": "五道新的 Agent 题：被悄悄停用的 webhook 端点、把操作从 bash 提升为专用工具、慢节奏聊天的缓存断点与 TTL、清理团队的 API 凭据，以及基于 Managed Agents outcome 的生成–评审循环。",
+  "generatedAt": "2026-11-19T06:57:41+08:00",
+  "questions": [
+    {
+      "id": "agent-daily-20261119-1",
+      "topic": "Evals & Observability",
+      "difficulty": "Medium",
+      "title": "The agent-jobs dashboard stopped updating on Tuesday: the Managed Agents webhook endpoint was disabled, and the missed events never came back",
+      "title_zh": "Agent 任务看板从周二起不再更新：Managed Agents 的 webhook 端点被停用了，错过的事件再也没有回来",
+      "question": "A dashboard tracks thousands of Managed Agents sessions from webhooks: `session.status_idled`, `session.status_terminated` and `session.outcome_evaluation_ended`. On Tuesday the platform team moved the endpoint behind a new load balancer that redirects `/hooks/anthropic` to `/hooks/anthropic/`. Since then nothing arrives. After the path was fixed and the endpoint re-enabled in the Console, new events flowed again, but Tuesday's sessions still show \"running\". A newer event type the team subscribed to last week also shows nothing for sessions from before the subscription.\n\nExplain what happened and make the dashboard trustworthy.",
+      "question_zh": "一个看板通过 webhook 跟踪数千个 Managed Agents 会话：`session.status_idled`、`session.status_terminated` 和 `session.outcome_evaluation_ended`。周二，平台团队把端点挪到了一个新的负载均衡器后面，它会把 `/hooks/anthropic` 重定向到 `/hooks/anthropic/`。从那以后就什么都收不到了。修好路径、并在 Console 里重新启用端点之后，新事件又开始到达，但周二的那些会话仍然显示「运行中」。团队上周新订阅的一个事件类型，对订阅之前的会话也什么都没显示。\n\n解释发生了什么，并让看板变得可信。",
+      "answer": "**The core idea.** Webhooks are hints, not a durable log. Each delivery says \"something changed, go look\", and the platform makes a bounded effort to deliver it. A dashboard that relies only on deliveries will drift; one that fetches state on each hint and reconciles regularly will not.\n\n- **The redirect disabled the endpoint.** A `3xx` response disables the endpoint immediately, on the first attempt, and redirects are never followed. A URL that resolves to a non-public IP is disabled the same way, and sustained failure over a period disables it too.\n- **Events during the outage are gone.** Events emitted while an endpoint is disabled are not replayed after it is re-enabled. Even while enabled, an event is retried a few times with backoff and then dropped, with no signal that it was lost.\n- **Subscriptions do not backfill.** An event reaches only the endpoints subscribed to its type at the moment it is emitted, which is why the new type shows nothing for older sessions.\n- **No ordering.** `session.status_idled` can arrive before `session.outcome_evaluation_ended`; drive state from the resource you fetch, not from arrival order.\n\n**The handler:** verify with the SDK's unwrap on the raw body, deduplicate on the event ID, hand the resource ID to a worker that fetches current state, and answer quickly with a 2xx:\n\n```go\ntype hookHandler struct {\n\tclient anthropic.Client // built with option.WithWebhookKey(whsec_...)\n\tseen   sync.Map         // event IDs; use a table with a TTL in production\n\twork   chan<- string    // session IDs to fetch and reconcile\n}\n\nfunc (h *hookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {\n\tbody, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20)) // raw bytes, never re-encoded\n\tif err != nil {\n\t\thttp.Error(w, \"bad body\", http.StatusBadRequest)\n\t\treturn\n\t}\n\tev, err := h.client.Beta.Webhooks.Unwrap(body, r.Header) // signature and freshness\n\tif err != nil {\n\t\thttp.Error(w, \"invalid signature\", http.StatusBadRequest)\n\t\treturn\n\t}\n\tif _, dup := h.seen.LoadOrStore(ev.ID, true); dup { // retries reuse the event ID\n\t\tw.WriteHeader(http.StatusNoContent)\n\t\treturn\n\t}\n\tselect {\n\tcase h.work <- ev.Data.ID: // the payload is a hint: the worker fetches current state\n\tdefault: // queue full: the reconciler will catch it\n\t}\n\tw.WriteHeader(http.StatusNoContent) // answer fast, never redirect\n}\n```\n\nIn a local test with a correctly signed payload, the first delivery and a retry both got 204 but only one session ID was queued, and the same payload re-encoded with extra spaces failed verification.\n\n- **Reconcile.** A job lists sessions your table still shows as running past a deadline and fetches their status. It repairs Tuesday's sessions and any future gap.\n- **Watch the pipe itself.** Alert when no deliveries arrive for longer than normal traffic allows, and check the endpoint's disabled reason in the Console after infrastructure changes.\n- **Use the right time.** The delivery timestamp is re-stamped on every attempt; use the payload's `created_at` for when the event happened.\n\n**Trade-offs.** Reconciliation costs API calls and adds a delay before a missed change shows up, but without it the dashboard is wrong silently, which is worse than being a few minutes late.",
+      "answer_zh": "**核心思想。** Webhook 是提示，而不是可靠的日志。每次投递只是在说「有东西变了，去看看」，平台只会做有限次数的投递尝试。只依赖投递的看板会逐渐失真；而在每次收到提示时去拉取状态、并定期对账的看板则不会。\n\n- **重定向导致端点被停用。** `3xx` 响应会在第一次尝试时就立即停用端点，而且平台从不跟随重定向。解析到非公网 IP 的 URL 也会这样被停用；在一段时间内持续失败同样会导致停用。\n- **停用期间的事件丢失了。** 端点停用期间产生的事件，在重新启用后不会补发。即使在启用状态下，一个事件也只会带退避重试几次，然后就被丢弃，没有任何信号表明它丢了。\n- **订阅不会回填。** 事件只会送达在其产生那一刻已订阅该类型的端点，所以新类型对旧会话什么都不显示。\n- **没有顺序保证。** `session.status_idled` 可能比 `session.outcome_evaluation_ended` 先到；状态要以你拉取的资源为准，而不是以到达顺序为准。\n\n**处理函数：** 用 SDK 的 unwrap 校验原始请求体，按事件 ID 去重，把资源 ID 交给一个拉取当前状态的 worker，然后快速返回 2xx：\n\n```go\ntype hookHandler struct {\n\tclient anthropic.Client // built with option.WithWebhookKey(whsec_...)\n\tseen   sync.Map         // event IDs; use a table with a TTL in production\n\twork   chan<- string    // session IDs to fetch and reconcile\n}\n\nfunc (h *hookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {\n\tbody, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20)) // raw bytes, never re-encoded\n\tif err != nil {\n\t\thttp.Error(w, \"bad body\", http.StatusBadRequest)\n\t\treturn\n\t}\n\tev, err := h.client.Beta.Webhooks.Unwrap(body, r.Header) // signature and freshness\n\tif err != nil {\n\t\thttp.Error(w, \"invalid signature\", http.StatusBadRequest)\n\t\treturn\n\t}\n\tif _, dup := h.seen.LoadOrStore(ev.ID, true); dup { // retries reuse the event ID\n\t\tw.WriteHeader(http.StatusNoContent)\n\t\treturn\n\t}\n\tselect {\n\tcase h.work <- ev.Data.ID: // the payload is a hint: the worker fetches current state\n\tdefault: // queue full: the reconciler will catch it\n\t}\n\tw.WriteHeader(http.StatusNoContent) // answer fast, never redirect\n}\n```\n\n在用正确签名的载荷做的本地测试中，首次投递和一次重试都得到了 204，但只有一个会话 ID 进入队列；而同一载荷被加上空格重新编码后，签名校验失败。\n\n- **对账。** 一个定时任务列出你的表中超过期限仍显示为运行中的会话，并拉取它们的状态。它能修复周二的会话，也能弥补以后的任何缺口。\n- **监控通道本身。** 当超过正常流量允许的时长没有收到任何投递时告警；基础设施变更之后，在 Console 里检查端点的停用原因。\n- **使用正确的时间。** 投递时间戳在每次尝试时都会重新生成；事件发生的时间要用载荷里的 `created_at`。\n\n**权衡。** 对账会消耗 API 调用，并让错过的变化要晚一些才显示出来；但没有对账，看板会悄无声息地出错，这比晚几分钟更糟。",
+      "followups": [
+        "How often would you run the reconciliation job, and what decides it?",
+        "Where would you store processed event IDs, and for how long?"
+      ],
+      "followups_zh": [
+        "你会多久运行一次对账任务？由什么决定？",
+        "你会把已处理的事件 ID 存在哪里，保存多久？"
+      ],
+      "vocab": [
+        {
+          "en": "webhook",
+          "zh": "Webhook 回调"
+        },
+        {
+          "en": "auto-disable",
+          "zh": "自动停用"
+        },
+        {
+          "en": "reconciliation",
+          "zh": "对账"
+        },
+        {
+          "en": "deduplication",
+          "zh": "去重"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261119-2",
+      "topic": "Tools & MCP",
+      "difficulty": "Medium",
+      "title": "The ad-ops agent has one bash tool: approvals are impossible to enforce, reads run one at a time, and a pause request went out without the merchant's yes",
+      "title_zh": "广告运营 Agent 只有一个 bash 工具：无法强制审批，读取操作只能逐个执行，还有一次暂停请求在商家没同意的情况下就发出去了",
+      "question": "To move fast, the team gave the ad-ops agent a single bash tool with `curl` and a CLI for the ad platforms. It works, but three problems appeared: the harness cannot tell a harmless `GET` from a `POST` that pauses a campaign, so a pause went out without the merchant's approval; every command runs one at a time because the harness cannot know which are safe to run together; and the UI can only show raw command strings, which merchants do not understand.\n\nHow would you redesign the tool surface?",
+      "question_zh": "为了快速上线，团队只给广告运营 Agent 配了一个 bash 工具，里面有 `curl` 和各广告平台的命令行工具。它能用，但出现了三个问题：框架无法区分无害的 `GET` 和会暂停广告活动的 `POST`，于是一次暂停在商家没批准的情况下就发出去了；所有命令都只能逐个执行，因为框架不知道哪些可以同时运行；界面只能显示原始命令字符串，商家看不懂。\n\n你会如何重新设计工具面？",
+      "answer": "**The core idea.** The shape of a tool call decides what your harness can do with it. A bash tool gives the model broad reach but gives the harness only an opaque string, the same shape for every action. A dedicated tool with typed arguments gives the harness a hook it can gate, render, audit and schedule.\n\n- **Gate what is hard to reverse.** Pausing campaigns, changing budgets and sending messages become dedicated tools that require confirmation. A `pause_campaign` call is easy to gate; a `curl -X POST` inside a shell command is not.\n- **Parallelize what is read-only.** Reading campaigns and spend can be marked safe to run together. Through bash, the harness cannot tell a safe read from an unsafe write, so it must serialize everything.\n- **Render what people must approve.** A typed call can be shown as \"Pause campaign Summer Sale on Meta\" instead of a command line.\n- **Keep bash for breadth** where none of this matters, such as exploring a report export in a sandbox.\n\n**A harness that uses the tool kinds:**\n\n```go\ntype Kind int\n\nconst (\n\tReadOnly Kind = iota // safe to run in parallel\n\tWrite                // changes our data: run in order\n\tExternal             // hard to reverse: needs approval first\n)\n\ntype Call struct {\n\tID, Tool string\n\tArgs     map[string]any\n}\n\ntype Tool struct {\n\tKind Kind\n\tRun  func(map[string]any) (string, error)\n}\n\ntype Result struct {\n\tID, Content string\n\tIsError     bool\n}\n\n// runTurn executes one assistant turn's tool calls: reads together, the rest in\n// order, and external actions only after approve says yes.\nfunc runTurn(calls []Call, tools map[string]Tool, approve func(Call) bool) []Result {\n\tout := make([]Result, len(calls))\n\tvar wg sync.WaitGroup\n\tfor i, c := range calls {\n\t\tt, ok := tools[c.Tool]\n\t\tswitch {\n\t\tcase !ok:\n\t\t\tout[i] = Result{c.ID, \"unknown tool \" + c.Tool, true}\n\t\tcase t.Kind == ReadOnly:\n\t\t\twg.Add(1)\n\t\t\tgo func() { defer wg.Done(); out[i] = exec(c, t) }()\n\t\t}\n\t}\n\twg.Wait()\n\tfor i, c := range calls {\n\t\tt, ok := tools[c.Tool]\n\t\tif !ok || t.Kind == ReadOnly {\n\t\t\tcontinue\n\t\t}\n\t\tif t.Kind == External && !approve(c) {\n\t\t\tout[i] = Result{c.ID, \"not approved by the merchant; do not retry without asking\", true}\n\t\t\tcontinue\n\t\t}\n\t\tout[i] = exec(c, t)\n\t}\n\treturn out // every call gets a result, in the original order\n}\n\nfunc exec(c Call, t Tool) Result {\n\ts, err := t.Run(c.Args)\n\tif err != nil {\n\t\treturn Result{c.ID, fmt.Sprintf(\"%s failed: %v\", c.Tool, err), true}\n\t}\n\treturn Result{c.ID, s, false}\n}\n```\n\nIn a local run with 200 ms tools, two reads and one write finished in about 400 ms, because the reads ran together; the unapproved pause returned an error result, and an unknown tool name got an error instead of a crash. Every `tool_use` still gets its `tool_result`, all in one user message.\n\n**Keep the bash tool honest too.** If bash stays, run it in a sandbox without the ad-platform credentials, so the only way to change a live campaign is through the gated tools.\n\n**Trade-offs.** Each dedicated tool is code to write and a schema to maintain, and too many tools make choosing harder. Start with bash, then promote an action when you need to gate, render, audit or parallelize it.",
+      "answer_zh": "**核心思想。** 工具调用的形态，决定了框架能对它做什么。bash 工具给了模型很大的能力范围，却只给框架一个不透明的字符串，每种操作都是同一个形态。带类型参数的专用工具则给了框架一个可以把关、渲染、审计和调度的切入点。\n\n- **对难以撤销的操作把关。** 暂停广告活动、修改预算、发送消息都改成需要确认的专用工具。`pause_campaign` 调用很容易把关；藏在 shell 命令里的 `curl -X POST` 则不行。\n- **并行执行只读操作。** 读取广告活动和花费可以标记为可同时运行。通过 bash 时，框架分辨不出安全的读和不安全的写，只能把所有操作串行化。\n- **渲染出需要人批准的内容。** 带类型的调用可以显示成「暂停 Meta 上的 Summer Sale 广告活动」，而不是一行命令。\n- **在这些都不重要的地方保留 bash 以获得广度，** 比如在沙箱里探索一份报表导出。\n\n**一个利用工具类别的框架：**\n\n```go\ntype Kind int\n\nconst (\n\tReadOnly Kind = iota // safe to run in parallel\n\tWrite                // changes our data: run in order\n\tExternal             // hard to reverse: needs approval first\n)\n\ntype Call struct {\n\tID, Tool string\n\tArgs     map[string]any\n}\n\ntype Tool struct {\n\tKind Kind\n\tRun  func(map[string]any) (string, error)\n}\n\ntype Result struct {\n\tID, Content string\n\tIsError     bool\n}\n\n// runTurn executes one assistant turn's tool calls: reads together, the rest in\n// order, and external actions only after approve says yes.\nfunc runTurn(calls []Call, tools map[string]Tool, approve func(Call) bool) []Result {\n\tout := make([]Result, len(calls))\n\tvar wg sync.WaitGroup\n\tfor i, c := range calls {\n\t\tt, ok := tools[c.Tool]\n\t\tswitch {\n\t\tcase !ok:\n\t\t\tout[i] = Result{c.ID, \"unknown tool \" + c.Tool, true}\n\t\tcase t.Kind == ReadOnly:\n\t\t\twg.Add(1)\n\t\t\tgo func() { defer wg.Done(); out[i] = exec(c, t) }()\n\t\t}\n\t}\n\twg.Wait()\n\tfor i, c := range calls {\n\t\tt, ok := tools[c.Tool]\n\t\tif !ok || t.Kind == ReadOnly {\n\t\t\tcontinue\n\t\t}\n\t\tif t.Kind == External && !approve(c) {\n\t\t\tout[i] = Result{c.ID, \"not approved by the merchant; do not retry without asking\", true}\n\t\t\tcontinue\n\t\t}\n\t\tout[i] = exec(c, t)\n\t}\n\treturn out // every call gets a result, in the original order\n}\n\nfunc exec(c Call, t Tool) Result {\n\ts, err := t.Run(c.Args)\n\tif err != nil {\n\t\treturn Result{c.ID, fmt.Sprintf(\"%s failed: %v\", c.Tool, err), true}\n\t}\n\treturn Result{c.ID, s, false}\n}\n```\n\n在本地用耗时 200 毫秒的工具运行时，两次读取和一次写入大约 400 毫秒就完成了，因为两次读取是同时进行的；未获批准的暂停返回了错误结果，未知的工具名也得到了错误结果而不是崩溃。每个 `tool_use` 依然都有对应的 `tool_result`，全部放在同一条用户消息里。\n\n**也要让 bash 工具守规矩。** 如果保留 bash，就把它放在没有广告平台凭据的沙箱里运行，这样修改线上广告活动的唯一途径就是那些需要把关的工具。\n\n**权衡。** 每个专用工具都是要写的代码和要维护的 schema，工具太多也会让选择变难。从 bash 起步，当某个操作需要把关、渲染、审计或并行时，再把它提升为专用工具。",
+      "followups": [
+        "The model starts calling curl through bash to avoid the approval step. What do you change?",
+        "Which ad-platform actions would you still leave behind bash, and why?"
+      ],
+      "followups_zh": [
+        "模型开始通过 bash 调用 curl 来绕过审批步骤。你要改什么？",
+        "哪些广告平台操作你仍会留在 bash 后面？为什么？"
+      ],
+      "vocab": [
+        {
+          "en": "tool surface",
+          "zh": "工具面"
+        },
+        {
+          "en": "dedicated tool",
+          "zh": "专用工具"
+        },
+        {
+          "en": "parallel-safe",
+          "zh": "可并行执行的"
+        },
+        {
+          "en": "approval gate",
+          "zh": "审批关卡"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261119-3",
+      "topic": "Context & Memory",
+      "difficulty": "Hard",
+      "title": "The merchant help chat pays cache write premiums on every turn, and switching everything to the 1-hour TTL made the bill go up",
+      "title_zh": "商家帮助聊天在每一轮都支付缓存写入溢价，把所有地方改成 1 小时 TTL 后账单反而上涨了",
+      "question": "The merchant help chat sends a 30K-token policy prompt, then retrieved help articles, then the conversation, with top-level automatic caching. Merchants often reply after 10 to 30 minutes. Usage logs show `cache_creation_input_tokens` on almost every request and cache reads that never cover the retrieved articles. Someone switched every breakpoint to the 1-hour TTL, the bill went up, and a later change that put a 1-hour marker after a 5-minute one returned a 400.\n\nExplain the cost pattern and design the caching.",
+      "question_zh": "商家帮助聊天先发送一份 3 万 token 的政策提示，然后是检索到的帮助文章，再然后是对话，开启了顶层自动缓存。商家通常隔 10 到 30 分钟才回复。用量日志显示几乎每个请求都有 `cache_creation_input_tokens`，而缓存读取从来覆盖不到检索到的文章。有人把所有断点都改成了 1 小时 TTL，账单涨了；后来一次把 1 小时标记放在 5 分钟标记之后的改动还返回了 400。\n\n解释这种成本模式，并设计缓存方案。",
+      "answer": "**The core idea.** A cache entry is written once and pays off only when later requests read the same prefix before it expires. Put breakpoints where the shared part ends, and choose the TTL from the gap between requests that share that part, not from a feeling that longer is safer.\n\n- **Writes on every turn.** Automatic caching puts its breakpoint on the last cacheable block. When the prompt ends in content unique to each request, such as freshly retrieved articles, every request pays the write premium on bytes nobody reads back. The signature is exactly this: creation tokens on every request, reads that never cover the shared prefix.\n- **Why 1 hour cost more.** A cache read refreshes the timer at no extra cost, and the lifetime counts from the start of the request. Requests that share a prefix and start less than 5 minutes apart keep the 5-minute entry warm indefinitely, so the 1-hour TTL only doubles the write price there. It pays off only in the 5 to 60 minute band, which here is the gap between a merchant's replies.\n- **The 400.** Entries with the longer TTL must come before shorter ones. A 1-hour marker after a 5-minute one is rejected; a 1-hour marker with a 5-minute tail is fine.\n\n**The design.** Put an explicit breakpoint at the end of the static policy prompt, keep retrieved articles after it, and use automatic caching for the conversation tail. Choose the TTL per route from the observed gap, and set the same value on both:\n\n```go\n// ttlFor picks the cache TTL from the start-to-start gap between requests that share the prefix.\nfunc ttlFor(typicalGap time.Duration) anthropic.CacheControlEphemeralTTL {\n\tif typicalGap > 5*time.Minute && typicalGap <= time.Hour {\n\t\treturn anthropic.CacheControlEphemeralTTLTTL1h // the only band where the 2x write pays off\n\t}\n\treturn anthropic.CacheControlEphemeralTTLTTL5m // shorter gaps refresh it; longer ones miss anyway\n}\n\nfunc chatRequest(policy string, history []anthropic.MessageParam, ttl anthropic.CacheControlEphemeralTTL) anthropic.MessageNewParams {\n\tcc := anthropic.CacheControlEphemeralParam{TTL: ttl}\n\treturn anthropic.MessageNewParams{\n\t\tModel:     \"claude-opus-5-5\",\n\t\tMaxTokens: 16000,\n\t\t// Explicit breakpoint at the end of the shared, static prefix.\n\t\tSystem: []anthropic.TextBlockParam{{Text: policy, CacheControl: cc}},\n\t\t// Automatic caching for the growing conversation tail, with the same TTL:\n\t\t// a longer TTL may not follow a shorter one.\n\t\tCacheControl: cc,\n\t\tMessages:     history,\n\t}\n}\n```\n\n- **Move per-turn content out of the shared prefix:** retrieved articles go into the user turn they answer, so they become part of the conversation the next turn reads, not a varying block in front of it.\n- **On Claude Fable 5.2 and 5.1,** cache reads are cheap enough that the guide suggests a keep-alive instead: stay on 5 minutes and re-send the previous request with `max_tokens: 0` shortly before the entry expires.\n- **Measure:** track the share of input served from cache per route and the write tokens per request, before and after.\n\n**Trade-offs.** Gaps vary by merchant and time of day, so one TTL per route is a compromise; gaps over an hour miss either way. Moving articles into the turn makes the conversation grow faster, which matters for very long chats.",
+      "answer_zh": "**核心思想。** 缓存条目写入一次，只有在过期前有后续请求读取同一个前缀时才划算。把断点放在共享部分结束的地方，并根据共享该部分的请求之间的时间间隔来选择 TTL，而不是凭「越长越保险」的感觉。\n\n- **每一轮都在写入。** 自动缓存把断点放在最后一个可缓存的块上。当提示以每个请求独有的内容结尾（比如刚检索到的文章）时，每个请求都要为没人会再读的字节支付写入溢价。症状正是如此：每个请求都有创建 token，而读取从来覆盖不到共享前缀。\n- **为什么 1 小时更贵。** 缓存读取会免费刷新计时器，而生命周期从请求开始时算起。共享前缀、且开始时间间隔不到 5 分钟的请求，可以让 5 分钟的条目一直保持有效，所以在这种情况下 1 小时 TTL 只会让写入价格翻倍。它只在 5 到 60 分钟的区间里划算，而这里正是商家两次回复之间的间隔。\n- **那个 400。** TTL 更长的条目必须排在更短的之前。5 分钟标记之后再放一个 1 小时标记会被拒绝；1 小时标记加一个 5 分钟的尾部则没问题。\n\n**设计方案。** 在静态政策提示的末尾放一个显式断点，把检索到的文章放在它之后，对话尾部使用自动缓存。按路由根据观测到的间隔选择 TTL，并在两处设置相同的值：\n\n```go\n// ttlFor picks the cache TTL from the start-to-start gap between requests that share the prefix.\nfunc ttlFor(typicalGap time.Duration) anthropic.CacheControlEphemeralTTL {\n\tif typicalGap > 5*time.Minute && typicalGap <= time.Hour {\n\t\treturn anthropic.CacheControlEphemeralTTLTTL1h // the only band where the 2x write pays off\n\t}\n\treturn anthropic.CacheControlEphemeralTTLTTL5m // shorter gaps refresh it; longer ones miss anyway\n}\n\nfunc chatRequest(policy string, history []anthropic.MessageParam, ttl anthropic.CacheControlEphemeralTTL) anthropic.MessageNewParams {\n\tcc := anthropic.CacheControlEphemeralParam{TTL: ttl}\n\treturn anthropic.MessageNewParams{\n\t\tModel:     \"claude-opus-5-5\",\n\t\tMaxTokens: 16000,\n\t\t// Explicit breakpoint at the end of the shared, static prefix.\n\t\tSystem: []anthropic.TextBlockParam{{Text: policy, CacheControl: cc}},\n\t\t// Automatic caching for the growing conversation tail, with the same TTL:\n\t\t// a longer TTL may not follow a shorter one.\n\t\tCacheControl: cc,\n\t\tMessages:     history,\n\t}\n}\n```\n\n- **把每轮的内容移出共享前缀：** 检索到的文章放进它所回答的那个用户轮次中，这样它们就成为下一轮会读取的对话的一部分，而不是挡在前面的一个变化的块。\n- **在 Claude Fable 5.2 和 5.1 上，** 缓存读取足够便宜，指南建议改用保活：保持 5 分钟 TTL，并在条目过期前不久用 `max_tokens: 0` 重发上一个请求。\n- **测量：** 改动前后，按路由跟踪由缓存提供的输入占比，以及每个请求的写入 token。\n\n**权衡。** 回复间隔随商家和时段而变，所以每条路由一个 TTL 只是折中；超过一小时的间隔无论如何都会未命中。把文章放进轮次里会让对话增长得更快，这对很长的聊天有影响。",
+      "followups": [
+        "How would you measure the start-to-start gap per route from your own logs?",
+        "A tool list that changes per merchant sits before the system prompt. What happens to the cache?"
+      ],
+      "followups_zh": [
+        "你会如何从自己的日志中测量每条路由的请求开始间隔？",
+        "一个按商家变化的工具列表位于系统提示之前。缓存会怎样？"
+      ],
+      "vocab": [
+        {
+          "en": "cache breakpoint",
+          "zh": "缓存断点"
+        },
+        {
+          "en": "write premium",
+          "zh": "写入溢价"
+        },
+        {
+          "en": "time to live",
+          "zh": "存活时间（TTL）"
+        },
+        {
+          "en": "keep-alive",
+          "zh": "保活"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261119-4",
+      "topic": "Safety & Security",
+      "difficulty": "Hard",
+      "title": "One API key shared in a .env file, admin scopes used for everyday tests, and a developer's login copied into a container image: cleaning up credentials for the agent team",
+      "title_zh": "一个共享在 .env 文件里的 API key、日常测试用的是管理员权限、开发者的登录凭据被复制进了容器镜像：为 Agent 团队清理凭据",
+      "question": "The agent team of eight shares one Console API key in a `.env` file that was once committed. To fix that, developers were asked to use `ant auth login`, but several still see requests billed to the old key, one engineer runs daily tests on a profile that has the `org:admin` scope, a script that calls the API with curl fails with the OAuth token, and someone made a staging container work by copying their `~/.config/anthropic` directory into the image.\n\nExplain each problem and set up the credential model.",
+      "question_zh": "一个八人的 Agent 团队共用一个 Console API key，放在一个曾经被提交过的 `.env` 文件里。为了解决这个问题，团队要求开发者改用 `ant auth login`，但有几个人发现请求仍然算在旧 key 名下；一位工程师用带 `org:admin` 权限的 profile 跑日常测试；一个用 curl 调用 API 的脚本在使用 OAuth token 时失败；还有人为了让预发环境的容器跑起来，把自己的 `~/.config/anthropic` 目录复制进了镜像。\n\n解释每一个问题，并建立凭据模型。",
+      "answer": "**The core idea.** Every credential should belong to one person or one workload, carry only the access it needs, and live only where that person or workload runs. Most of the trouble here comes from credential precedence and from copying a personal credential into shared places.\n\n- **The old key still wins.** The SDKs and `ant` resolve credentials in order, and `ANTHROPIC_API_KEY` comes before a login profile. An exported key from the old `.env` overrides the login; even an empty value wins its slot and authenticates with an empty key. `ant auth status` shows which source won.\n- **Admin scope for daily work.** Privileged scopes are not in the default set and ride on every token the profile mints. Keep an `admin` profile for organization tasks and run everyday inference on an unprivileged one.\n- **The curl script.** An OAuth token goes in `Authorization: Bearer` with the `anthropic-beta: oauth-2025-04-20` header, not in `x-api-key`. Get a bare token with `ant auth print-credentials --access-token`; without the flag it prints the whole credentials JSON. A token passed through an environment variable is short-lived and not refreshed.\n- **The copied login.** An interactive login is for development on your own machine. The credentials file in the image is a person's token on a shared host, bound to that person's workspace. Remove it and give non-interactive workloads their own identity: workload identity federation, or a key in the platform's secret store.\n\n**A startup check** catches the common mistakes before the first request:\n\n```go\n// credentialProblems runs at startup and lists what would make the SDK pick\n// the wrong credential, or what should never exist on this kind of host.\nfunc credentialProblems(interactiveDev bool) []string {\n\tvar p []string\n\tkey, keySet := os.LookupEnv(\"ANTHROPIC_API_KEY\")\n\t_, tokenSet := os.LookupEnv(\"ANTHROPIC_AUTH_TOKEN\")\n\tswitch {\n\tcase keySet && key == \"\":\n\t\tp = append(p, \"ANTHROPIC_API_KEY is set but empty: it still wins and authenticates with an empty key\")\n\tcase keySet && interactiveDev:\n\t\tp = append(p, \"ANTHROPIC_API_KEY overrides your `ant auth login` profile; unset it\")\n\t}\n\tif tokenSet && !interactiveDev {\n\t\tp = append(p, \"ANTHROPIC_AUTH_TOKEN in a service: a token passed by env var is not refreshed\")\n\t}\n\tif !interactiveDev {\n\t\tdir := os.Getenv(\"ANTHROPIC_CONFIG_DIR\")\n\t\tif dir == \"\" {\n\t\t\thome, _ := os.UserHomeDir()\n\t\t\tdir = filepath.Join(home, \".config\", \"anthropic\")\n\t\t}\n\t\tif _, err := os.Stat(filepath.Join(dir, \"credentials\")); err == nil {\n\t\t\tp = append(p, \"a developer's login credentials were copied onto this host; remove them and use workload identity federation or a secret store\")\n\t\t}\n\t}\n\treturn p\n}\n```\n\nIn a local run, it flagged an empty `ANTHROPIC_API_KEY`, an exported key on a developer machine, an env-var token in a service, and a copied credentials directory.\n\n**Finish the cleanup.** Revoke the shared key, since it was committed once and must be assumed leaked. Use one profile per workspace for people who work in several. Remember that login tokens hard-expire after some weeks, so a failing profile usually needs a fresh login.\n\n**Trade-offs.** Personal logins add a step for every developer and do not work for automation, which is the point: automation gets its own identity and its own audit trail.",
+      "answer_zh": "**核心思想。** 每个凭据都应该只属于一个人或一个工作负载，只带有它需要的权限，并且只存在于这个人或工作负载运行的地方。这里的大部分麻烦来自凭据的优先级，以及把个人凭据复制到了共享的地方。\n\n- **旧 key 仍然优先。** SDK 和 `ant` 按顺序解析凭据，`ANTHROPIC_API_KEY` 排在登录 profile 之前。旧 `.env` 中导出的 key 会覆盖登录；即使是空值也会占据它的优先级位置，并用一个空 key 去认证。`ant auth status` 会显示是哪个来源胜出。\n- **日常工作用了管理员权限。** 特权 scope 不在默认集合中，而且会附带在该 profile 签发的每个 token 上。保留一个 `admin` profile 专门处理组织管理任务，日常推理用一个没有特权的 profile。\n- **curl 脚本。** OAuth token 要放在 `Authorization: Bearer` 里，并带上 `anthropic-beta: oauth-2025-04-20` 头，而不是放在 `x-api-key` 里。用 `ant auth print-credentials --access-token` 获取纯 token；不带这个参数时，它会输出整个凭据 JSON。通过环境变量传递的 token 有效期很短，而且不会自动刷新。\n- **被复制的登录凭据。** 交互式登录是给你在自己机器上开发用的。镜像里的凭据文件，是一个人的 token 被放在了共享主机上，而且绑定在这个人的 workspace 上。把它删掉，给非交互式工作负载各自的身份：工作负载身份联合（WIF），或者平台密钥存储中的 key。\n\n**一个启动检查** 可以在第一个请求之前发现常见错误：\n\n```go\n// credentialProblems runs at startup and lists what would make the SDK pick\n// the wrong credential, or what should never exist on this kind of host.\nfunc credentialProblems(interactiveDev bool) []string {\n\tvar p []string\n\tkey, keySet := os.LookupEnv(\"ANTHROPIC_API_KEY\")\n\t_, tokenSet := os.LookupEnv(\"ANTHROPIC_AUTH_TOKEN\")\n\tswitch {\n\tcase keySet && key == \"\":\n\t\tp = append(p, \"ANTHROPIC_API_KEY is set but empty: it still wins and authenticates with an empty key\")\n\tcase keySet && interactiveDev:\n\t\tp = append(p, \"ANTHROPIC_API_KEY overrides your `ant auth login` profile; unset it\")\n\t}\n\tif tokenSet && !interactiveDev {\n\t\tp = append(p, \"ANTHROPIC_AUTH_TOKEN in a service: a token passed by env var is not refreshed\")\n\t}\n\tif !interactiveDev {\n\t\tdir := os.Getenv(\"ANTHROPIC_CONFIG_DIR\")\n\t\tif dir == \"\" {\n\t\t\thome, _ := os.UserHomeDir()\n\t\t\tdir = filepath.Join(home, \".config\", \"anthropic\")\n\t\t}\n\t\tif _, err := os.Stat(filepath.Join(dir, \"credentials\")); err == nil {\n\t\t\tp = append(p, \"a developer's login credentials were copied onto this host; remove them and use workload identity federation or a secret store\")\n\t\t}\n\t}\n\treturn p\n}\n```\n\n在本地运行时，它标出了空的 `ANTHROPIC_API_KEY`、开发机上导出的 key、服务里通过环境变量传入的 token，以及被复制过来的凭据目录。\n\n**完成清理。** 吊销那个共享的 key，因为它曾被提交过，必须假定它已泄露。对于在多个 workspace 工作的人，每个 workspace 用一个 profile。记住登录 token 在几周后会硬性过期，所以 profile 失效时通常只需要重新登录。\n\n**权衡。** 个人登录会给每个开发者多加一个步骤，而且不能用于自动化，这正是目的所在：自动化有自己的身份和自己的审计记录。",
+      "followups": [
+        "A developer's tests suddenly cannot see agents they created yesterday. What do you check first?",
+        "How would you prove that nothing still uses the revoked shared key?",
+        "Should CI run with a person's identity for convenience? Why not?"
+      ],
+      "followups_zh": [
+        "某个开发者的测试突然看不到他昨天创建的 Agent 了。你首先检查什么？",
+        "你会如何证明已经没有任何东西还在使用那个被吊销的共享 key？",
+        "为了方便，CI 应该用某个人的身份运行吗？为什么不应该？"
+      ],
+      "vocab": [
+        {
+          "en": "credential precedence",
+          "zh": "凭据优先级"
+        },
+        {
+          "en": "OAuth scope",
+          "zh": "OAuth 权限范围"
+        },
+        {
+          "en": "profile",
+          "zh": "配置档（profile）"
+        },
+        {
+          "en": "workload identity",
+          "zh": "工作负载身份"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261119-5",
+      "topic": "Multi-agent",
+      "difficulty": "Senior",
+      "title": "Weekly feed-health reports built with Managed Agents outcomes: the grader loop never settles, reports marked \"done\" failed their rubric, and ops keeps typing \"keep going\"",
+      "title_zh": "用 Managed Agents outcome 生成每周商品源健康报告：评审循环一直不收敛，标为「完成」的报告其实没通过评分标准，运维还在不停地输入「继续」",
+      "question": "Each week a Managed Agents session builds a Google Shopping feed-health report for a merchant, using an outcome: a description, a rubric and a grader that scores each iteration. The rubric says \"The report is accurate, clear and helpful\". Sessions often reach the iteration limit; the client marks a report done at the first `span.outcome_evaluation_end` it sees; some reports with `max_iterations_reached` were sent to merchants as finished; operators send \"keep going\" messages to slow sessions; and an attempt to set the outcome on `sessions.create()` failed.\n\nRedesign the rubric, the client and the operating model.",
+      "question_zh": "每周都有一个 Managed Agents 会话为某个商家生成 Google Shopping 商品源健康报告，使用的是 outcome：一段描述、一份评分标准，以及一个为每次迭代打分的评审者。评分标准写的是「报告准确、清晰、有帮助」。会话经常达到迭代上限；客户端在看到第一个 `span.outcome_evaluation_end` 时就把报告标为完成；有些结果为 `max_iterations_reached` 的报告被当作已完成发给了商家；运维人员会给慢的会话发「继续」消息；还有一次尝试在 `sessions.create()` 上设置 outcome 失败了。\n\n重新设计评分标准、客户端和运营方式。",
+      "answer": "**The core idea.** An outcome turns a session from conversation into work: the agent iterates, a separate grader with its own context window scores each iteration against your rubric and sends back the gaps, and the loop stops when the rubric is met, the iteration limit is reached, or someone interrupts. The grader can only be as precise as the rubric.\n\n- **The rubric.** \"Accurate, clear and helpful\" cannot be graded consistently, so the loop wanders. Write 5 to 10 independently gradeable criteria, such as \"lists every disapproved item with its reason code\" or \"the totals match the diagnostics export\". If no rubric exists, have Claude analyze a known-good report and turn that into one.\n- **The limit.** `max_iterations` defaults to 3 and can go up to 20. Raise it only when the per-criterion explanations show steady progress; each iteration costs a grader pass as well as agent work.\n- **Kick-off.** An outcome is not a field on `sessions.create()`; send one `user.define_outcome` event, or put it in `initial_events`. The agent starts on it, so no extra `user.message` is needed.\n\n**The client.** A `needs_revision` grade means the session keeps working, so the evaluation event is not the end. Use the usual idle gate, an idle whose stop reason is not `requires_action`, for \"finished\", and treat only `satisfied` as passed:\n\n```go\ntype OutcomeEvent struct {\n\tType        string // e.g. \"span.outcome_evaluation_end\", \"session.status_idle\"\n\tResult      string // satisfied | needs_revision | max_iterations_reached | failed | interrupted\n\tIteration   int\n\tExplanation string\n\tStopReason  string // on session.status_idle\n}\n\ntype Verdict struct {\n\tDone, Passed bool\n\tIterations   int\n\tWhy          string\n}\n\n// follow consumes one outcome's events. \"Done\" comes from the idle gate, never from\n// the grader event alone; \"Passed\" only from a satisfied grade.\nfunc follow(events []OutcomeEvent) Verdict {\n\tvar v Verdict\n\tfor _, e := range events {\n\t\tswitch e.Type {\n\t\tcase \"span.outcome_evaluation_end\":\n\t\t\tv.Iterations = e.Iteration + 1\n\t\t\tv.Passed = e.Result == \"satisfied\"\n\t\t\tv.Why = e.Result + \": \" + e.Explanation\n\t\tcase \"session.status_idle\":\n\t\t\tif e.StopReason != \"requires_action\" { // waiting on us is not finished\n\t\t\t\tv.Done = true\n\t\t\t\treturn v\n\t\t\t}\n\t\t}\n\t}\n\treturn v\n}\n```\n\nIn a local run, a sequence with one revision ended as done and passed after two iterations, and a `max_iterations_reached` sequence ended as done but not passed, with the open criterion in the explanation.\n\n- **Operations.** Don't send \"keep going\": the agent already works until a terminal result. Steer with a specific message only when the explanations show a wrong direction. A report that is not `satisfied` goes to a person with the grader's explanation, never to the merchant.\n- **One outcome at a time.** Chain the next outcome, such as a summary email, only after the previous one's terminal result. A `failed` result means the rubric and description contradict each other: fix the task definition, not the agent.\n- **Deliverables and cost.** Fetch the report from the session's outputs through the Files API, and track grader usage per iteration from the evaluation events alongside the session budget.\n\n**Trade-offs.** A strict rubric makes more reports wait for a person; a loose one ships weaker reports automatically. Outcomes fit one deliverable per session; a stream of quick questions should stay plain conversation.",
+      "answer_zh": "**核心思想。** outcome 把会话从对话变成了工作：Agent 反复迭代，一个拥有独立上下文窗口的评审者按你的评分标准给每次迭代打分并反馈差距，当满足评分标准、达到迭代上限或有人中断时，循环才会停止。评审者的精确程度不会超过评分标准本身。\n\n- **评分标准。** 「准确、清晰、有帮助」无法被一致地评分，所以循环会漫无目的。写 5 到 10 条可以独立评分的标准，比如「列出每个被拒商品及其原因代码」或「总数与诊断导出一致」。如果还没有评分标准，就让 Claude 分析一份公认合格的报告，把分析结果整理成标准。\n- **迭代上限。** `max_iterations` 默认是 3，最高可设到 20。只有当逐条标准的说明显示出稳定进展时才调高；每次迭代除了 Agent 的工作，还要多付一次评审的开销。\n- **启动方式。** outcome 不是 `sessions.create()` 上的字段；要发送一个 `user.define_outcome` 事件，或者把它放进 `initial_events`。Agent 收到后就会开始工作，不需要再额外发 `user.message`。\n\n**客户端。** `needs_revision` 评分意味着会话还在继续工作，所以评审事件并不代表结束。判断「完成」要用常规的 idle 关卡，即停止原因不是 `requires_action` 的 idle；只有 `satisfied` 才算通过：\n\n```go\ntype OutcomeEvent struct {\n\tType        string // e.g. \"span.outcome_evaluation_end\", \"session.status_idle\"\n\tResult      string // satisfied | needs_revision | max_iterations_reached | failed | interrupted\n\tIteration   int\n\tExplanation string\n\tStopReason  string // on session.status_idle\n}\n\ntype Verdict struct {\n\tDone, Passed bool\n\tIterations   int\n\tWhy          string\n}\n\n// follow consumes one outcome's events. \"Done\" comes from the idle gate, never from\n// the grader event alone; \"Passed\" only from a satisfied grade.\nfunc follow(events []OutcomeEvent) Verdict {\n\tvar v Verdict\n\tfor _, e := range events {\n\t\tswitch e.Type {\n\t\tcase \"span.outcome_evaluation_end\":\n\t\t\tv.Iterations = e.Iteration + 1\n\t\t\tv.Passed = e.Result == \"satisfied\"\n\t\t\tv.Why = e.Result + \": \" + e.Explanation\n\t\tcase \"session.status_idle\":\n\t\t\tif e.StopReason != \"requires_action\" { // waiting on us is not finished\n\t\t\t\tv.Done = true\n\t\t\t\treturn v\n\t\t\t}\n\t\t}\n\t}\n\treturn v\n}\n```\n\n在本地运行中，一个经过一次修订的序列在两次迭代后被判定为完成且通过；一个 `max_iterations_reached` 的序列被判定为完成但未通过，说明里写着尚未满足的标准。\n\n- **运营方式。** 不要发「继续」：Agent 本来就会一直工作到出现终态结果。只有当评审说明显示方向错了时，才发具体的引导消息。没有达到 `satisfied` 的报告，连同评审说明一起交给人处理，绝不发给商家。\n- **一次只处理一个 outcome。** 只有在前一个 outcome 出现终态结果之后，才串接下一个（比如一封摘要邮件）。`failed` 结果意味着评分标准和描述相互矛盾：要修的是任务定义，而不是 Agent。\n- **交付物与成本。** 通过 Files API 从会话的输出中获取报告，并根据评审事件跟踪每次迭代的评审用量，与会话预算一起看。\n\n**权衡。** 严格的评分标准会让更多报告等人处理；宽松的标准会让质量较差的报告被自动发出去。outcome 适合每个会话一个交付物的场景；一连串的快速问答应该保持普通对话。",
+      "followups": [
+        "How would you version the rubric and compare two versions fairly?",
+        "Two criteria keep failing together. What does that tell you about the rubric?",
+        "Where would a person step in, and how would their fix flow back into the rubric?"
+      ],
+      "followups_zh": [
+        "你会如何给评分标准做版本管理，并公平地比较两个版本？",
+        "有两条标准总是一起不通过。这说明评分标准有什么问题？",
+        "人应该在哪个环节介入？他们的修正又如何反馈到评分标准中？"
+      ],
+      "vocab": [
+        {
+          "en": "outcome",
+          "zh": "结果目标（outcome）"
+        },
+        {
+          "en": "rubric",
+          "zh": "评分标准"
+        },
+        {
+          "en": "grader",
+          "zh": "评审者"
+        },
+        {
+          "en": "iteration limit",
+          "zh": "迭代上限"
+        }
+      ]
+    }
+  ]
+}
