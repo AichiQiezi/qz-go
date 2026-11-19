@@ -1,0 +1,201 @@
+{
+  "id": "daily-2026-11-20",
+  "order": 20261120,
+  "kind": "daily",
+  "title": "Daily set · Nov 20",
+  "title_zh": "每日新题 · 11 月 20 日",
+  "summary": "Five new agent questions: tool results cut without saying so, moving from Vertex AI to Claude Models on Google Cloud (Anthropic managed), retrieval across languages, model comparisons polluted by refusal fallbacks, and erasing a shopper's data from an agent platform.",
+  "summary_zh": "五道新的 Agent 题：被悄悄截断的工具结果、从 Vertex AI 迁移到 Claude Models on Google Cloud（Anthropic managed）、跨语言检索、被拒答回退污染的模型对比，以及从 Agent 平台中删除一位顾客的数据。",
+  "generatedAt": "2026-11-20T06:58:11+08:00",
+  "questions": [
+    {
+      "id": "agent-daily-20261120-1",
+      "topic": "Agent Loop",
+      "difficulty": "Medium",
+      "title": "The finance agent reports last month's revenue from the first 100 orders, because the harness cuts large tool results without saying so",
+      "title_zh": "财务 Agent 只根据前 100 笔订单就报出了上个月的收入，因为框架在不作说明的情况下截断了过大的工具结果",
+      "question": "A merchant asks the finance agent for last month's revenue. Its `list_orders` tool returns every matching order as JSON, and to protect the context window the harness keeps only the first 100 KB of any tool result. For a store with 4,000 orders the agent receives about 600 of them, adds them up, and states a confident total that is far too low. Nothing in the result told the model it was incomplete.\n\nExplain the failure and redesign the tool.",
+      "question_zh": "一位商家向财务 Agent 询问上个月的收入。它的 `list_orders` 工具会以 JSON 返回所有匹配的订单，而为了保护上下文窗口，框架对任何工具结果只保留前 100 KB。对一个有 4,000 笔订单的店铺，Agent 大约只拿到了其中 600 笔，把它们加起来，然后信心十足地报出了一个低得多的总额。结果里没有任何信息告诉模型数据不完整。\n\n解释这个故障，并重新设计这个工具。",
+      "answer": "**The core idea.** The model can only reason about what it sees, and it treats a tool result as the whole answer unless the result says otherwise. Silent truncation turns a size limit into a wrong number. The fix belongs in the tool's contract: return bounded results that say what is missing, and give the model a better tool for the question it is really asking.\n\n- **Page explicitly.** Each call returns at most a fixed number of items plus the total count and a cursor, and says in plain words when the page is partial.\n- **Answer the real question with a narrow tool.** Revenue is an aggregate: a `summarize_orders(date_range, group_by)` tool computes it in your database and returns a few numbers. The cost guide recommends narrow accessors and list tools with `limit`, `fields` and `date_range` parameters over broad data dumps.\n- **For real analysis over large data,** put the export in a file and let code execution compute over it, so only the result enters the context.\n\n```go\ntype Order struct {\n\tID         string `json:\"id\"`\n\tTotalCents int64  `json:\"total_cents\"`\n\tStatus     string `json:\"status\"`\n}\n\n// ordersPage is what the tool returns: one bounded page, with the facts the\n// model needs to know it has not seen everything.\ntype ordersPage struct {\n\tOrders     []Order `json:\"orders\"`\n\tReturned   int     `json:\"returned\"`\n\tTotalMatch int     `json:\"total_matching\"`\n\tNextCursor string  `json:\"next_cursor,omitempty\"`\n\tNote       string  `json:\"note,omitempty\"`\n}\n\nfunc listOrdersTool(all []Order, cursor, limit int) string {\n\tif limit <= 0 || limit > 100 {\n\t\tlimit = 100\n\t}\n\tend := min(cursor+limit, len(all))\n\tp := ordersPage{Orders: all[cursor:end], Returned: end - cursor, TotalMatch: len(all)}\n\tif end < len(all) {\n\t\tp.NextCursor = fmt.Sprint(end)\n\t\tp.Note = fmt.Sprintf(\"partial: %d of %d orders; use summarize_orders for totals or pass next_cursor\", end-cursor, len(all))\n\t}\n\tb, _ := json.Marshal(p)\n\treturn string(b)\n}\n```\n\nIn a local run with 250 orders, a page of 100 came back with `total_matching: 250`, a `next_cursor`, and a note that the page is partial and that totals should come from the summary tool.\n\n- **Keep a backstop, but make it loud.** If a result must still be cut, append a marker saying how much was dropped and how to get the rest, and log it; never cut silently.\n- **Say it in the description.** The tool description should state the page size and point to the summary tool for totals, so the model picks the right tool the first time.\n- **Test the edge.** Add eval cases whose answers need more than one page, and check the agent either pages through or uses the summary tool.\n\n**Trade-offs.** Paging costs more turns when the model really needs every row; summary tools need to be written for each common question. Both are cheaper than a confident wrong number in a finance report.",
+      "answer_zh": "**核心思想。** 模型只能基于它看到的内容推理；除非结果另有说明，它会把工具结果当作完整答案。悄悄截断会把一个大小限制变成一个错误的数字。修复应该落在工具的契约上：返回有界的结果，并说明缺了什么；同时为模型真正想问的问题提供一个更合适的工具。\n\n- **显式分页。** 每次调用最多返回固定数量的条目，外加总数和一个游标；当这一页不完整时，用直白的话说明。\n- **用专门的工具回答真正的问题。** 收入是一个汇总值：一个 `summarize_orders(date_range, group_by)` 工具在你的数据库里算好，只返回几个数字。成本指南建议使用窄而专的访问工具，以及带 `limit`、`fields` 和 `date_range` 参数的列表工具，而不是大范围的数据转储。\n- **对大数据做真正的分析时，** 把导出放进文件，让代码执行在上面计算，这样只有结果进入上下文。\n\n```go\ntype Order struct {\n\tID         string `json:\"id\"`\n\tTotalCents int64  `json:\"total_cents\"`\n\tStatus     string `json:\"status\"`\n}\n\n// ordersPage is what the tool returns: one bounded page, with the facts the\n// model needs to know it has not seen everything.\ntype ordersPage struct {\n\tOrders     []Order `json:\"orders\"`\n\tReturned   int     `json:\"returned\"`\n\tTotalMatch int     `json:\"total_matching\"`\n\tNextCursor string  `json:\"next_cursor,omitempty\"`\n\tNote       string  `json:\"note,omitempty\"`\n}\n\nfunc listOrdersTool(all []Order, cursor, limit int) string {\n\tif limit <= 0 || limit > 100 {\n\t\tlimit = 100\n\t}\n\tend := min(cursor+limit, len(all))\n\tp := ordersPage{Orders: all[cursor:end], Returned: end - cursor, TotalMatch: len(all)}\n\tif end < len(all) {\n\t\tp.NextCursor = fmt.Sprint(end)\n\t\tp.Note = fmt.Sprintf(\"partial: %d of %d orders; use summarize_orders for totals or pass next_cursor\", end-cursor, len(all))\n\t}\n\tb, _ := json.Marshal(p)\n\treturn string(b)\n}\n```\n\n在用 250 笔订单做的本地运行中，返回的一页有 100 条，带有 `total_matching: 250`、一个 `next_cursor`，以及一条说明：这一页不完整，总额应当来自汇总工具。\n\n- **保留兜底，但要明确告知。** 如果结果仍然必须截断，就附上一条标记，说明丢掉了多少、怎样获取剩余部分，并记录日志；绝不悄悄截断。\n- **在描述里写清楚。** 工具描述应该说明每页大小，并指明求总数要用汇总工具，这样模型第一次就会选对工具。\n- **测试边界情况。** 加入需要超过一页数据才能回答的评测用例，检查 Agent 是逐页获取，还是使用了汇总工具。\n\n**权衡。** 当模型确实需要每一行时，分页会多花轮次；汇总工具则需要为每个常见问题单独编写。但两者都比财务报告里一个信心十足的错误数字便宜。",
+      "followups": [
+        "The merchant asks for revenue by country and by product. One tool, or several?",
+        "How would you detect in production that answers were built on partial data?"
+      ],
+      "followups_zh": [
+        "商家想按国家和按商品查看收入。用一个工具，还是几个？",
+        "在生产环境中，你会如何发现答案是基于不完整的数据得出的？"
+      ],
+      "vocab": [
+        {
+          "en": "silent truncation",
+          "zh": "静默截断"
+        },
+        {
+          "en": "pagination cursor",
+          "zh": "分页游标"
+        },
+        {
+          "en": "aggregate tool",
+          "zh": "汇总工具"
+        },
+        {
+          "en": "tool contract",
+          "zh": "工具契约"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261120-2",
+      "topic": "Production",
+      "difficulty": "Medium",
+      "title": "Moving the catalog agent from Vertex AI to Claude Models on Google Cloud (Anthropic managed): model IDs, workspaces, keys and the EU endpoint",
+      "title_zh": "把商品目录 Agent 从 Vertex AI 迁移到 Claude Models on Google Cloud（Anthropic managed）：模型 ID、workspace、key 和欧盟端点",
+      "question": "The catalog agent calls Claude through Vertex AI with the `AnthropicVertex` client in the `europe-west4` region. The team wants Claude API features that Vertex lacks and decides to move to Claude Models on Google Cloud (Anthropic managed), still billed through Google. In the first test, requests fail before they are sent, the old model ID `claude-opus-4-5@20251101` is rejected, an `ANTHROPIC_API_KEY` the team exported has no effect, and batches and uploaded files from their existing Claude Console organization are missing.\n\nExplain each surprise and plan the move.",
+      "question_zh": "商品目录 Agent 通过 Vertex AI 调用 Claude，用的是 `europe-west4` 区域的 `AnthropicVertex` 客户端。团队想用 Vertex 上没有的 Claude API 功能，于是决定迁移到 Claude Models on Google Cloud（Anthropic managed），计费仍然走 Google。第一次测试中：请求在发出之前就失败了；旧模型 ID `claude-opus-4-5@20251101` 被拒绝；团队导出的 `ANTHROPIC_API_KEY` 没有任何作用；他们现有 Claude Console 组织里的批处理任务和上传文件也都找不到了。\n\n解释每个意外，并规划这次迁移。",
+      "answer": "**The core idea.** These are two different products. Vertex AI is operated by Google, with its own endpoints, request format and feature set. Claude Models on Google Cloud (Anthropic managed) is the Claude API operated by Anthropic and reached through a Google Cloud project, with Google credentials, IAM and billing. Moving between them is a client and identity change, not a configuration flag.\n\n- **Requests fail before sending.** The workspace ID is required; without it the client raises an error. In a local test the Go client was created, and the first request failed with \"no workspace ID found\" before anything was sent.\n- **The model ID.** Model IDs are the Claude API's, with no prefix and no `@` date separator; for older dated models, replace the `@` with a hyphen.\n- **No API keys.** Authentication is Google Application Default Credentials, and the identity needs `roles/claude.user`. The clients ignore `ANTHROPIC_API_KEY`, and the Console cannot create keys for this organization.\n- **Missing files and batches.** Setup creates a new Anthropic organization. Workspaces, Console settings, files, skills, batches and Managed Agents resources stay in the old one, and a Zero Data Retention arrangement does not carry over.\n\n```go\n// newGoogleCloud replaces the Vertex AI client. Credentials come from Google\n// Application Default Credentials; ANTHROPIC_API_KEY is ignored on this platform.\nfunc newGoogleCloud(ctx context.Context) (*googlecloud.Client, error) {\n\treturn googlecloud.NewClient(ctx, googlecloud.ClientConfig{\n\t\tProject:     os.Getenv(\"ANTHROPIC_GOOGLE_CLOUD_PROJECT\"),\n\t\tWorkspaceID: os.Getenv(\"ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID\"), // wrkspc_...\n\t\t// Location stays \"global\": Vertex's regional endpoints have no match here.\n\t})\n}\n\nvar describeParams = anthropic.MessageNewParams{\n\tModel:     \"claude-opus-5-5\", // no \"@\" date suffix and no prefix\n\tMaxTokens: 16000,\n}\n```\n\n**The EU question.** Vertex AI's regional endpoints have no match here; the location stays `global`. If the European region was chosen for data-location reasons, settle that before moving. The available control is US-only inference, `inference_geo: \"us\"` on each request, which does not answer an EU requirement.\n\n- **403s** can come from Google: check that the Claude service is enabled on the project and the caller has the right role.\n- **Re-create what lived in the old organization:** upload files again, re-create agents and environments from version-controlled definitions, and re-request any beta access the old organization had.\n- **Roll out by route** behind a flag, compare errors, latency and cost, and keep the Vertex client until the last route has moved.\n\n**Trade-offs.** The move buys Claude API features with Google billing and IAM, but costs a new organization to set up and a loss of regional endpoints. If data must stay in a specific region, that requirement decides, not the feature list.",
+      "answer_zh": "**核心思想。** 这是两个不同的产品。Vertex AI 由 Google 运营，有自己的端点、请求格式和功能集。Claude Models on Google Cloud（Anthropic managed）是由 Anthropic 运营的 Claude API，通过 Google Cloud 项目访问，使用 Google 的凭据、IAM 和计费。在两者之间迁移，要换的是客户端和身份，而不是改一个配置项。\n\n- **请求在发出之前就失败。** workspace ID 是必需的；没有它，客户端会报错。在本地测试中，Go 客户端创建成功，但第一个请求在发出任何内容之前就以「no workspace ID found」失败了。\n- **模型 ID。** 模型 ID 与 Claude API 相同，没有前缀，也没有 `@` 日期分隔符；对于带日期的旧模型，把 `@` 换成连字符。\n- **没有 API key。** 认证用的是 Google 的 Application Default Credentials，调用身份需要 `roles/claude.user`。客户端会忽略 `ANTHROPIC_API_KEY`，Console 也无法为这个组织创建 key。\n- **文件和批处理不见了。** 开通时会创建一个新的 Anthropic 组织。workspace、Console 设置、文件、技能、批处理以及 Managed Agents 资源都留在旧组织里，零数据保留（ZDR）的约定也不会延续过来。\n\n```go\n// newGoogleCloud replaces the Vertex AI client. Credentials come from Google\n// Application Default Credentials; ANTHROPIC_API_KEY is ignored on this platform.\nfunc newGoogleCloud(ctx context.Context) (*googlecloud.Client, error) {\n\treturn googlecloud.NewClient(ctx, googlecloud.ClientConfig{\n\t\tProject:     os.Getenv(\"ANTHROPIC_GOOGLE_CLOUD_PROJECT\"),\n\t\tWorkspaceID: os.Getenv(\"ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID\"), // wrkspc_...\n\t\t// Location stays \"global\": Vertex's regional endpoints have no match here.\n\t})\n}\n\nvar describeParams = anthropic.MessageNewParams{\n\tModel:     \"claude-opus-5-5\", // no \"@\" date suffix and no prefix\n\tMaxTokens: 16000,\n}\n```\n\n**欧盟的问题。** Vertex AI 的区域端点在这里没有对应项；location 保持为 `global`。如果当初选择欧洲区域是出于数据存放位置的原因，迁移前就要把这个问题解决。这里能用的控制只有「仅在美国推理」，即在每个请求上设置 `inference_geo: \"us\"`，它解决不了欧盟的要求。\n\n- **403** 可能来自 Google：检查项目上是否启用了 Claude 服务，以及调用方是否有正确的角色。\n- **重建原本在旧组织里的东西：** 重新上传文件，用版本控制中的定义重新创建 Agent 和环境，并重新申请旧组织拥有的 beta 权限。\n- **按路由逐步上线，** 放在开关后面，比较错误率、延迟和成本；在最后一条路由迁移完之前，保留 Vertex 客户端。\n\n**权衡。** 这次迁移用 Google 的计费和 IAM 换来了 Claude API 的功能，代价是要搭建一个新组织，并失去区域端点。如果数据必须留在特定区域，起决定作用的是这个要求，而不是功能清单。",
+      "followups": [
+        "A teammate's IAM role is revoked, but their Managed Agents session keeps running. Why, and how do you stop it?",
+        "How would you test the new platform without moving production traffic?"
+      ],
+      "followups_zh": [
+        "某位同事的 IAM 角色被撤销了，但他的 Managed Agents 会话还在运行。为什么？如何停止它？",
+        "在不迁移生产流量的情况下，你会如何测试新平台？"
+      ],
+      "vocab": [
+        {
+          "en": "Application Default Credentials",
+          "zh": "应用默认凭据（ADC）"
+        },
+        {
+          "en": "workspace ID",
+          "zh": "workspace ID（工作区标识）"
+        },
+        {
+          "en": "data location",
+          "zh": "数据存放位置"
+        },
+        {
+          "en": "IAM role",
+          "zh": "IAM 角色"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261120-3",
+      "topic": "RAG",
+      "difficulty": "Hard",
+      "title": "German and Japanese merchants get vague answers from the help assistant, although the right article exists in English and in their language",
+      "title_zh": "德国和日本商家从帮助助手那里得到的答案很含糊，尽管英文和他们母语的正确文章都存在",
+      "question": "The help center has about 2,000 English articles and partial translations in German and Japanese. The assistant embeds the merchant's question as written and retrieves the top five chunks from one shared index. English questions do well; German and Japanese questions often retrieve loosely related chunks, the answers are vague, and the citations sometimes point to an outdated German translation of an article whose English version was updated last week.\n\nDiagnose the problem and redesign retrieval for multiple languages.",
+      "question_zh": "帮助中心有大约 2,000 篇英文文章，以及部分德文和日文译文。助手按原文对商家的问题做向量化，然后从一个共享索引中检索前五个片段。英文问题效果很好；德文和日文问题却经常检索到关联不大的片段，答案含糊，引用有时还指向某篇文章过时的德文译文，而它的英文版上周刚更新过。\n\n诊断问题，并为多语言重新设计检索。",
+      "answer": "**The core idea.** Retrieval quality depends on the query and the documents meeting in the same space. A question in one language against documents mostly in another works only as well as the embedding model's cross-language ability, and partial translations add a second problem: the same article can exist in two versions that disagree.\n\n- **Measure per language first.** Build a small labeled set of real merchant questions in each language with the correct article, and compute retrieval hit rate by language. Without it, \"vague answers\" cannot be traced to retrieval or to generation.\n- **Query in two languages.** Translate the question into English with a fast model, retrieve with both the original and the translation, and merge the lists. An article that ranks well in either list surfaces.\n- **One article, one identity.** Index every translation with the canonical article ID and a version or updated date. When a translation is older than the English source, prefer the English chunk or show both, and say the translation may be out of date.\n- **Answer in the merchant's language** with citations that point to the version actually used, so a merchant can see when the source was English.\n\nReciprocal rank fusion is a simple, score-free way to merge the two lists:\n\n```go\n// rrf merges ranked lists of article IDs with reciprocal rank fusion: an article\n// ranked well by either list (original language or English) rises to the top.\nfunc rrf(lists [][]string, k float64, topN int) []string {\n\tscore := map[string]float64{}\n\tfor _, list := range lists {\n\t\tfor rank, id := range list {\n\t\t\tscore[id] += 1 / (k + float64(rank+1))\n\t\t}\n\t}\n\tids := make([]string, 0, len(score))\n\tfor id := range score {\n\t\tids = append(ids, id)\n\t}\n\tsort.Slice(ids, func(i, j int) bool {\n\t\tif score[ids[i]] != score[ids[j]] {\n\t\t\treturn score[ids[i]] > score[ids[j]]\n\t\t}\n\t\treturn ids[i] < ids[j] // deterministic ties\n\t})\n\tif len(ids) > topN {\n\t\tids = ids[:topN]\n\t}\n\treturn ids\n}\n```\n\nIn a local run, the article ranked first in German and second in English came out on top, ahead of articles found by only one query.\n\n- **Keyword search helps here too.** Product names, error codes and setting names often stay in English inside German or Japanese questions; a keyword index catches them where embeddings blur.\n- **Fix the source, not just the search.** Track which translations lag their English source and feed that list to the localization team; retrieval can work around stale content but cannot make it correct.\n\n**Trade-offs.** Translating every query adds latency and a small cost, so do it only for non-English questions; a multilingual embedding model may reduce the need but must be measured on your own labeled set first. Showing English sources to a Japanese merchant is less friendly but more accurate than citing an outdated translation.",
+      "answer_zh": "**核心思想。** 检索质量取决于问题和文档能否在同一个空间里相遇。用一种语言的问题去检索大多是另一种语言的文档，效果只能取决于向量模型的跨语言能力；而部分翻译又带来了第二个问题：同一篇文章可能存在两个互相矛盾的版本。\n\n- **先按语言分别测量。** 为每种语言整理一小组真实的商家问题并标注正确的文章，按语言计算检索命中率。没有这个，就无法判断「含糊的答案」是检索的问题还是生成的问题。\n- **用两种语言检索。** 用一个快速模型把问题翻译成英文，用原文和译文分别检索，再合并两个列表。在任一列表中排名靠前的文章都会浮上来。\n- **一篇文章，一个身份。** 给每个译文都打上规范的文章 ID，以及版本号或更新日期。当译文比英文原文旧时，优先使用英文片段或两者都展示，并说明译文可能已过时。\n- **用商家的语言回答，** 并让引用指向实际使用的版本，这样商家能看出来源是英文的。\n\n倒数排名融合（reciprocal rank fusion）是一种简单、不依赖分数的合并两个列表的方法：\n\n```go\n// rrf merges ranked lists of article IDs with reciprocal rank fusion: an article\n// ranked well by either list (original language or English) rises to the top.\nfunc rrf(lists [][]string, k float64, topN int) []string {\n\tscore := map[string]float64{}\n\tfor _, list := range lists {\n\t\tfor rank, id := range list {\n\t\t\tscore[id] += 1 / (k + float64(rank+1))\n\t\t}\n\t}\n\tids := make([]string, 0, len(score))\n\tfor id := range score {\n\t\tids = append(ids, id)\n\t}\n\tsort.Slice(ids, func(i, j int) bool {\n\t\tif score[ids[i]] != score[ids[j]] {\n\t\t\treturn score[ids[i]] > score[ids[j]]\n\t\t}\n\t\treturn ids[i] < ids[j] // deterministic ties\n\t})\n\tif len(ids) > topN {\n\t\tids = ids[:topN]\n\t}\n\treturn ids\n}\n```\n\n在本地运行中，德文检索排第一、英文检索排第二的那篇文章排在了最前面，领先于只被一次查询找到的文章。\n\n- **关键词检索在这里也有帮助。** 德文或日文问题中，商品名称、错误码和设置项名称往往仍然是英文；在向量模糊的地方，关键词索引能抓住它们。\n- **修正源头，而不只是搜索。** 跟踪哪些译文落后于英文原文，把清单交给本地化团队；检索可以绕开过时的内容，但无法让它变正确。\n\n**权衡。** 翻译每个问题会增加延迟和少量成本，所以只对非英文问题这样做；多语言向量模型也许能减少这种需要，但必须先在你自己的标注集上测过。给日本商家展示英文来源不那么友好，但比引用过时的译文更准确。",
+      "followups": [
+        "How would you choose between a multilingual embedding model and query translation?",
+        "A German term has no English equivalent in the help center. What happens, and what do you do?"
+      ],
+      "followups_zh": [
+        "你会如何在多语言向量模型和问题翻译之间做选择？",
+        "某个德文术语在帮助中心里没有对应的英文说法。会发生什么？你要怎么做？"
+      ],
+      "vocab": [
+        {
+          "en": "cross-language retrieval",
+          "zh": "跨语言检索"
+        },
+        {
+          "en": "reciprocal rank fusion",
+          "zh": "倒数排名融合"
+        },
+        {
+          "en": "canonical article ID",
+          "zh": "规范文章 ID"
+        },
+        {
+          "en": "stale translation",
+          "zh": "过时的译文"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261120-4",
+      "topic": "Evals & Observability",
+      "difficulty": "Hard",
+      "title": "The model comparison says Claude Fable 5.1 beats Claude Opus 5.5 on ad-policy reviews, but some of Fable's answers were written by Claude Opus 4.8",
+      "title_zh": "模型对比结果显示 Claude Fable 5.1 在广告政策审核上胜过 Claude Opus 5.5，但 Fable 的部分答案其实是 Claude Opus 4.8 写的",
+      "question": "The team compares Claude Fable 5.1 and Claude Opus 5.5 for an ad-policy review agent on 300 cases, three repetitions each. The production code enables server-side refusal fallbacks, and the eval calls the production entry point, so fallbacks are on in the eval too. Fable 5.1 wins by a few points. A reviewer notices that some Fable rows mention `claude-opus-4-8` in the response, that the cost per case looks too low, and that the second and third repetitions of some cases never touched Fable at all.\n\nExplain what the eval actually measured and fix it.",
+      "question_zh": "团队用 300 个用例、每个重复三次，比较 Claude Fable 5.1 和 Claude Opus 5.5 在广告政策审核 Agent 上的表现。生产代码开启了服务端的拒答回退（fallbacks），而评测调用的是生产入口，所以评测里也开着回退。Fable 5.1 领先几个百分点。一位审阅者注意到：有些 Fable 的结果行在响应中出现了 `claude-opus-4-8`；每个用例的成本看起来低得不对；还有些用例的第二、第三次重复根本没有用到 Fable。\n\n解释这个评测实际测到了什么，并修复它。",
+      "answer": "**The core idea.** An eval score is only about the model that answered. With fallbacks on, a declined request is re-run on another model inside the same call, so a \"Fable 5.1\" row can be an Opus 4.8 answer. The eval-health guide is blunt: assert on every call that the model that served the request is the one you asked for, because a score served by the wrong model measures nothing.\n\n- **Who answered.** The served-by signal is a `fallback_message` entry in `usage.iterations`, paired with a non-refusal stop reason; the top-level `model` names the model that produced the message. Don't rely on the `fallback` content block alone: sticky-served turns have none.\n- **Why later repetitions skipped Fable.** Once a conversation falls back, later requests with the same content are served directly by the fallback model for about an hour. Repetitions of the same case in quick succession hit that record.\n- **Why the cost looked low.** Top-level `usage` covers only the attempt that produced the returned message; `usage.iterations` is the per-attempt record. Costs computed from the top level miss the declined attempt.\n\n**Record it per row:**\n\n```go\ntype Served struct {\n\tModel       string // the model that produced the returned message\n\tFellBack    bool   // a fallback model ran and its answer was returned\n\tRefused     bool   // the whole chain declined\n\tInputTokens int64  // summed over every attempt, not just the last one\n\tOutputTkns  int64\n}\n\n// servedBy records who actually answered an eval case. Rows where FellBack is\n// true are not a measurement of the requested model.\nfunc servedBy(m *anthropic.BetaMessage) Served {\n\ts := Served{Model: string(m.Model), Refused: m.StopReason == anthropic.BetaStopReasonRefusal}\n\tfor _, it := range m.Usage.Iterations {\n\t\tif it.Type == \"fallback_message\" {\n\t\t\ts.FellBack = !s.Refused\n\t\t}\n\t\ts.InputTokens += it.InputTokens + it.CacheCreationInputTokens + it.CacheReadInputTokens\n\t\ts.OutputTkns += it.OutputTokens\n\t}\n\treturn s\n}\n```\n\nIn a local test with a sample response, a fallback row was recognized as served by Opus 4.8, and summing the iterations gave twice the input tokens of the top-level `usage`.\n\n- **Report two numbers.** Quality of the requested model on the rows it answered, and the refusal rate on the rest, with the categories. A model that declines 8% of ad reviews is a production fact, not noise to hide.\n- **Decide what the eval is for.** To compare models, run without fallbacks and count refusals separately. To measure the production system, keep them and report the served-model mix.\n- **Make repetitions independent** and check the noise floor: with 300 cases, a few points may be within run-to-run variation.\n\n**Trade-offs.** Running without fallbacks tells you about the model but not the product; running with them tells you about the product but blurs the comparison. Most teams need both views, labeled clearly.",
+      "answer_zh": "**核心思想。** 评测分数只反映实际作答的那个模型。开启回退后，被拒的请求会在同一次调用中换另一个模型重跑，所以一行标着「Fable 5.1」的结果，可能是 Opus 4.8 的答案。评测健康指南说得很直接：在每次调用上都要断言实际服务请求的模型就是你要求的那个，因为由错误模型给出的分数什么也说明不了。\n\n- **是谁作答的。** 判断由谁服务的信号，是 `usage.iterations` 中出现 `fallback_message` 条目，并且停止原因不是 refusal；顶层的 `model` 字段写的是产出这条消息的模型。不要只依赖 `fallback` 内容块：粘性路由服务的轮次里没有这个块。\n- **为什么后面的重复没有用到 Fable。** 一个对话一旦回退，之后内容相同的请求会在大约一小时内直接由回退模型服务。同一个用例在短时间内的重复，正好命中了这条记录。\n- **为什么成本看起来偏低。** 顶层的 `usage` 只包含产出返回消息的那次尝试；`usage.iterations` 才是逐次尝试的记录。用顶层数据算出的成本漏掉了被拒的那次尝试。\n\n**逐行记录：**\n\n```go\ntype Served struct {\n\tModel       string // the model that produced the returned message\n\tFellBack    bool   // a fallback model ran and its answer was returned\n\tRefused     bool   // the whole chain declined\n\tInputTokens int64  // summed over every attempt, not just the last one\n\tOutputTkns  int64\n}\n\n// servedBy records who actually answered an eval case. Rows where FellBack is\n// true are not a measurement of the requested model.\nfunc servedBy(m *anthropic.BetaMessage) Served {\n\ts := Served{Model: string(m.Model), Refused: m.StopReason == anthropic.BetaStopReasonRefusal}\n\tfor _, it := range m.Usage.Iterations {\n\t\tif it.Type == \"fallback_message\" {\n\t\t\ts.FellBack = !s.Refused\n\t\t}\n\t\ts.InputTokens += it.InputTokens + it.CacheCreationInputTokens + it.CacheReadInputTokens\n\t\ts.OutputTkns += it.OutputTokens\n\t}\n\treturn s\n}\n```\n\n在用示例响应做的本地测试中，一条回退行被识别为由 Opus 4.8 服务；把各次尝试相加后，输入 token 是顶层 `usage` 的两倍。\n\n- **报告两个数字。** 一个是请求的模型在它作答的那些行上的质量；另一个是其余各行的拒答率，并附上类别。一个拒绝审核 8% 广告的模型，是生产环境中的事实，而不是可以掩盖的噪声。\n- **想清楚评测的目的。** 如果要比较模型，就关闭回退来跑，并单独统计拒答。如果要衡量生产系统，就保留回退，并报告实际服务模型的构成。\n- **让各次重复相互独立，** 并检查噪声下限：在 300 个用例上，几个百分点的差距可能就在不同运行之间的正常波动范围内。\n\n**权衡。** 关闭回退能说明模型本身，却说明不了产品；开启回退能说明产品，却模糊了对比。大多数团队两种视角都需要，并且要清楚标注。",
+      "followups": [
+        "How would you stop sticky routing from affecting repetitions in an eval?",
+        "Which refusal categories would you expect on ad-policy cases, and how would you report them?",
+        "Where else in an eval can the served model differ from the requested one?"
+      ],
+      "followups_zh": [
+        "你会如何避免粘性路由影响评测中的重复运行？",
+        "在广告政策用例上，你预计会出现哪些拒答类别？你会如何报告它们？",
+        "在评测中，还有哪些地方实际服务的模型可能与请求的不同？"
+      ],
+      "vocab": [
+        {
+          "en": "served model",
+          "zh": "实际服务的模型"
+        },
+        {
+          "en": "refusal fallback",
+          "zh": "拒答回退"
+        },
+        {
+          "en": "sticky routing",
+          "zh": "粘性路由"
+        },
+        {
+          "en": "per-attempt usage",
+          "zh": "逐次尝试的用量"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261120-5",
+      "topic": "Safety & Security",
+      "difficulty": "Senior",
+      "title": "A shopper asks to have their data deleted, and it is spread across agent sessions, memory history, uploaded files, traces and eval sets",
+      "title_zh": "一位顾客要求删除自己的数据，而这些数据分散在 Agent 会话、记忆历史、上传文件、追踪数据和评测集里",
+      "question": "A shopper invokes their right to erasure. The support agent on Managed Agents has handled their tickets for a year: their name, address and order details appear in session histories, in notes the agent wrote to a merchant's memory store, in a CSV of order disputes uploaded through the Files API, in OpenTelemetry traces with full content, and in eval cases the team copied from production transcripts. Legal asks the agent team for a plan and a deadline.\n\nDesign the deletion process and the changes that make the next request easier.",
+      "question_zh": "一位顾客行使了被遗忘权。Managed Agents 上的客服 Agent 处理他的工单已经一年了：他的姓名、地址和订单详情出现在会话历史中、Agent 写进商家记忆库的笔记里、通过 Files API 上传的一份订单争议 CSV 中、带完整内容的 OpenTelemetry 追踪数据里，以及团队从生产对话记录中复制出来的评测用例里。法务要求 Agent 团队给出方案和完成期限。\n\n设计删除流程，以及让下一次请求更容易处理的改进。",
+      "answer": "**The core idea.** You can only delete what you can find. The platform gives you delete and redact operations per resource, but no \"everything about this person\" search. The real work is an index of where personal data went, built when the data arrives, plus a design that keeps personal data out of places that cannot be edited.\n\n- **Sessions.** Archiving makes a session read-only and keeps its data; deleting permanently removes the session, its event history, container and checkpoints. Erasure means delete.\n- **Memory stores.** Every change to a memory creates an immutable version. Delete or rewrite the current memory, then redact the historical versions that held the data: redaction clears content and path but keeps who changed what and when, which is what an audit trail needs.\n- **Files.** An uploaded original stays until you delete it; the copy mounted into a session is removed with the session.\n- **Your own systems.** Trace backends, logs, eval datasets and analytics exports are yours to search and purge; the platform cannot do it for you.\n\n**The erasure job,** driven by the footprint your own index recorded:\n\n```go\n// ShopperFootprint is what our own index recorded when the shopper's data\n// reached the platform; the API has no \"find everything about this person\" call.\ntype ShopperFootprint struct {\n\tSessionIDs     []string\n\tMemoryStoreID  string\n\tMemoryVersions []string // memver_... ids whose content held the shopper's data\n\tFileIDs        []string\n}\n\nfunc eraseShopper(ctx context.Context, c anthropic.Client, f ShopperFootprint) error {\n\tvar errs []error\n\tfor _, id := range f.SessionIDs { // deletes events, container and checkpoints\n\t\tif _, err := c.Beta.Sessions.Delete(ctx, id, anthropic.BetaSessionDeleteParams{}); err != nil {\n\t\t\terrs = append(errs, fmt.Errorf(\"session %s: %w\", id, err))\n\t\t}\n\t}\n\tfor _, v := range f.MemoryVersions { // keeps actor and timestamps, clears content and path\n\t\t_, err := c.Beta.MemoryStores.MemoryVersions.Redact(ctx, v,\n\t\t\tanthropic.BetaMemoryStoreMemoryVersionRedactParams{MemoryStoreID: f.MemoryStoreID})\n\t\tif err != nil {\n\t\t\terrs = append(errs, fmt.Errorf(\"memory version %s: %w\", v, err))\n\t\t}\n\t}\n\tfor _, id := range f.FileIDs { // uploaded originals stay until deleted\n\t\tif _, err := c.Files.Delete(ctx, id, anthropic.FileDeleteParams{}); err != nil {\n\t\t\terrs = append(errs, fmt.Errorf(\"file %s: %w\", id, err))\n\t\t}\n\t}\n\treturn errors.Join(errs...) // retry what failed; record what succeeded\n}\n```\n\n- **Build the footprint at write time.** When a session, file or memory write involves a shopper, record the shopper ID against the resource ID in your database.\n- **Keep personal data out of immutable places.** Agent configurations are versioned and have no delete, so never put customer data into a system prompt. Memory notes should hold preferences and IDs, not addresses.\n- **Minimize what goes in.** Tools can return an order ID and a masked address instead of full details when the task does not need them; traces can drop or hash message content.\n- **Prove it.** Log each deletion and redaction with its result, retry failures, and give legal a report per request.\n\n**Trade-offs.** Deleting sessions loses the debugging record for those tickets; redaction keeps the audit trail but not the content. Data minimization makes some agent tasks need an extra lookup, which is the price of being able to answer the next request in days instead of weeks.",
+      "answer_zh": "**核心思想。** 你只能删除你找得到的东西。平台为每类资源提供了删除和脱敏操作，但没有「查找与此人有关的一切」这样的搜索。真正的工作是建立一份个人数据流向的索引（在数据进入时就建立），再加上一套让个人数据远离不可编辑之处的设计。\n\n- **会话。** 归档会让会话变成只读，但数据仍然保留；删除则会永久移除会话及其事件历史、容器和检查点。履行删除义务意味着要删除。\n- **记忆库。** 对记忆的每次修改都会生成一个不可变的版本。先删除或改写当前的记忆，再对存有这些数据的历史版本做脱敏：脱敏会清除内容和路径，但保留谁在何时改了什么，这正是审计记录所需要的。\n- **文件。** 上传的原始文件会一直保留到你删除它；挂载进会话的副本会随会话一起被移除。\n- **你自己的系统。** 追踪后端、日志、评测数据集和分析导出，都需要你自己去搜索和清除；平台无法替你完成。\n\n**删除任务，** 由你自己的索引记录下的数据足迹驱动：\n\n```go\n// ShopperFootprint is what our own index recorded when the shopper's data\n// reached the platform; the API has no \"find everything about this person\" call.\ntype ShopperFootprint struct {\n\tSessionIDs     []string\n\tMemoryStoreID  string\n\tMemoryVersions []string // memver_... ids whose content held the shopper's data\n\tFileIDs        []string\n}\n\nfunc eraseShopper(ctx context.Context, c anthropic.Client, f ShopperFootprint) error {\n\tvar errs []error\n\tfor _, id := range f.SessionIDs { // deletes events, container and checkpoints\n\t\tif _, err := c.Beta.Sessions.Delete(ctx, id, anthropic.BetaSessionDeleteParams{}); err != nil {\n\t\t\terrs = append(errs, fmt.Errorf(\"session %s: %w\", id, err))\n\t\t}\n\t}\n\tfor _, v := range f.MemoryVersions { // keeps actor and timestamps, clears content and path\n\t\t_, err := c.Beta.MemoryStores.MemoryVersions.Redact(ctx, v,\n\t\t\tanthropic.BetaMemoryStoreMemoryVersionRedactParams{MemoryStoreID: f.MemoryStoreID})\n\t\tif err != nil {\n\t\t\terrs = append(errs, fmt.Errorf(\"memory version %s: %w\", v, err))\n\t\t}\n\t}\n\tfor _, id := range f.FileIDs { // uploaded originals stay until deleted\n\t\tif _, err := c.Files.Delete(ctx, id, anthropic.FileDeleteParams{}); err != nil {\n\t\t\terrs = append(errs, fmt.Errorf(\"file %s: %w\", id, err))\n\t\t}\n\t}\n\treturn errors.Join(errs...) // retry what failed; record what succeeded\n}\n```\n\n- **在写入时建立数据足迹。** 每当会话、文件或记忆写入涉及某位顾客时，在你的数据库里把顾客 ID 和资源 ID 关联起来记录。\n- **让个人数据远离不可变的地方。** Agent 配置带有版本且无法删除，所以绝不要把客户数据放进系统提示。记忆笔记应该保存偏好和 ID，而不是地址。\n- **尽量少放进去。** 当任务用不到完整信息时，工具可以只返回订单 ID 和打码后的地址；追踪数据可以丢弃或哈希化消息内容。\n- **留下证明。** 记录每次删除和脱敏的结果，重试失败的操作，并为每个请求给法务一份报告。\n\n**权衡。** 删除会话会丢失这些工单的调试记录；脱敏保留了审计记录，但不保留内容。数据最小化会让一些 Agent 任务多一次查询，这是为了让下一次请求能在几天而不是几周内完成所付出的代价。",
+      "followups": [
+        "The shopper's data appears inside a session that also holds other customers' tickets. What do you do?",
+        "How would you keep eval sets built from production transcripts free of personal data?",
+        "Which of these stores would you check first under a tight deadline, and why?"
+      ],
+      "followups_zh": [
+        "这位顾客的数据出现在一个同时包含其他客户工单的会话中。你怎么办？",
+        "你会如何确保从生产对话记录构建的评测集里没有个人数据？",
+        "在期限很紧的情况下，你会先检查这些存储中的哪一个？为什么？"
+      ],
+      "vocab": [
+        {
+          "en": "right to erasure",
+          "zh": "被遗忘权（删除权）"
+        },
+        {
+          "en": "data footprint",
+          "zh": "数据足迹"
+        },
+        {
+          "en": "redaction",
+          "zh": "脱敏"
+        },
+        {
+          "en": "data minimization",
+          "zh": "数据最小化"
+        }
+      ]
+    }
+  ]
+}

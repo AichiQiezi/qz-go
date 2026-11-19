@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 43 个模块、199 道题。
+共 44 个模块、204 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -593,3 +593,17 @@ Five new agent questions: a webhook endpoint that was silently disabled, promoti
 | 3 | Context & Memory | Hard | [The merchant help chat pays cache write premiums on every turn, and switching everything to the 1-hour TTL made the bill go up](modules/daily-2026-11-19.md#q3) | 商家帮助聊天在每一轮都支付缓存写入溢价，把所有地方改成 1 小时 TTL 后账单反而上涨了 |
 | 4 | Safety & Security | Hard | [One API key shared in a .env file, admin scopes used for everyday tests, and a developer's login copied into a container image: cleaning up credentials for the agent team](modules/daily-2026-11-19.md#q4) | 一个共享在 .env 文件里的 API key、日常测试用的是管理员权限、开发者的登录凭据被复制进了容器镜像：为 Agent 团队清理凭据 |
 | 5 | Multi-agent | Senior | [Weekly feed-health reports built with Managed Agents outcomes: the grader loop never settles, reports marked "done" failed their rubric, and ops keeps typing "keep going"](modules/daily-2026-11-19.md#q5) | 用 Managed Agents outcome 生成每周商品源健康报告：评审循环一直不收敛，标为「完成」的报告其实没通过评分标准，运维还在不停地输入「继续」 |
+
+## [Daily set · Nov 20 · 每日新题 · 11 月 20 日](modules/daily-2026-11-20.md)
+
+Five new agent questions: tool results cut without saying so, moving from Vertex AI to Claude Models on Google Cloud (Anthropic managed), retrieval across languages, model comparisons polluted by refusal fallbacks, and erasing a shopper's data from an agent platform.
+
+> 五道新的 Agent 题：被悄悄截断的工具结果、从 Vertex AI 迁移到 Claude Models on Google Cloud（Anthropic managed）、跨语言检索、被拒答回退污染的模型对比，以及从 Agent 平台中删除一位顾客的数据。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Agent Loop | Medium | [The finance agent reports last month's revenue from the first 100 orders, because the harness cuts large tool results without saying so](modules/daily-2026-11-20.md#q1) | 财务 Agent 只根据前 100 笔订单就报出了上个月的收入，因为框架在不作说明的情况下截断了过大的工具结果 |
+| 2 | Production | Medium | [Moving the catalog agent from Vertex AI to Claude Models on Google Cloud (Anthropic managed): model IDs, workspaces, keys and the EU endpoint](modules/daily-2026-11-20.md#q2) | 把商品目录 Agent 从 Vertex AI 迁移到 Claude Models on Google Cloud（Anthropic managed）：模型 ID、workspace、key 和欧盟端点 |
+| 3 | RAG | Hard | [German and Japanese merchants get vague answers from the help assistant, although the right article exists in English and in their language](modules/daily-2026-11-20.md#q3) | 德国和日本商家从帮助助手那里得到的答案很含糊，尽管英文和他们母语的正确文章都存在 |
+| 4 | Evals & Observability | Hard | [The model comparison says Claude Fable 5.1 beats Claude Opus 5.5 on ad-policy reviews, but some of Fable's answers were written by Claude Opus 4.8](modules/daily-2026-11-20.md#q4) | 模型对比结果显示 Claude Fable 5.1 在广告政策审核上胜过 Claude Opus 5.5，但 Fable 的部分答案其实是 Claude Opus 4.8 写的 |
+| 5 | Safety & Security | Senior | [A shopper asks to have their data deleted, and it is spread across agent sessions, memory history, uploaded files, traces and eval sets](modules/daily-2026-11-20.md#q5) | 一位顾客要求删除自己的数据，而这些数据分散在 Agent 会话、记忆历史、上传文件、追踪数据和评测集里 |
