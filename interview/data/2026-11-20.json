@@ -1,0 +1,193 @@
+{
+  "date": "2026-11-20",
+  "generatedAt": "2026-11-20T06:46:32+08:00",
+  "questions": [
+    {
+      "id": "20261120-1",
+      "topic": "Go",
+      "difficulty": "Medium",
+      "title": "Product IDs sent to Google Merchant Center lose their first letters after a refactor to strings.TrimLeft",
+      "title_zh": "改用 strings.TrimLeft 重构之后，发往 Google Merchant Center 的商品 ID 丢了开头的几个字母",
+      "question": "Internal SKUs carry a store prefix such as `shop_shoes-42`, and the feed exporter strips it before sending IDs to Google Merchant Center. A cleanup replaced a hand-written prefix check with `strings.TrimLeft(sku, \"shop_\")`. Unit tests with `shop_123` still pass, but Google now receives IDs like `es-42` and `at-1`, and some products overwrite each other in the feed.\n\nExplain the bug and fix it.",
+      "question_zh": "内部 SKU 带有店铺前缀，比如 `shop_shoes-42`，商品源导出程序在把 ID 发给 Google Merchant Center 之前会去掉这个前缀。一次代码清理把手写的前缀判断换成了 `strings.TrimLeft(sku, \"shop_\")`。用 `shop_123` 写的单元测试仍然通过，但 Google 现在收到的是 `es-42`、`at-1` 这样的 ID，商品源里还有一些商品互相覆盖了。\n\n解释这个 bug，并修复它。",
+      "answer": "**Why.** `TrimLeft`'s second argument is a cutset: a set of characters, not a string to match. It removes every leading character that appears anywhere in `\"shop_\"`, so after `shop_` it keeps eating `s`, `h`, `o` and `p`. In a local test, `shop_shoes-42` became `es-42`, `shop_hat-1` became `at-1` and `shop_promo` became `romo`, while `shop_123` came out right because digits are not in the set. That is why the tests passed.\n\n**The fix.** Use the functions that match a whole prefix or suffix:\n\n```go\n// TrimLeft treats \"shop_\" as a set of characters, not a prefix.\nstrings.TrimLeft(\"shop_shoes-42\", \"shop_\")   // \"es-42\"\nstrings.TrimPrefix(\"shop_shoes-42\", \"shop_\") // \"shoes-42\"\n\n// When the prefix is required, say so and check it.\nrest, ok := strings.CutPrefix(sku, \"shop_\")\nif !ok {\n\treturn \"\", fmt.Errorf(\"sku %q has no shop_ prefix\", sku)\n}\n```\n\n- `TrimPrefix` removes the prefix once if present and leaves the string unchanged otherwise. `CutPrefix` also tells you whether it was there, which matters when a missing prefix means bad data.\n- The same trap exists at the other end: `TrimRight(\"season.json\", \".json\")` returned `sea` in the test, where `TrimSuffix` returned `season`.\n- `Trim` with a cutset is still right for its real job, such as stripping spaces and quotes around a value.\n\n**Repair the damage.** The feed sent wrong IDs, and Google treats a new ID as a new product, so the old items may linger and the shortened IDs may collide. Re-send with the correct IDs, delete the bad ones, and check that the ID mapping is one-to-one before every export.\n\n**Trade-offs.** Table-driven tests with realistic SKUs, including ones whose next letters overlap the prefix, catch this class of bug; a test set of numeric IDs never will.",
+      "answer_zh": "**原因。** `TrimLeft` 的第二个参数是一个字符集（cutset）：一组字符，而不是要匹配的字符串。它会去掉开头所有出现在 `\"shop_\"` 中的字符，所以在去掉 `shop_` 之后还会继续吃掉 `s`、`h`、`o` 和 `p`。在本地测试中，`shop_shoes-42` 变成了 `es-42`，`shop_hat-1` 变成了 `at-1`，`shop_promo` 变成了 `romo`；而 `shop_123` 结果正确，因为数字不在这个字符集里。这就是测试能通过的原因。\n\n**修复方法。** 使用按整个前缀或后缀匹配的函数：\n\n```go\n// TrimLeft treats \"shop_\" as a set of characters, not a prefix.\nstrings.TrimLeft(\"shop_shoes-42\", \"shop_\")   // \"es-42\"\nstrings.TrimPrefix(\"shop_shoes-42\", \"shop_\") // \"shoes-42\"\n\n// When the prefix is required, say so and check it.\nrest, ok := strings.CutPrefix(sku, \"shop_\")\nif !ok {\n\treturn \"\", fmt.Errorf(\"sku %q has no shop_ prefix\", sku)\n}\n```\n\n- `TrimPrefix` 在前缀存在时去掉一次，否则保持字符串不变。`CutPrefix` 还会告诉你前缀是否存在；当缺少前缀意味着数据有问题时，这一点很重要。\n- 另一端也有同样的陷阱：测试中 `TrimRight(\"season.json\", \".json\")` 返回的是 `sea`，而 `TrimSuffix` 返回的是 `season`。\n- 带字符集的 `Trim` 在它真正的用途上仍然是对的，比如去掉值两边的空格和引号。\n\n**修复造成的损害。** 商品源发出了错误的 ID，而 Google 会把新 ID 当作新商品，所以旧商品可能会残留，被截短的 ID 也可能互相冲突。用正确的 ID 重新发送，删除错误的 ID，并在每次导出前检查 ID 映射是否一一对应。\n\n**权衡。** 用贴近真实的 SKU（包括后续字母与前缀重叠的那些）编写表驱动测试，可以发现这类 bug；只用纯数字 ID 的测试集永远发现不了。",
+      "followups": [
+        "How would you write a test that would have caught this?",
+        "Google already has 20,000 products under the wrong IDs. How do you clean up?"
+      ],
+      "followups_zh": [
+        "你会如何编写一个本可以发现这个问题的测试？",
+        "Google 那边已经有 2 万个商品挂在错误的 ID 下了。你会如何清理？"
+      ],
+      "vocab": [
+        {
+          "en": "cutset",
+          "zh": "字符集（cutset）"
+        },
+        {
+          "en": "prefix",
+          "zh": "前缀"
+        },
+        {
+          "en": "table-driven test",
+          "zh": "表驱动测试"
+        },
+        {
+          "en": "ID collision",
+          "zh": "ID 冲突"
+        }
+      ]
+    },
+    {
+      "id": "20261120-2",
+      "topic": "System Design",
+      "difficulty": "Senior",
+      "title": "Reconciling payment provider settlements against orders for 100,000 stores: fees, refunds, chargebacks and payouts that never match exactly",
+      "title_zh": "为 10 万家店铺把支付服务商的结算与订单对账：手续费、退款、拒付和从不精确吻合的打款",
+      "question": "The platform collects payments for merchants through two payment providers and pays merchants out weekly. Finance reconciles by hand in spreadsheets: provider settlement files, order records and bank payouts rarely line up, because of fees, partial refunds, chargebacks months later, currency conversion and payouts that bundle hundreds of transactions. Some merchants were paid twice for one refund last quarter.\n\nDesign an automated reconciliation system.",
+      "question_zh": "平台通过两家支付服务商为商家收款，每周给商家打款。财务目前在电子表格里手工对账：服务商的结算文件、订单记录和银行打款很少能对上，原因包括手续费、部分退款、几个月后才发生的拒付、币种换算，以及一笔打款打包了几百笔交易。上个季度还有一些商家因为同一笔退款被打了两次款。\n\n设计一个自动化的对账系统。",
+      "answer": "**Three ledgers that must agree.** Your orders say what should have happened, the provider's reports say what it processed, and the bank says what money arrived. Reconciliation matches records across them and explains every difference, rather than trusting any single source.\n\n**Ingest provider data idempotently.** Each money movement the provider reports becomes one row keyed by provider and the provider's own transaction ID, so re-importing a file or a webhook changes nothing:\n\n```sql\n-- One row per money movement the PSP reports, imported idempotently.\nCREATE TABLE psp_transactions (\n  psp            text   NOT NULL,\n  psp_txn_id     text   NOT NULL,\n  kind           text   NOT NULL,   -- charge, refund, fee, chargeback, payout\n  amount_minor   bigint NOT NULL,\n  currency       char(3) NOT NULL,\n  order_id       bigint,            -- null until matched\n  payout_id      text,\n  match_status   text   NOT NULL DEFAULT 'unmatched',\n  PRIMARY KEY (psp, psp_txn_id)\n);\n```\n\n- **Matching:** link each charge and refund to your order or refund record by the reference you sent the provider, then compare amount and currency in minor units. Fees are their own rows, not a difference to explain away.\n- **Payouts:** a payout is the sum of the transactions the provider lists for it. Check that the listed rows add up to the payout amount and that the bank received that amount.\n- **Exceptions, not silence:** anything unmatched after a grace period goes to a queue with a reason, such as missing order, amount mismatch or unknown fee, and an owner.\n- **Late events:** chargebacks and refunds can arrive months later. Merchant balances come from an append-only ledger of entries, so a late chargeback is a new debit, never an edit to a closed week.\n\n**The double refund.** Make the merchant payout depend on ledger entries, each created once per provider transaction ID. A refund recorded both from the admin action and from the provider webhook must resolve to one entry, so the same refund cannot be counted twice.\n\n**Scale and operations.** Partition work by provider and settlement date, and run matching as a daily batch plus near-real-time updates from webhooks. Report the reconciled percentage and the exception backlog by age; finance works the queue instead of the spreadsheet.\n\n**Trade-offs.** Strict matching produces more exceptions for people to clear; loose matching hides real losses. Start strict, then add rules for known patterns such as rounding on currency conversion, each with a tolerance and an audit trail.",
+      "answer_zh": "**三本必须一致的账。** 你的订单说明本应发生什么，服务商的报告说明它处理了什么，银行说明实际到账了多少钱。对账就是在它们之间匹配记录、解释每一处差异，而不是信任其中任何一个单一来源。\n\n**以幂等方式导入服务商数据。** 服务商报告的每一笔资金变动都成为一行，以服务商和服务商自己的交易 ID 作为键，这样重复导入同一个文件或 webhook 不会改变任何东西：\n\n```sql\n-- One row per money movement the PSP reports, imported idempotently.\nCREATE TABLE psp_transactions (\n  psp            text   NOT NULL,\n  psp_txn_id     text   NOT NULL,\n  kind           text   NOT NULL,   -- charge, refund, fee, chargeback, payout\n  amount_minor   bigint NOT NULL,\n  currency       char(3) NOT NULL,\n  order_id       bigint,            -- null until matched\n  payout_id      text,\n  match_status   text   NOT NULL DEFAULT 'unmatched',\n  PRIMARY KEY (psp, psp_txn_id)\n);\n```\n\n- **匹配：** 通过你发给服务商的引用编号，把每笔收款和退款关联到你的订单或退款记录，再以最小货币单位比较金额和币种。手续费是单独的行，而不是一个需要「解释掉」的差额。\n- **打款：** 一笔打款等于服务商为它列出的那些交易之和。检查列出的行加起来是否等于打款金额，以及银行是否收到了这个金额。\n- **列为异常，而不是默默忽略：** 宽限期过后仍未匹配的记录，连同原因（比如缺少订单、金额不符、未知手续费）和负责人一起进入异常队列。\n- **迟到的事件：** 拒付和退款可能在几个月后才到。商家余额来自一本只追加的分录账，所以一笔迟到的拒付是一条新的借记，绝不会修改已经结账的那一周。\n\n**重复的退款。** 让商家打款依赖于账本分录，每个服务商交易 ID 只生成一条分录。从后台操作和服务商 webhook 两处记录下来的同一笔退款，必须归并为一条分录，这样同一笔退款就不会被计算两次。\n\n**规模与运营。** 按服务商和结算日期划分工作，以每日批处理加上来自 webhook 的准实时更新来运行匹配。报告已对账的比例，以及按账龄统计的异常积压；财务处理异常队列，而不是电子表格。\n\n**权衡。** 严格匹配会产生更多需要人工处理的异常；宽松匹配则会掩盖真实的损失。从严格开始，再为已知模式（比如币种换算中的舍入）添加规则，每条规则都要有容差和审计记录。",
+      "followups": [
+        "A provider changes its settlement file format without notice. How does the system notice?",
+        "How would you handle a payout in a currency different from the orders?",
+        "What would you show a merchant who asks why this week's payout is lower?"
+      ],
+      "followups_zh": [
+        "某家服务商在没有通知的情况下改了结算文件格式。系统如何察觉？",
+        "当打款币种与订单币种不同时，你会如何处理？",
+        "商家问为什么这周的打款变少了，你会给他看什么？"
+      ],
+      "vocab": [
+        {
+          "en": "settlement",
+          "zh": "结算"
+        },
+        {
+          "en": "chargeback",
+          "zh": "拒付"
+        },
+        {
+          "en": "payout",
+          "zh": "打款"
+        },
+        {
+          "en": "append-only ledger",
+          "zh": "只追加的账本"
+        }
+      ]
+    },
+    {
+      "id": "20261120-3",
+      "topic": "Database",
+      "difficulty": "Hard",
+      "title": "Filtering products by a weight stored in JSONB returns nothing for 5 to 50 grams, and sorting puts 100 g before 9 g",
+      "title_zh": "按存储在 JSONB 中的重量筛选商品，5 到 50 克的范围什么都查不到，排序时 100 克还排在 9 克前面",
+      "question": "Merchant-defined attributes live in `products.attrs jsonb`. A shipping-rules feature filters with `WHERE attrs->>'weight_g' BETWEEN '5' AND '50'` and sorts with `ORDER BY attrs->>'weight_g'`. The filter returns nothing for a store whose products weigh 9, 20 and 45 grams, sorting gives 100 before 20 before 9, and an attempt to cast to `numeric` crashes on a value written as `12,5`.\n\nExplain the behavior and fix the data model and the query.",
+      "question_zh": "商家自定义的属性存放在 `products.attrs jsonb` 中。一个运费规则功能用 `WHERE attrs->>'weight_g' BETWEEN '5' AND '50'` 筛选，用 `ORDER BY attrs->>'weight_g'` 排序。对一个商品重量分别为 9、20、45 克的店铺，筛选结果为空；排序结果是 100 在 20 前面，20 又在 9 前面；而尝试转换成 `numeric` 时，遇到一个写成 `12,5` 的值就崩溃了。\n\n解释这种行为，并修复数据模型和查询。",
+      "answer": "**Why.** `->>` returns text, so both the comparison and the sort are string comparisons, character by character. In a local test, `ORDER BY attrs->>'weight_g'` gave `100 12,5 20 250 9`, and a text `BETWEEN '5' AND '50'` matched none of 9, 20 and 45, because `'9'` sorts after `'50'` and `'20'` and `'45'` sort before `'5'`. The values were also mixed: some were stored as JSON strings and one as a JSON number, so the data never had a type to begin with.\n\n**Why casting in the query is not enough.** `(attrs->>'weight_g')::numeric` fixes the order but fails the whole query on the first bad value, such as `12,5`. And an expression index is used only when the query uses the same expression: in the test, an index on the `::numeric` expression served a `::numeric` filter, while the same filter written with `::int` did a sequential scan.\n\n**The fix: give the attribute a real type.** Validate and normalize at write time, then keep a typed column for the attributes you filter and sort on:\n\n```sql\n-- A typed column, filled from the JSON on every write; bad values fail the INSERT.\nALTER TABLE products\n  ADD COLUMN weight_g numeric\n  GENERATED ALWAYS AS ((attrs->>'weight_g')::numeric) STORED;\nCREATE INDEX ON products (weight_g);\n\nSELECT id FROM products WHERE weight_g BETWEEN 5 AND 50 ORDER BY weight_g;\n```\n\n- In the test, the generated column sorted `9 20 100 250` and the range query used its index. Inserting `12,5` afterwards failed at write time, which is where bad data should be caught, with a clear message to the merchant.\n- Clean existing data first: find values that do not match a number pattern, fix them with the merchant, or move them aside, before adding the column.\n- Store units explicitly. A weight attribute should say grams; mixing grams and kilograms breaks numeric order just as badly.\n\n**Trade-offs.** Generated columns cost a table rewrite to add and some storage, and only cover attributes the platform chooses. Keep JSONB for the long tail, and promote attributes that drive filters, sorting or money, such as shipping weight.",
+      "answer_zh": "**原因。** `->>` 返回的是文本，所以比较和排序都是逐字符的字符串比较。在本地测试中，`ORDER BY attrs->>'weight_g'` 得到的是 `100 12,5 20 250 9`；而文本形式的 `BETWEEN '5' AND '50'` 对 9、20、45 一个都没匹配上，因为 `'9'` 排在 `'50'` 之后，而 `'20'` 和 `'45'` 排在 `'5'` 之前。这些值的类型也很混杂：有的存成 JSON 字符串，有一个存成 JSON 数字，所以数据从一开始就没有类型。\n\n**为什么只在查询里做类型转换还不够。** `(attrs->>'weight_g')::numeric` 能修正排序，但遇到第一个坏值（比如 `12,5`）就会让整个查询失败。而且表达式索引只有在查询使用相同表达式时才会被用上：在测试中，建在 `::numeric` 表达式上的索引服务了一个 `::numeric` 的筛选，而同样的筛选写成 `::int` 时却做了顺序扫描。\n\n**修复方法：给属性一个真正的类型。** 在写入时校验并规范化，然后为需要筛选和排序的属性保留一个带类型的列：\n\n```sql\n-- A typed column, filled from the JSON on every write; bad values fail the INSERT.\nALTER TABLE products\n  ADD COLUMN weight_g numeric\n  GENERATED ALWAYS AS ((attrs->>'weight_g')::numeric) STORED;\nCREATE INDEX ON products (weight_g);\n\nSELECT id FROM products WHERE weight_g BETWEEN 5 AND 50 ORDER BY weight_g;\n```\n\n- 在测试中，生成列的排序结果是 `9 20 100 250`，范围查询也用上了它的索引。之后再插入 `12,5` 时在写入阶段就失败了，而写入阶段正是应该拦住坏数据的地方，并给商家一个清晰的提示。\n- 先清理现有数据：找出不符合数字格式的值，与商家一起修正，或者把它们挪到一边，然后再添加这个列。\n- 明确存储单位。重量属性应该写明是克；克和千克混在一起，对数值排序的破坏同样严重。\n\n**权衡。** 添加生成列需要重写整张表，还会占用一些存储空间，而且只覆盖平台选定的属性。长尾属性仍用 JSONB，把驱动筛选、排序或涉及金额的属性（比如运费重量）提升为正式列。",
+      "followups": [
+        "Would storing the value as a JSON number instead of a string fix the sort by itself?",
+        "How would you add the generated column to a 50-million-row table without long locks?"
+      ],
+      "followups_zh": [
+        "把值存成 JSON 数字而不是字符串，能单独解决排序问题吗？",
+        "你会如何在一张 5000 万行的表上添加生成列，同时避免长时间锁表？"
+      ],
+      "vocab": [
+        {
+          "en": "text comparison",
+          "zh": "文本比较"
+        },
+        {
+          "en": "generated column",
+          "zh": "生成列"
+        },
+        {
+          "en": "expression index",
+          "zh": "表达式索引"
+        },
+        {
+          "en": "write-time validation",
+          "zh": "写入时校验"
+        }
+      ]
+    },
+    {
+      "id": "20261120-4",
+      "topic": "Middleware",
+      "difficulty": "Medium",
+      "title": "Queue workers blocking on BLPOP share a Redis client with the API, and every API call that touches Redis starts timing out",
+      "title_zh": "阻塞在 BLPOP 上的队列 worker 与 API 共用一个 Redis 客户端，结果所有访问 Redis 的 API 调用都开始超时",
+      "question": "A Go service runs both the storefront API and background sync workers. To save connections, both use one `go-redis` client. The workers loop on `BLPOP jobs:sync 30s`. During a quiet night the queue is empty, and the next morning every API request that checks a Redis rate limiter fails with `redis: connection pool timeout`, although Redis itself shows low CPU and few commands.\n\nExplain the failure and fix it.",
+      "question_zh": "一个 Go 服务同时运行店铺前台 API 和后台同步 worker。为了节省连接，两者共用一个 `go-redis` 客户端。worker 循环执行 `BLPOP jobs:sync 30s`。在一个安静的夜里队列是空的，第二天早上，所有需要检查 Redis 限流器的 API 请求都以 `redis: connection pool timeout` 失败，尽管 Redis 本身 CPU 很低、命令也很少。\n\n解释这个故障，并修复它。",
+      "answer": "**Why.** A blocking command holds its connection for as long as it waits. Each worker blocked on an empty queue takes one connection out of the shared pool for up to 30 seconds, again and again. Once the number of workers reaches the pool size, other commands wait for a free connection until the pool timeout, then fail. Redis is idle because the problem is in the client's pool, not the server.\n\n**Reproduced locally:** with a pool of 4 and four workers blocking on an empty list, a plain `GET` waited 1 second and failed with a pool timeout; the pool stats showed all four connections in use and none idle. With separate clients for the workers and the API, the same `GET` returned at once.\n\n**The fix:**\n\n```go\n// Blocking queue reads get their own client and pool; the API path never shares it.\nqueue := redis.NewClient(&redis.Options{Addr: addr, PoolSize: workers + 2})\napi := redis.NewClient(&redis.Options{\n\tAddr:        addr,\n\tPoolTimeout: 200 * time.Millisecond, // fail fast instead of queueing behind a stall\n})\n```\n\n- **Separate pools by behavior.** Blocking consumers get their own client sized to the number of workers plus a little headroom; the request path gets a client that never waits behind them.\n- **Fail fast on the request path.** A short pool timeout turns a stall into a quick error that the rate limiter can handle, for example by allowing the request and logging, instead of hanging every request.\n- **Watch the pool, not just Redis.** Export pool statistics such as timeouts and idle connections; here they pointed straight at the cause while the server looked healthy.\n\n**Trade-offs.** More clients mean more connections to Redis, which matters with many pods; shorter blocking timeouts free connections sooner but cost more round trips on an idle queue.",
+      "answer_zh": "**原因。** 阻塞命令在等待期间会一直占着它的连接。每个阻塞在空队列上的 worker 都会从共享连接池中拿走一个连接，最长 30 秒，而且反复如此。一旦 worker 数量达到连接池大小，其他命令就只能等待空闲连接，直到超过连接池超时后失败。Redis 很空闲，因为问题出在客户端的连接池，而不在服务端。\n\n**本地复现：** 连接池大小为 4，四个 worker 阻塞在一个空列表上，一个普通的 `GET` 等了 1 秒后以连接池超时失败；连接池统计显示四个连接全被占用，没有空闲的。把 worker 和 API 拆成独立的客户端后，同样的 `GET` 立即返回。\n\n**修复方法：**\n\n```go\n// Blocking queue reads get their own client and pool; the API path never shares it.\nqueue := redis.NewClient(&redis.Options{Addr: addr, PoolSize: workers + 2})\napi := redis.NewClient(&redis.Options{\n\tAddr:        addr,\n\tPoolTimeout: 200 * time.Millisecond, // fail fast instead of queueing behind a stall\n})\n```\n\n- **按行为拆分连接池。** 阻塞式消费者使用自己的客户端，大小等于 worker 数量再加一点余量；请求路径使用一个绝不会排在它们后面等待的客户端。\n- **请求路径要快速失败。** 较短的连接池超时会把卡顿变成一个快速的错误，限流器可以处理它（比如放行请求并记录日志），而不是让每个请求都挂起。\n- **要监控连接池，而不只是 Redis。** 导出连接池统计数据，比如超时次数和空闲连接数；在这个案例中，当服务端看起来一切正常时，正是这些数据直接指向了原因。\n\n**权衡。** 客户端越多，到 Redis 的连接就越多，在 Pod 很多时这一点很重要；更短的阻塞超时能更早释放连接，但在空闲队列上会多花往返次数。",
+      "followups": [
+        "Would raising the pool size alone fix this? What happens when you add workers later?",
+        "Which other Redis commands hold a connection the same way?"
+      ],
+      "followups_zh": [
+        "只调大连接池能解决这个问题吗？以后再增加 worker 时会怎样？",
+        "还有哪些 Redis 命令会以同样的方式占住连接？"
+      ],
+      "vocab": [
+        {
+          "en": "blocking command",
+          "zh": "阻塞命令"
+        },
+        {
+          "en": "connection pool",
+          "zh": "连接池"
+        },
+        {
+          "en": "pool timeout",
+          "zh": "连接池超时"
+        },
+        {
+          "en": "fail fast",
+          "zh": "快速失败"
+        }
+      ]
+    },
+    {
+      "id": "20261120-5",
+      "topic": "Java & CS",
+      "difficulty": "Hard",
+      "title": "After adding a PACKED order status, shipped orders show as packed and delivered ones as shipped: enum ordinals in the database",
+      "title_zh": "新增了一个 PACKED 订单状态后，已发货的订单显示为已打包，已送达的显示为已发货：数据库里存的是枚举序号",
+      "question": "The order service stores `OrderStatus` with JPA's `@Enumerated` and no argument, and sends `status.ordinal()` in events to the analytics pipeline. A developer added `PACKED` between `PAID` and `SHIPPED` because that is where it belongs in the flow. After the deploy, existing shipped orders display as packed, delivered orders display as shipped, and analytics dashboards shift every status by one.\n\nExplain what happened, fix it, and repair the data.",
+      "question_zh": "订单服务用不带参数的 JPA `@Enumerated` 存储 `OrderStatus`，并在发给分析管道的事件里发送 `status.ordinal()`。一位开发者在 `PAID` 和 `SHIPPED` 之间加了 `PACKED`，因为在流程里它就该在那个位置。部署之后，已发货的旧订单显示为已打包，已送达的订单显示为已发货，分析看板上的每个状态也都错位了一格。\n\n解释发生了什么，修复它，并修复数据。",
+      "answer": "**Why.** `@Enumerated` defaults to `EnumType.ORDINAL`, which stores each constant's position in the declaration. Inserting a constant shifts every later position, so the same stored number now means a different status. In a local test, `SHIPPED` was stored as 2; read back with the new enum, 2 was `PACKED`, and the stored `DELIVERED` came back as `SHIPPED`. The analytics events carried the same numbers, so they shifted too.\n\n**Ordinals leak in other places too.** `compareTo` and `EnumSet` order follow declaration order. Code that asks \"is the order at least shipped?\" with `compareTo` silently changes meaning whenever someone reorders constants.\n\n**The fix: store and send a stable code, never the ordinal.**\n\n```java\nenum OrderStatus {\n    PENDING(\"pending\"), PAID(\"paid\"), PACKED(\"packed\"),\n    SHIPPED(\"shipped\"), DELIVERED(\"delivered\");\n\n    private final String code;            // stable, stored and sent on the wire\n    OrderStatus(String code) { this.code = code; }\n    String code() { return code; }\n\n    static OrderStatus fromCode(String c) {\n        for (OrderStatus s : values()) if (s.code.equals(c)) return s;\n        throw new IllegalArgumentException(\"unknown status \" + c);\n    }\n}\n// JPA: @Enumerated(EnumType.STRING), or an AttributeConverter that stores code().\n```\n\n- Storing `name()` with `EnumType.STRING` also survives reordering; in the test, `SHIPPED` read back correctly by name. An explicit code goes further and survives renaming a constant.\n- Express flow rules explicitly, for example a set of allowed transitions, instead of relying on declaration order.\n- Add a test that fails if any constant's stored code changes, so the next developer finds out before production does.\n\n**Repairing the data.** Rows written before the deploy hold old ordinals and rows written after hold new ones, so the deploy time decides how to read each row. Use each row's last-updated timestamp, or the order's own history of status changes, to map old numbers to codes in a migration, and replay the analytics events with the corrected values.\n\n**Trade-offs.** Strings take more space than small integers and need an index-friendly length; that cost is small next to a silent change of meaning across every stored row.",
+      "answer_zh": "**原因。** `@Enumerated` 默认使用 `EnumType.ORDINAL`，存储的是每个常量在声明中的位置。插入一个常量会让它后面所有常量的位置都后移，于是同一个存储的数字现在表示的是另一个状态。在本地测试中，`SHIPPED` 存成了 2；用新枚举读回时，2 变成了 `PACKED`，而存储的 `DELIVERED` 读回来变成了 `SHIPPED`。分析事件里带的也是这些数字，所以同样错位了。\n\n**序号还会在其他地方泄露。** `compareTo` 和 `EnumSet` 的顺序都遵循声明顺序。用 `compareTo` 来判断「订单是否至少已发货」的代码，在有人调整常量顺序时会悄悄改变含义。\n\n**修复方法：存储和发送稳定的编码，绝不使用序号。**\n\n```java\nenum OrderStatus {\n    PENDING(\"pending\"), PAID(\"paid\"), PACKED(\"packed\"),\n    SHIPPED(\"shipped\"), DELIVERED(\"delivered\");\n\n    private final String code;            // stable, stored and sent on the wire\n    OrderStatus(String code) { this.code = code; }\n    String code() { return code; }\n\n    static OrderStatus fromCode(String c) {\n        for (OrderStatus s : values()) if (s.code.equals(c)) return s;\n        throw new IllegalArgumentException(\"unknown status \" + c);\n    }\n}\n// JPA: @Enumerated(EnumType.STRING), or an AttributeConverter that stores code().\n```\n\n- 用 `EnumType.STRING` 存储 `name()` 同样能抵御顺序调整；在测试中，按名称读回的 `SHIPPED` 是正确的。显式编码更进一步，连常量改名都不受影响。\n- 显式表达流转规则，比如一组允许的状态转换，而不是依赖声明顺序。\n- 加一个测试，在任何常量的存储编码发生变化时失败，这样下一位开发者会在生产环境之前发现问题。\n\n**修复数据。** 部署之前写入的行存的是旧序号，部署之后写入的行存的是新序号，所以要根据部署时间来决定如何解读每一行。利用每行的最后更新时间，或者订单自身的状态变更历史，在迁移中把旧数字映射成编码，并用修正后的值重放分析事件。\n\n**权衡。** 字符串比小整数占用更多空间，并且需要控制长度以便建索引；但与所有已存储行的含义悄悄改变相比，这点代价微不足道。",
+      "followups": [
+        "What if some rows were written by the old version after the deploy started, during a rolling update?",
+        "How would you change the stored representation without downtime?"
+      ],
+      "followups_zh": [
+        "如果在滚动更新期间、部署开始之后，仍有一些行是由旧版本写入的，怎么办？",
+        "你会如何在不停机的情况下改变存储格式？"
+      ],
+      "vocab": [
+        {
+          "en": "ordinal",
+          "zh": "序号（ordinal）"
+        },
+        {
+          "en": "stable code",
+          "zh": "稳定编码"
+        },
+        {
+          "en": "data migration",
+          "zh": "数据迁移"
+        },
+        {
+          "en": "rolling update",
+          "zh": "滚动更新"
+        }
+      ]
+    }
+  ]
+}

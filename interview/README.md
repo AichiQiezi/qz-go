@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 39 天、195 道题。
+共 40 天、200 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-20](days/2026-11-20.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Medium | [Product IDs sent to Google Merchant Center lose their first letters after a refactor to strings.TrimLeft](days/2026-11-20.md#q1) | 改用 strings.TrimLeft 重构之后，发往 Google Merchant Center 的商品 ID 丢了开头的几个字母 |
+| 2 | System Design | Senior | [Reconciling payment provider settlements against orders for 100,000 stores: fees, refunds, chargebacks and payouts that never match exactly](days/2026-11-20.md#q2) | 为 10 万家店铺把支付服务商的结算与订单对账：手续费、退款、拒付和从不精确吻合的打款 |
+| 3 | Database | Hard | [Filtering products by a weight stored in JSONB returns nothing for 5 to 50 grams, and sorting puts 100 g before 9 g](days/2026-11-20.md#q3) | 按存储在 JSONB 中的重量筛选商品，5 到 50 克的范围什么都查不到，排序时 100 克还排在 9 克前面 |
+| 4 | Middleware | Medium | [Queue workers blocking on BLPOP share a Redis client with the API, and every API call that touches Redis starts timing out](days/2026-11-20.md#q4) | 阻塞在 BLPOP 上的队列 worker 与 API 共用一个 Redis 客户端，结果所有访问 Redis 的 API 调用都开始超时 |
+| 5 | Java & CS | Hard | [After adding a PACKED order status, shipped orders show as packed and delivered ones as shipped: enum ordinals in the database](days/2026-11-20.md#q5) | 新增了一个 PACKED 订单状态后，已发货的订单显示为已打包，已送达的显示为已发货：数据库里存的是枚举序号 |
 
 ## [2026-11-19](days/2026-11-19.md)
 
