@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 44 个模块、204 道题。
+共 45 个模块、209 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -607,3 +607,17 @@ Five new agent questions: tool results cut without saying so, moving from Vertex
 | 3 | RAG | Hard | [German and Japanese merchants get vague answers from the help assistant, although the right article exists in English and in their language](modules/daily-2026-11-20.md#q3) | 德国和日本商家从帮助助手那里得到的答案很含糊，尽管英文和他们母语的正确文章都存在 |
 | 4 | Evals & Observability | Hard | [The model comparison says Claude Fable 5.1 beats Claude Opus 5.5 on ad-policy reviews, but some of Fable's answers were written by Claude Opus 4.8](modules/daily-2026-11-20.md#q4) | 模型对比结果显示 Claude Fable 5.1 在广告政策审核上胜过 Claude Opus 5.5，但 Fable 的部分答案其实是 Claude Opus 4.8 写的 |
 | 5 | Safety & Security | Senior | [A shopper asks to have their data deleted, and it is spread across agent sessions, memory history, uploaded files, traces and eval sets](modules/daily-2026-11-20.md#q5) | 一位顾客要求删除自己的数据，而这些数据分散在 Agent 会话、记忆历史、上传文件、追踪数据和评测集里 |
+
+## [Daily set · Nov 21 · 每日新题 · 11 月 21 日](modules/daily-2026-11-21.md)
+
+Five new agent questions: a retry that refunded twice, rewriting follow-up questions for retrieval, a GitHub theme agent on Managed Agents behind limited networking, two agents overwriting each other's listing edits, and resuming a multi-day migration across sessions.
+
+> 五道新的 Agent 题：一次导致重复退款的重试、为检索改写追问、在受限网络下运行于 Managed Agents 的 GitHub 主题 Agent、两个 Agent 互相覆盖商品详情的修改，以及跨会话继续一项持续多天的迁移。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Agent Loop | Medium | [The refund agent refunded one order twice: a retry wrapped around the whole loop step re-ran a tool that had already executed](modules/daily-2026-11-21.md#q1) | 退款 Agent 把同一笔订单退了两次：包住整个循环步骤的重试，把一个已经执行过的工具又执行了一遍 |
+| 2 | RAG | Medium | [Follow-up questions such as "and for PayPal?" get vague answers, because the retriever searches for the follow-up text alone](modules/daily-2026-11-21.md#q2) | 像「那 PayPal 呢？」这样的追问得到的回答很含糊，因为检索器只拿追问本身去搜索 |
+| 3 | Tools & MCP | Hard | [A theme-fixing agent on Managed Agents can push branches to a merchant's theme repo but cannot open pull requests, and sessions fail to start after networking was locked down](modules/daily-2026-11-21.md#q3) | Managed Agents 上的主题修复 Agent 能向商家的主题仓库推送分支，却无法创建 Pull Request；收紧网络之后，会话还启动不了了 |
+| 4 | Multi-agent | Hard | [The SEO agent and the compliance agent both edit product listings, and each one keeps undoing the other's changes](modules/daily-2026-11-21.md#q4) | SEO Agent 和合规 Agent 都在修改商品详情，结果互相撤销对方的改动 |
+| 5 | Context & Memory | Senior | [A catalog migration takes the agent three days and many sessions: what to carry between sessions, and how to resume without trusting stale notes](modules/daily-2026-11-21.md#q5) | 一次商品目录迁移要花 Agent 三天、跨很多个会话：会话之间要带上什么，以及如何在不盲信过时笔记的前提下继续 |

@@ -1,0 +1,203 @@
+{
+  "id": "daily-2026-11-21",
+  "order": 20261121,
+  "kind": "daily",
+  "title": "Daily set · Nov 21",
+  "title_zh": "每日新题 · 11 月 21 日",
+  "summary": "Five new agent questions: a retry that refunded twice, rewriting follow-up questions for retrieval, a GitHub theme agent on Managed Agents behind limited networking, two agents overwriting each other's listing edits, and resuming a multi-day migration across sessions.",
+  "summary_zh": "五道新的 Agent 题：一次导致重复退款的重试、为检索改写追问、在受限网络下运行于 Managed Agents 的 GitHub 主题 Agent、两个 Agent 互相覆盖商品详情的修改，以及跨会话继续一项持续多天的迁移。",
+  "generatedAt": "2026-11-21T06:57:31+08:00",
+  "questions": [
+    {
+      "id": "agent-daily-20261121-1",
+      "topic": "Agent Loop",
+      "difficulty": "Medium",
+      "title": "The refund agent refunded one order twice: a retry wrapped around the whole loop step re-ran a tool that had already executed",
+      "title_zh": "退款 Agent 把同一笔订单退了两次：包住整个循环步骤的重试，把一个已经执行过的工具又执行了一遍",
+      "question": "The support agent can call `issue_refund`. Each step of the hand-written Go loop does three things: run the tool calls from the last assistant message, append their results, and call the model again. The team wrapped the whole step in a retry helper. One evening the API returned overload errors for a few minutes; the SDK's own retries ran out, the step failed, and the helper ran it again. Finance found 14 orders refunded twice. In a second case, the payment provider timed out, the tool returned an error, and the model simply called `issue_refund` again.\n\nExplain both duplicates and fix the loop and the tool.",
+      "question_zh": "客服 Agent 可以调用 `issue_refund`。手写的 Go 循环里，每一步做三件事：执行上一条助手消息里的工具调用，追加它们的结果，然后再次调用模型。团队用一个重试辅助函数把整个步骤包了起来。某天晚上，API 连续几分钟返回过载错误；SDK 自己的重试用完了，这一步失败，辅助函数又把它执行了一遍。财务发现有 14 笔订单被退了两次。另一个案例里，支付服务商超时，工具返回了错误，模型干脆又调用了一次 `issue_refund`。\n\n解释这两种重复退款的原因，并修复循环和工具。",
+      "answer": "**The core idea.** A retry is only safe around something that can run twice without harm. Calling the model can run twice; issuing a refund cannot. The bug is that the retry boundary included both.\n\n**Duplicate 1: the retry re-ran executed tools.** The refunds succeeded, then the model request failed. Retrying the step started again from the top, so the same `tool_use` blocks, with the same `tool_use_id`s, were executed a second time. The SDKs already retry overload and other 5xx errors with backoff (two retries by default), so the extra wrapper added nothing for the model call and did harm around the tools.\n\n**The fix: split the step and record what ran.** Retry only the model request. Execute tool calls once, and store each result under its `tool_use_id` before doing anything else, so a crash or a replay finds the result instead of running the call again:\n\n```go\n// Ledger remembers every side-effecting call that already ran,\n// keyed by tool_use_id. It lives outside the retry loop.\ntype Ledger struct{ done map[string]Result }\n\nfunc (l *Ledger) Run(ctx context.Context, c ToolCall, exec func(context.Context, ToolCall) (Result, error)) Result {\n\tif r, ok := l.done[c.ID]; ok {\n\t\treturn r // already executed: never run it again\n\t}\n\tr, err := exec(ctx, c)\n\tif err != nil {\n\t\t// The outcome is unknown, not \"failed\": say so and let a lookup decide.\n\t\tr = Result{Content: \"refund request sent but no confirmation received; call get_refund_status before retrying\", IsError: true}\n\t}\n\tl.done[c.ID] = r\n\treturn r\n}\n```\n\nIn a local run, the same call replayed twice executed once. Keep the ledger in durable storage next to the conversation, not in memory, if the process can restart between the tool call and the next model request.\n\n**Duplicate 2: the model retried a call whose outcome was unknown.** A timeout does not mean the refund failed; the provider may have processed it. The tool returned a plain error, so the model reasonably tried again, with a new `tool_use_id` that no ledger keyed on IDs can catch. Two changes fix it:\n\n- Make the tool idempotent by business key. Derive the payment provider's idempotency key from the order and refund amount, not from the model's call, so a second request for the same refund is recognized as the same one.\n- Tell the model the truth. Return `is_error: true` with \"outcome unknown, check status first\", and give it a `get_refund_status` tool. A clear error message is what lets Claude choose a different approach instead of repeating itself.\n\n**Guard the money path anyway.** Refunds are a side effect worth gating: a per-order check that refuses a second refund beyond the paid amount, and human approval above a threshold, catch the cases the loop design misses.\n\n**Trade-offs.** A durable ledger adds a write per tool call and some code. The SDK's tool runner removes the hand-written loop, but it does not make your tools idempotent; that part is always yours.",
+      "answer_zh": "**核心思想。** 只有能安全执行两次的操作，才能在外面包一层重试。调用模型可以执行两次；发起退款不行。这个 bug 的根源在于重试的范围把两者都包进去了。\n\n**重复 1：重试把已经执行过的工具又跑了一遍。** 退款成功之后，模型请求失败了。重试这一步时又从头开始，于是同样的 `tool_use` 块、同样的 `tool_use_id`，被第二次执行。SDK 本身已经会带退避地重试过载和其他 5xx 错误（默认重试两次），所以多包的这一层对模型调用毫无帮助，对工具却有害。\n\n**修复方法：拆开这一步，并记录执行过的调用。** 只对模型请求做重试。工具调用只执行一次，并且在做任何其他事情之前，先把每个结果按 `tool_use_id` 存下来；这样崩溃恢复或重放时会找到已有结果，而不是再执行一次：\n\n```go\n// Ledger remembers every side-effecting call that already ran,\n// keyed by tool_use_id. It lives outside the retry loop.\ntype Ledger struct{ done map[string]Result }\n\nfunc (l *Ledger) Run(ctx context.Context, c ToolCall, exec func(context.Context, ToolCall) (Result, error)) Result {\n\tif r, ok := l.done[c.ID]; ok {\n\t\treturn r // already executed: never run it again\n\t}\n\tr, err := exec(ctx, c)\n\tif err != nil {\n\t\t// The outcome is unknown, not \"failed\": say so and let a lookup decide.\n\t\tr = Result{Content: \"refund request sent but no confirmation received; call get_refund_status before retrying\", IsError: true}\n\t}\n\tl.done[c.ID] = r\n\treturn r\n}\n```\n\n在本地运行中，同一个调用被重放两次，只执行了一次。如果进程可能在工具调用和下一次模型请求之间重启，就把这个记录和对话一起放在持久化存储里，而不是放在内存里。\n\n**重复 2：模型重试了一个结果未知的调用。** 超时并不意味着退款失败；服务商可能已经处理了。工具返回的是一个普通错误，于是模型合理地又试了一次，而且用的是新的 `tool_use_id`，任何按 ID 记录的表都拦不住。两处改动可以修复它：\n\n- 让工具按业务键实现幂等。用订单和退款金额来生成支付服务商的幂等键，而不是用模型的调用来生成，这样针对同一笔退款的第二次请求会被识别为同一笔。\n- 把真实情况告诉模型。返回 `is_error: true`，内容是「结果未知，请先查询状态」，并给它一个 `get_refund_status` 工具。清楚的错误信息，才能让 Claude 换一种做法，而不是重复自己。\n\n**无论如何都要守住资金链路。** 退款是值得把关的副作用：按订单检查，拒绝超过实付金额的第二次退款，并对超过阈值的退款要求人工审批，可以兜住循环设计漏掉的情况。\n\n**权衡。** 持久化的执行记录让每次工具调用多一次写入，也多一些代码。SDK 的 tool runner 可以省掉手写的循环，但它不会让你的工具变得幂等；这部分永远要你自己负责。",
+      "followups": [
+        "Which of your agent's tools are safe to retry blindly, and how would you mark that in code?",
+        "The process crashes after the refund but before the result is stored. What happens on restart, and how do you close that gap?"
+      ],
+      "followups_zh": [
+        "你的 Agent 的哪些工具可以无脑重试？你会如何在代码里标明这一点？",
+        "进程在退款之后、结果存储之前崩溃了。重启时会发生什么？你会如何堵住这个缺口？"
+      ],
+      "vocab": [
+        {
+          "en": "retry boundary",
+          "zh": "重试边界"
+        },
+        {
+          "en": "side effect",
+          "zh": "副作用"
+        },
+        {
+          "en": "idempotency key",
+          "zh": "幂等键"
+        },
+        {
+          "en": "unknown outcome",
+          "zh": "结果未知"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261121-2",
+      "topic": "RAG",
+      "difficulty": "Medium",
+      "title": "Follow-up questions such as \"and for PayPal?\" get vague answers, because the retriever searches for the follow-up text alone",
+      "title_zh": "像「那 PayPal 呢？」这样的追问得到的回答很含糊，因为检索器只拿追问本身去搜索",
+      "question": "The merchant help chat retrieves help-center articles for every user message and passes the top results to Claude. First questions are answered well. Follow-ups are not: after \"How long do refunds take for card payments?\", the message \"and for PayPal?\" retrieves articles about connecting a PayPal account, and the answer talks about setup instead of refund times.\n\nExplain the failure and design the fix.",
+      "question_zh": "商家帮助聊天会针对每条用户消息检索帮助中心文章，并把排在前面的结果交给 Claude。第一个问题回答得很好，追问却不行：在「银行卡付款的退款要多久？」之后，「那 PayPal 呢？」检索到的是关于绑定 PayPal 账户的文章，回答讲的是设置方法，而不是退款时间。\n\n解释这个问题，并设计修复方案。",
+      "answer": "**The core idea.** The model sees the whole conversation, but the retriever sees only the last message. \"and for PayPal?\" has one useful word, so search returns whatever is most about PayPal. The answer is only as good as the documents it is given, so a good model still answers the wrong question.\n\n**The fix: rewrite the message into a standalone query before searching.** A small, fast model call turns the conversation plus the new message into a query that makes sense on its own:\n\n```text\nConversation so far:\n  user: How long do refunds take for orders paid by card?\n  assistant: Card refunds usually appear within a few business days ...\nNew message: and for PayPal?\n\nRewrite the new message as one standalone search query.\nOutput: refund processing time for orders paid with PayPal\n```\n\n- Use the rewritten query only for retrieval. Answer with the original conversation, so the reply still sounds like part of the chat.\n- Give the rewriter a short window: the last few turns are usually enough, and old topics that leak in make the query drift.\n- Let it return the message unchanged when it already stands alone, and let it return several queries when the user asks two things at once.\n- Ask for structured output so your code gets a clean list of queries rather than a sentence it must parse.\n\n**Cost and latency.** The rewrite adds one model call before retrieval, on the critical path. A cheap model such as Claude Haiku 5.5 at low effort fits this narrow task, and the conversation prefix can be cached. You can skip the rewrite when a quick check says the message has no pronouns, ellipsis or references to earlier turns.\n\n**Alternatives.** Searching with the concatenated last few messages is cheaper but mixes topics. Letting the answering model call a search tool itself also works, because it writes its own queries with the full context, at the cost of an extra turn and less control over what gets retrieved.\n\n**Measure it.** Build an eval set of real multi-turn conversations where the last message depends on earlier ones, and score retrieval (did the right article come back?) separately from the answer. Rewrite bugs show up in the retrieval score first.\n\n**Handle weak results honestly.** When even the rewritten query finds nothing that clears your relevance bar, have the assistant say it could not find the policy and ask what the merchant means, instead of answering from loosely related articles.\n\n**Trade-offs.** A rewriter can also be wrong: it may drop a constraint the user stated earlier or invent one. Log the rewritten query with each answer so you can see which step failed when a reply goes wrong.",
+      "answer_zh": "**核心思想。** 模型能看到整段对话，而检索器只看到最后一条消息。「那 PayPal 呢？」里只有一个有用的词，所以搜索返回的是和 PayPal 最相关的任何东西。回答的质量取决于交给它的文档，所以模型再好，也是在回答错误的问题。\n\n**修复方法：在搜索之前，把消息改写成一个独立的查询。** 用一次小而快的模型调用，把对话加上新消息，转换成一个单独看也说得通的查询：\n\n```text\nConversation so far:\n  user: How long do refunds take for orders paid by card?\n  assistant: Card refunds usually appear within a few business days ...\nNew message: and for PayPal?\n\nRewrite the new message as one standalone search query.\nOutput: refund processing time for orders paid with PayPal\n```\n\n- 改写后的查询只用于检索。回答时仍然使用原始对话，这样回复读起来仍然是聊天的一部分。\n- 给改写步骤一个较短的窗口：通常最近几轮就够了，混进来的旧话题会让查询跑偏。\n- 当消息本身已经独立时，让它原样返回；当用户一次问了两件事时，让它返回多个查询。\n- 要求结构化输出，这样代码拿到的是一个干净的查询列表，而不是一句需要解析的话。\n\n**成本与延迟。** 改写会在检索之前多一次模型调用，而且位于关键路径上。像 Claude Haiku 5.5 这样的低价模型配合低 effort，就适合这种范围很窄的任务，对话前缀也可以缓存。如果一个快速检查发现消息里没有代词、省略或对前文的引用，就可以跳过改写。\n\n**替代方案。** 把最近几条消息拼起来去搜索更便宜，但会把话题混在一起。让负责回答的模型自己调用搜索工具也行，因为它会结合完整上下文自己写查询，代价是多一轮交互，而且对检索什么的控制更少。\n\n**度量它。** 用真实的多轮对话建一个评测集，其中最后一条消息要依赖前文；把检索（正确的文章有没有被找回来？）和回答分开打分。改写的问题会首先体现在检索分数上。\n\n**诚实地处理弱结果。** 如果改写后的查询仍然找不到任何达到相关性门槛的内容，就让助手说明它没有找到相关规定，并询问商家具体指什么，而不是用勉强相关的文章来回答。\n\n**权衡。** 改写步骤本身也会出错：它可能丢掉用户之前说过的限制条件，或者凭空加上一个。把改写后的查询和每个回答一起记录下来，这样回答出错时就能看出是哪一步出了问题。",
+      "followups": [
+        "The user switches topic completely in the middle of the chat. How should the rewriter behave?",
+        "How would you decide between a rewrite step and giving the model a search tool?"
+      ],
+      "followups_zh": [
+        "用户在聊天中途完全换了话题，改写步骤应该怎么处理？",
+        "你会如何在「改写步骤」和「给模型一个搜索工具」之间做选择？"
+      ],
+      "vocab": [
+        {
+          "en": "follow-up question",
+          "zh": "追问"
+        },
+        {
+          "en": "query rewriting",
+          "zh": "查询改写"
+        },
+        {
+          "en": "standalone query",
+          "zh": "独立查询"
+        },
+        {
+          "en": "critical path",
+          "zh": "关键路径"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261121-3",
+      "topic": "Tools & MCP",
+      "difficulty": "Hard",
+      "title": "A theme-fixing agent on Managed Agents can push branches to a merchant's theme repo but cannot open pull requests, and sessions fail to start after networking was locked down",
+      "title_zh": "Managed Agents 上的主题修复 Agent 能向商家的主题仓库推送分支，却无法创建 Pull Request；收紧网络之后，会话还启动不了了",
+      "question": "Merchants on the enterprise plan keep their storefront theme in GitHub. A theme-fixing agent on Managed Agents mounts the merchant's repository, fixes broken Liquid templates and should open a pull request for review. Three problems came up:\n\n- The agent commits and pushes a branch, then says it has no way to create a pull request.\n- After the security team moved the environment from `unrestricted` to `limited` networking, session creation fails with a 400 for some agents, and others fail to install the theme linter.\n- A security reviewer asks whether the agent could read the GitHub token and send it somewhere.\n\nExplain each one and give a working setup.",
+      "question_zh": "企业版商家把店铺主题放在 GitHub 上。Managed Agents 上的主题修复 Agent 会挂载商家的仓库，修复出错的 Liquid 模板，并应当创建一个 Pull Request 供人审核。出现了三个问题：\n\n- Agent 提交并推送了分支，然后说它没有办法创建 Pull Request。\n- 安全团队把环境从 `unrestricted` 网络改成 `limited` 之后，一部分 Agent 的会话创建直接返回 400，另一部分则装不上主题检查工具。\n- 一位安全审核人员问：Agent 能不能读到 GitHub token 并把它发到别处？\n\n逐一解释，并给出一套可行的配置。",
+      "answer": "**The core idea.** A mounted repository and the GitHub API are two different doors with two different keys. The `github_repository` resource gives the agent files and `git`; creating a pull request is a GitHub API action that needs a GitHub tool. Network policy then decides which doors the session may use at all.\n\n**Problem 1: no pull request tool.** The repository resource clones the repo into the container and supports `git pull` and `git push` through its `authorization_token`, which needs `Contents: Read and write` on a fine-grained token to push. That is all it does. To open a pull request, declare the GitHub MCP server on the agent with an `mcp_toolset` entry, and attach a vault holding the MCP credential when the session is created. The flow becomes: edit files, push the branch with `bash`, then call the MCP `create_pull_request` tool. The repo token and the MCP credential are separate, and you need both.\n\n**Problem 2: `limited` networking is deny-by-default.** Two separate rules caused the two failures:\n\n- An agent that declares MCP servers needs `allow_mcp_servers: true`, or each server's host in `allowed_hosts`. Otherwise creating the session fails with a 400 that names the blocked hosts. That was the 400.\n- Installing packages needs `allow_package_managers: true`; listing the registry in `allowed_hosts` is not enough, and declaring `packages` without it is also a 400.\n- Host matching is exact: `example.com` does not match `www.example.com`, and `*.example.com` does not match `example.com` itself. Under `limited`, `allowed_hosts` also limits the web search and web fetch tools, so turn those off if the agent does not need the web.\n\n```json\n{\n  \"networking\": {\n    \"type\": \"limited\",\n    \"allow_package_managers\": true,\n    \"allow_mcp_servers\": true,\n    \"allowed_hosts\": [\"theme-cdn.example.com\"]\n  }\n}\n```\n\nThe session then attaches the repository and the vault:\n\n```json\n{\n  \"vault_ids\": [\"<vault holding the GitHub MCP credential>\"],\n  \"resources\": [{\n    \"type\": \"github_repository\",\n    \"url\": \"https://github.com/acme-themes/store-4411-theme\",\n    \"authorization_token\": \"<fine-grained token: Contents read and write>\",\n    \"checkout\": {\"type\": \"branch\", \"name\": \"main\"}\n  }]\n}\n```\n\n**Problem 3: the token never enters the container.** The repository's `authorization_token` is not placed in the sandbox and is never echoed in API responses. `git` and GitHub REST calls for the attached repository go through an Anthropic-side git proxy that adds the token after the request leaves the sandbox, so code the agent writes cannot read it. The MCP credential lives in the vault, outside the container too. What the agent can do is act with the token's permissions, so keep them narrow: one repository, `Contents` only, and branch protection on `main` so every change goes through review.\n\n**Operational details.** Repositories are fixed for the life of a session; to mount another one, start a new session. You can rotate a repository's token on a running session through the session resources update call. Mounting a repository also loads skills from its root `.claude/skills` directory, so treat a merchant's repo as untrusted input to the agent.\n\n**Trade-offs.** `limited` networking with an explicit host list is more work to maintain than `unrestricted`, but it turns an exfiltration risk into a configuration error you see at session creation.",
+      "answer_zh": "**核心思想。** 挂载的仓库和 GitHub API 是两扇不同的门，用的是两把不同的钥匙。`github_repository` 资源给 Agent 的是文件和 `git`；创建 Pull Request 是一个 GitHub API 操作，需要 GitHub 工具。然后由网络策略决定会话到底能用哪些门。\n\n**问题 1：没有创建 Pull Request 的工具。** 仓库资源会把仓库克隆进容器，并通过它的 `authorization_token` 支持 `git pull` 和 `git push`；要推送，细粒度 token 需要 `Contents: Read and write` 权限。它能做的就这些。要创建 Pull Request，需要在 Agent 上用一个 `mcp_toolset` 条目声明 GitHub MCP 服务器，并在创建会话时挂上一个存有 MCP 凭据的 vault。流程变成：编辑文件，用 `bash` 推送分支，然后调用 MCP 的 `create_pull_request` 工具。仓库 token 和 MCP 凭据是分开的，两者都需要。\n\n**问题 2：`limited` 网络默认全部拒绝。** 两种失败分别由两条不同的规则造成：\n\n- 声明了 MCP 服务器的 Agent，需要设置 `allow_mcp_servers: true`，或者把每个服务器的主机加入 `allowed_hosts`。否则创建会话会返回 400，并列出被拦截的主机。那个 400 就是这么来的。\n- 安装软件包需要 `allow_package_managers: true`；仅仅把包仓库加到 `allowed_hosts` 里是不够的，而没有这个设置却声明了 `packages`，同样会返回 400。\n- 主机匹配是精确的：`example.com` 匹配不了 `www.example.com`，`*.example.com` 也匹配不了 `example.com` 本身。在 `limited` 模式下，`allowed_hosts` 同样会限制 web search 和 web fetch 工具，所以如果 Agent 不需要上网，就把它们关掉。\n\n```json\n{\n  \"networking\": {\n    \"type\": \"limited\",\n    \"allow_package_managers\": true,\n    \"allow_mcp_servers\": true,\n    \"allowed_hosts\": [\"theme-cdn.example.com\"]\n  }\n}\n```\n\n然后在会话上挂载仓库和 vault：\n\n```json\n{\n  \"vault_ids\": [\"<vault holding the GitHub MCP credential>\"],\n  \"resources\": [{\n    \"type\": \"github_repository\",\n    \"url\": \"https://github.com/acme-themes/store-4411-theme\",\n    \"authorization_token\": \"<fine-grained token: Contents read and write>\",\n    \"checkout\": {\"type\": \"branch\", \"name\": \"main\"}\n  }]\n}\n```\n\n**问题 3：token 从不进入容器。** 仓库的 `authorization_token` 不会放进沙箱，也不会出现在任何 API 响应里。针对已挂载仓库的 `git` 和 GitHub REST 调用，会经过 Anthropic 一侧的 git 代理，请求离开沙箱之后才由代理加上 token，所以 Agent 写的代码读不到它。MCP 凭据存在 vault 里，同样在容器之外。Agent 能做的，是以这个 token 的权限去操作，所以权限要收窄：只给一个仓库，只给 `Contents`，并且对 `main` 开启分支保护，让每个改动都经过审核。\n\n**运维细节。** 仓库在会话的整个生命周期内是固定的；要挂载别的仓库，就开一个新会话。可以通过会话资源的更新接口，给运行中的会话轮换仓库 token。挂载仓库还会加载其根目录 `.claude/skills` 下的技能，所以要把商家的仓库当作 Agent 的不可信输入。\n\n**权衡。** 带显式主机列表的 `limited` 网络比 `unrestricted` 更费维护，但它把数据外泄的风险，变成了一个在创建会话时就能看到的配置错误。",
+      "followups": [
+        "The agent should also comment on the merchant's open issues. What changes in the setup?",
+        "How would you stop a malicious skill in a merchant's repository from steering the agent?"
+      ],
+      "followups_zh": [
+        "Agent 还需要在商家的未关闭 issue 下评论。配置需要做哪些改动？",
+        "你会如何防止商家仓库里的恶意技能操纵 Agent？"
+      ],
+      "vocab": [
+        {
+          "en": "pull request",
+          "zh": "拉取请求（Pull Request）"
+        },
+        {
+          "en": "deny-by-default",
+          "zh": "默认拒绝"
+        },
+        {
+          "en": "git proxy",
+          "zh": "git 代理"
+        },
+        {
+          "en": "least privilege",
+          "zh": "最小权限"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261121-4",
+      "topic": "Multi-agent",
+      "difficulty": "Hard",
+      "title": "The SEO agent and the compliance agent both edit product listings, and each one keeps undoing the other's changes",
+      "title_zh": "SEO Agent 和合规 Agent 都在修改商品详情，结果互相撤销对方的改动",
+      "question": "Two agents work on the same catalog. The SEO agent rewrites titles and descriptions for search. The compliance agent removes claims that ad platforms reject, such as \"burns fat fast\". Each reads a listing, edits it and writes the whole listing back. Merchants see titles flip between versions, and rejected claims reappear a day after compliance removed them. Ads get disapproved again.\n\nExplain what is going on and design how the agents should share the catalog.",
+      "question_zh": "两个 Agent 在处理同一个商品目录。SEO Agent 为了搜索效果改写标题和描述。合规 Agent 删除广告平台会拒绝的宣传语，比如「快速燃脂」。两者都是读取商品详情、修改，然后把整条详情写回去。商家看到标题在几个版本之间来回切换，被合规删掉的宣传语一天后又出现了，广告再次被拒。\n\n解释发生了什么，并设计这两个 Agent 应该如何共享商品目录。",
+      "answer": "**The core idea.** This is the classic lost update, with agents as the writers. Each agent writes back a full copy based on what it read earlier, so whichever writes last silently erases the other's work. The agents are not confused; the write path lets stale copies win.\n\n**Fix 1: reject stale writes.** Give every listing a version. A write names the version it was based on, and the store rejects it if the listing has changed since:\n\n```go\n// Update applies a change only if the listing is still at the version the\n// agent read. On conflict the agent must re-read and redo its edit.\nfunc (s *Store) Update(id string, readVersion int64, apply func(*Listing)) (Listing, error) {\n\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\tcur := s.m[id]\n\tif cur.Version != readVersion {\n\t\treturn cur, ErrConflict\n\t}\n\tapply(&cur)\n\tcur.Version++\n\ts.m[id] = cur\n\treturn cur, nil\n}\n```\n\nIn a local run, both agents read version 7; compliance wrote first and created version 8, and the SEO agent's write was rejected instead of restoring the banned claim. The tool returns that conflict to the agent as an error, and the agent re-reads and redoes its edit on the current text. Managed Agents memory stores use the same pattern: an update can carry a `content_sha256` precondition and fails with a 409 on mismatch.\n\n**Fix 2: write changes, not whole copies.** Let tools update fields (`set_title`) instead of replacing the listing. Fewer writes collide, and a conflict on the description no longer touches the title.\n\n**Fix 3: decide who wins before they collide.** Version checks stop silent overwrites, but the SEO agent can still put the claim back on its next pass. The rule has to live outside both prompts:\n\n- Make compliance a gate, not a peer. Every proposed change goes through the compliance check before it is saved, so the SEO agent's output cannot reach the store unchecked.\n- Or use one writer: both agents submit proposals, and a single coordinator, or plain code, merges them in a fixed order and applies the result.\n- Record why each change was made, so the SEO agent sees \"removed: health claim\" and does not treat it as an accident.\n\n**Do not rely on shared context.** In a Managed Agents team, threads share the filesystem but not conversation history, so one agent does not know what the other decided unless it is written down or sent in a message. Durable rules such as banned phrases belong in data both agents read, or in the tool that saves the listing.\n\n**Trade-offs.** Optimistic version checks are cheap when conflicts are rare and cost retries when they are common; if both agents touch the same listings all day, a single writer is simpler. A compliance gate adds latency to every SEO change, which is acceptable for catalog edits that are not interactive.",
+      "answer_zh": "**核心思想。** 这是经典的「更新丢失」问题，只不过写入方换成了 Agent。每个 Agent 都根据自己早先读到的内容写回一份完整副本，所以谁最后写，谁就会悄悄抹掉另一方的工作。Agent 并没有犯糊涂，是写入路径让过时的副本赢了。\n\n**修复 1：拒绝基于过时数据的写入。** 给每条商品详情一个版本号。写入时注明它基于哪个版本，如果详情在那之后已经变了，存储就拒绝这次写入：\n\n```go\n// Update applies a change only if the listing is still at the version the\n// agent read. On conflict the agent must re-read and redo its edit.\nfunc (s *Store) Update(id string, readVersion int64, apply func(*Listing)) (Listing, error) {\n\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\tcur := s.m[id]\n\tif cur.Version != readVersion {\n\t\treturn cur, ErrConflict\n\t}\n\tapply(&cur)\n\tcur.Version++\n\ts.m[id] = cur\n\treturn cur, nil\n}\n```\n\n在本地运行中，两个 Agent 都读到了版本 7；合规 Agent 先写，生成了版本 8，SEO Agent 的写入被拒绝，而没有把被禁的宣传语恢复回去。工具把这个冲突作为错误返回给 Agent，Agent 重新读取，并在当前文本上重做自己的修改。Managed Agents 的 memory store 用的也是同样的模式：更新时可以带上 `content_sha256` 前置条件，不匹配就返回 409。\n\n**修复 2：写入改动，而不是整份副本。** 让工具更新字段（`set_title`），而不是替换整条详情。互相冲突的写入会变少，描述上的冲突也不会再影响到标题。\n\n**修复 3：在冲突之前就决定谁说了算。** 版本检查能阻止悄悄覆盖，但 SEO Agent 在下一轮仍然可能把那句宣传语加回去。规则必须放在两个 Agent 的提示词之外：\n\n- 让合规成为一道关卡，而不是平级的参与者。每个提议的修改在保存之前都要经过合规检查，这样 SEO Agent 的输出就不可能未经检查就写进存储。\n- 或者只保留一个写入方：两个 Agent 都只提交修改建议，由单一的协调者（或者普通代码）按固定顺序合并，再应用结果。\n- 记录每个修改的原因，这样 SEO Agent 能看到「已删除：健康宣称」，不会把它当成意外。\n\n**不要依赖共享上下文。** 在 Managed Agents 的团队里，各线程共享文件系统，但不共享对话历史，所以除非写下来或者通过消息发送，否则一个 Agent 不知道另一个做了什么决定。像禁用语这样长期有效的规则，应当放在两个 Agent 都会读取的数据里，或者放在保存商品详情的工具里。\n\n**权衡。** 冲突很少时，乐观的版本检查成本很低；冲突频繁时，它的代价是大量重试。如果两个 Agent 整天都在改同一批商品，单一写入方会更简单。合规关卡会给每个 SEO 修改增加延迟，但对于非交互的商品目录编辑，这是可以接受的。",
+      "followups": [
+        "A merchant edits the title by hand while an agent is working on it. How does your design treat the merchant's edit?",
+        "How would you detect lost updates that already happened last month?"
+      ],
+      "followups_zh": [
+        "Agent 正在修改标题时，商家手动改了标题。你的设计会如何对待商家的修改？",
+        "你会如何发现上个月已经发生过的更新丢失？"
+      ],
+      "vocab": [
+        {
+          "en": "lost update",
+          "zh": "更新丢失"
+        },
+        {
+          "en": "optimistic concurrency",
+          "zh": "乐观并发控制"
+        },
+        {
+          "en": "single writer",
+          "zh": "单一写入方"
+        },
+        {
+          "en": "precondition",
+          "zh": "前置条件"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261121-5",
+      "topic": "Context & Memory",
+      "difficulty": "Senior",
+      "title": "A catalog migration takes the agent three days and many sessions: what to carry between sessions, and how to resume without trusting stale notes",
+      "title_zh": "一次商品目录迁移要花 Agent 三天、跨很多个会话：会话之间要带上什么，以及如何在不盲信过时笔记的前提下继续",
+      "question": "A merchant is moving 60,000 products from an old platform. The migration agent maps attributes, fixes variants and writes products to the new store in batches. It cannot finish in one session, so each morning a new session starts. Today's session began by re-asking the merchant about size mapping, which they had answered on day one, and it re-imported a batch that had already been written.\n\nDesign how the work carries across sessions, and how a new session should resume.",
+      "question_zh": "一位商家要从旧平台迁移 6 万个商品。迁移 Agent 负责映射属性、修复变体，并分批把商品写入新店铺。它无法在一个会话里完成，所以每天早上都会开一个新会话。今天的会话一开始就又问了商家尺码怎么映射，而这个问题商家在第一天就回答过了；它还重新导入了一个已经写入过的批次。\n\n设计这项工作如何在会话之间延续，以及新会话应该如何继续。",
+      "answer": "**The core idea.** A conversation is a bad place to keep the state of a long job. Inside one session, context editing clears stale tool results and compaction summarizes when the window fills; neither survives into the next session. State that must cross sessions belongs in memory you design on purpose, and the source of truth for progress is the target system, not anyone's notes.\n\n**What to carry.** Separate three kinds of state, because they age differently:\n\n- Decisions and answers from people: size mapping, how to treat products without images, which collections to skip. These rarely change and are expensive to ask again, so they must persist.\n- Progress: the last committed batch and where the next one starts. This changes constantly and must be checked against the store, not just read from a note.\n- Open problems: products that failed and why, so they are retried on purpose rather than forgotten or retried forever.\n\n```go\n// Checkpoint is what a new session needs to resume. It records facts and\n// decisions, not the conversation.\ntype Checkpoint struct {\n\tJob          string            `json:\"job\"`\n\tBatch        int               `json:\"last_committed_batch\"` // batches up to here are written to the target\n\tCursor       string            `json:\"source_cursor\"`        // where the next batch starts\n\tDecisions    map[string]string `json:\"decisions\"`            // e.g. \"size_attr\": \"map EU sizes to US\"\n\tOpenProblems []string          `json:\"open_problems\"`\n}\n```\n\n**Where it lives.** On Managed Agents, a memory store attached at session creation is mounted at `/mnt/memory/<store-name>/` and read with ordinary file tools, and every write creates a version you can audit or roll back. Keep many small files, each memory is limited to 100KB, and split by lifecycle: a read-write store for this migration, a read-only store for the merchant's long-term preferences. Never put credentials there; memories are replayed into every later session that mounts the store.\n\n**How to resume.** Start every session with a fixed routine, not a chat:\n\n- Read the decisions and open problems first, and treat them as settled unless the merchant says otherwise.\n- Verify progress against the new store: count or spot-check the products in the last committed batch before trusting `last_committed_batch`. A note written just before a crash may claim a batch that never finished, or miss one that did.\n- Make each batch idempotent, for example upsert by source SKU, so re-running a batch after a doubtful checkpoint is harmless.\n- Update the checkpoint only after the batch is confirmed written, never before.\n\n**Why not one endless session?** Compaction can keep a single conversation going for a long time, but a summary decides for you what is kept, and the merchant's day-one answer is exactly the kind of detail a summary can drop. Explicit memory makes those facts durable and reviewable by a person.\n\n**Trade-offs.** Verifying progress at the start of each session costs some tool calls, which is cheap next to re-importing thousands of products or asking a merchant the same question twice. Too much memory has its own cost: notes that are never pruned turn into stale instructions, so close out open problems and archive the migration store when the job ends.",
+      "answer_zh": "**核心思想。** 对话不适合保存一项长任务的状态。在一个会话内部，上下文编辑会清除过时的工具结果，压缩会在窗口快满时做总结；但两者都延续不到下一个会话。必须跨会话的状态，应当放在你专门设计的记忆里；而进度的事实来源是目标系统，不是任何人的笔记。\n\n**要带上什么。** 把状态分成三类，因为它们过时的方式不同：\n\n- 人做出的决定和给出的答案：尺码映射、没有图片的商品怎么处理、跳过哪些商品集合。这些很少变化，再问一遍代价很高，所以必须保存下来。\n- 进度：最后一个已提交的批次，以及下一批从哪里开始。它一直在变，必须对照店铺进行核实，不能只从笔记里读。\n- 未解决的问题：哪些商品失败了、为什么失败，这样它们会被有意识地重试，而不是被遗忘，或者无休止地重试。\n\n```go\n// Checkpoint is what a new session needs to resume. It records facts and\n// decisions, not the conversation.\ntype Checkpoint struct {\n\tJob          string            `json:\"job\"`\n\tBatch        int               `json:\"last_committed_batch\"` // batches up to here are written to the target\n\tCursor       string            `json:\"source_cursor\"`        // where the next batch starts\n\tDecisions    map[string]string `json:\"decisions\"`            // e.g. \"size_attr\": \"map EU sizes to US\"\n\tOpenProblems []string          `json:\"open_problems\"`\n}\n```\n\n**放在哪里。** 在 Managed Agents 上，在创建会话时挂载的 memory store 会出现在 `/mnt/memory/<store-name>/`，用普通的文件工具读取；每一次写入都会生成一个可以审计或回滚的版本。保持许多小文件（每条记忆上限 100KB），并按生命周期拆分：这次迁移用一个可读写的存储，商家的长期偏好用一个只读的存储。绝不要在里面放凭据；记忆会被重放到之后每一个挂载这个存储的会话里。\n\n**如何继续。** 每个会话都以一套固定流程开始，而不是从聊天开始：\n\n- 先读取已有的决定和未解决的问题，除非商家另有说法，否则把它们当作已定论。\n- 对照新店铺核实进度：在相信 `last_committed_batch` 之前，先统计或抽查最后一个已提交批次里的商品。崩溃前刚写下的笔记，可能声称完成了一个其实没完成的批次，也可能漏记一个已经完成的批次。\n- 让每个批次都是幂等的，比如按源 SKU 做 upsert，这样在检查点存疑时重跑一个批次也不会有害处。\n- 只有在确认批次已经写入之后才更新检查点，绝不提前更新。\n\n**为什么不用一个永不结束的会话？** 压缩可以让一段对话持续很久，但总结会替你决定保留什么，而商家第一天给出的答案，正是总结可能丢掉的那种细节。显式的记忆让这些事实得以持久保存，也能由人来审阅。\n\n**权衡。** 每个会话开始时核实进度要花一些工具调用，但和重新导入几千个商品、或者把同一个问题问商家两遍相比，这点成本很低。记忆过多也有代价：从不清理的笔记会变成过时的指令，所以任务结束时要把未解决的问题逐一关闭，并把这次迁移用的存储归档。",
+      "followups": [
+        "Two sessions accidentally run the migration at the same time. What breaks, and how do you prevent it?",
+        "The merchant changes the size mapping on day two. How do you apply it to products already migrated?",
+        "Which parts of this design would you keep if the agent ran on your own Messages API loop instead of Managed Agents?"
+      ],
+      "followups_zh": [
+        "两个会话意外地同时在跑这次迁移。会出什么问题？你会如何防止？",
+        "商家在第二天修改了尺码映射。你会如何把它应用到已经迁移过的商品上？",
+        "如果 Agent 运行在你自己的 Messages API 循环上，而不是 Managed Agents 上，这个设计里哪些部分你会保留？"
+      ],
+      "vocab": [
+        {
+          "en": "checkpoint",
+          "zh": "检查点"
+        },
+        {
+          "en": "source of truth",
+          "zh": "事实来源"
+        },
+        {
+          "en": "memory store",
+          "zh": "记忆存储"
+        },
+        {
+          "en": "resume",
+          "zh": "恢复执行"
+        },
+        {
+          "en": "upsert",
+          "zh": "插入或更新（upsert）"
+        }
+      ]
+    }
+  ]
+}
