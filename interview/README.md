@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 40 天、200 道题。
+共 41 天、205 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-21](days/2026-11-21.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Senior | [A range-over-func iterator over the paged orders API panics in production when a caller breaks out of the loop](days/2026-11-21.md#q1) | 一个遍历分页订单 API 的 range-over-func 迭代器，在调用方中途 break 时于线上 panic |
+| 2 | System Design | Medium | [Dynamic customer segments for email marketing: "spent over $200 but no order in 30 days"](days/2026-11-21.md#q2) | 邮件营销的动态客户分群：「消费超过 200 美元，但 30 天没有下单」 |
+| 3 | Database | Hard | [An index on updated_at for the sync job doubles the size of every index on the busy inventory table](days/2026-11-21.md#q3) | 为同步任务在 updated_at 上加了一个索引，繁忙的库存表上所有索引的体积都翻倍了 |
+| 4 | Middleware | Hard | [Redis memory for product hashes quadruples after adding one short description field](days/2026-11-21.md#q4) | 给商品哈希加了一个简短的描述字段之后，Redis 内存翻了四倍 |
+| 5 | Java & CS | Medium | [Order-ID batches built with subList all fail with ConcurrentModificationException after the buffer is cleared](days/2026-11-21.md#q5) | 用 subList 切出来的订单 ID 批次，在缓冲区被清空后全部抛出 ConcurrentModificationException |
 
 ## [2026-11-20](days/2026-11-20.md)
 
