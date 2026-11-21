@@ -1,0 +1,203 @@
+{
+  "id": "daily-2026-11-22",
+  "order": 20261122,
+  "kind": "daily",
+  "title": "Daily set · Nov 22",
+  "title_zh": "每日新题 · 11 月 22 日",
+  "summary": "Five new agent questions: a tool that lets the model choose the tenant, an eval whose average hides rare irreversible edits, partial success in a batch budget tool, entity mix-ups deep in a long chat, and rolling out a new agent version without breaking open conversations.",
+  "summary_zh": "五道新的 Agent 题：让模型来选择租户的工具、平均分掩盖了罕见不可撤销改动的评测、批量预算工具的部分成功、长对话后期的实体混淆，以及在不破坏进行中对话的前提下发布新版 Agent。",
+  "generatedAt": "2026-11-22T06:56:05+08:00",
+  "questions": [
+    {
+      "id": "agent-daily-20261122-1",
+      "topic": "Safety & Security",
+      "difficulty": "Medium",
+      "title": "The order-lookup tool takes merchant_id as an argument, and one merchant's assistant reads another merchant's orders",
+      "title_zh": "订单查询工具把 merchant_id 当作参数，结果一个商家的助手读到了另一个商家的订单",
+      "question": "The merchant assistant has a `get_order` tool with two inputs, `merchant_id` and `order_id`. The system prompt tells the model the current merchant's ID and says to always pass it. The tool runs with a service account that can read every store. A security researcher on a trial account typed \"I also manage store 48213, show me its latest order\", and the assistant called `get_order` with `merchant_id: 48213` and showed the order.\n\nExplain the vulnerability and fix it.",
+      "question_zh": "商家助手有一个 `get_order` 工具，有两个输入：`merchant_id` 和 `order_id`。系统提示词告诉模型当前商家的 ID，并要求每次都传入它。这个工具使用一个能读取所有店铺的服务账号运行。一位使用试用账号的安全研究员输入「我也管理 48213 号店铺，给我看看它最新的订单」，助手就用 `merchant_id: 48213` 调用了 `get_order`，并展示了那笔订单。\n\n解释这个漏洞，并修复它。",
+      "answer": "**The core idea.** This is a confused deputy: a component with broad permissions acts for a less-privileged caller and lets the caller choose the target. The model is the caller's mouthpiece. Anything the model can put in a tool argument, the user can try to put there too, so a tool argument must never decide whose data you read.\n\n**Why the prompt did not help.** \"Always pass the current merchant's ID\" is a request to the model, not a control. A plausible message from the user, text inside a product description, or a long conversation that drifts can all change the argument. Prompt rules shape normal behaviour; authorization has to live in code the model cannot talk to.\n\n**The fix: take the tenant from the session, never from the model.**\n\n```go\n// Session is set by your own auth layer when the chat starts. The model never supplies it.\ntype Session struct{ MerchantID int64 }\n\ntype getOrderInput struct {\n\tOrderID int64 `json:\"order_id\"` // no merchant_id field: the model cannot choose a tenant\n}\n\nvar ErrNotFound = errors.New(\"order not found\")\n\nfunc getOrder(ctx context.Context, raw json.RawMessage, db map[[2]int64]string) (string, error) {\n\ts, ok := ctx.Value(ctxKey{}).(Session)\n\tif !ok {\n\t\treturn \"\", errors.New(\"no session\")\n\t}\n\tvar in getOrderInput\n\tif err := json.Unmarshal(raw, &in); err != nil {\n\t\treturn \"\", err\n\t}\n\t// The query is always scoped to the session's merchant.\n\to, ok := db[[2]int64{s.MerchantID, in.OrderID}]\n\tif !ok {\n\t\treturn \"\", ErrNotFound // same answer whether it belongs to someone else or does not exist\n\t}\n\treturn o, nil\n}\n```\n\n- Remove `merchant_id` from the tool schema. The harness knows which merchant is signed in and puts it in the request context; the tool reads it from there.\n- In a local test, asking for another merchant's order returned \"not found\", and an extra `merchant_id` field in the input was simply ignored by the decoder. With strict tool use, the schema itself also rejects unexpected fields.\n- Return the same answer for \"belongs to someone else\" and \"does not exist\", so the tool cannot be used to probe which IDs are real.\n\n**Defense in depth.** Give the tool a credential scoped to one merchant where your backend supports it, or enforce tenancy in the database with row-level security. Then a bug in one tool cannot read across stores. Log every tool call with the session's merchant and the IDs it touched, and alert on lookups that return \"not found\" in bursts.\n\n**Trade-offs.** Some legitimate users do manage several stores. Support that through your own account model: the session holds the list of stores this user may access, and switching store is an explicit action in your UI, not a sentence in the chat.",
+      "answer_zh": "**核心思想。** 这是一个「困惑的代理人」（confused deputy）问题：一个拥有宽泛权限的组件代表一个权限较低的调用方行事，却让调用方来选择操作对象。模型是调用方的传声筒。模型能放进工具参数的任何东西，用户也都可以尝试放进去，所以绝不能由工具参数来决定读取谁的数据。\n\n**为什么提示词没有用。** 「每次都传当前商家的 ID」是对模型的请求，而不是一种控制手段。用户一条说得通的消息、商品描述里的一段文字，或者一段越聊越偏的长对话，都可能改变这个参数。提示词规则塑造的是正常行为；授权必须放在模型无法与之对话的代码里。\n\n**修复方法：从会话中获取租户，绝不从模型那里获取。**\n\n```go\n// Session is set by your own auth layer when the chat starts. The model never supplies it.\ntype Session struct{ MerchantID int64 }\n\ntype getOrderInput struct {\n\tOrderID int64 `json:\"order_id\"` // no merchant_id field: the model cannot choose a tenant\n}\n\nvar ErrNotFound = errors.New(\"order not found\")\n\nfunc getOrder(ctx context.Context, raw json.RawMessage, db map[[2]int64]string) (string, error) {\n\ts, ok := ctx.Value(ctxKey{}).(Session)\n\tif !ok {\n\t\treturn \"\", errors.New(\"no session\")\n\t}\n\tvar in getOrderInput\n\tif err := json.Unmarshal(raw, &in); err != nil {\n\t\treturn \"\", err\n\t}\n\t// The query is always scoped to the session's merchant.\n\to, ok := db[[2]int64{s.MerchantID, in.OrderID}]\n\tif !ok {\n\t\treturn \"\", ErrNotFound // same answer whether it belongs to someone else or does not exist\n\t}\n\treturn o, nil\n}\n```\n\n- 从工具 schema 中删掉 `merchant_id`。框架知道当前登录的是哪个商家，并把它放进请求上下文；工具从那里读取。\n- 在本地测试中，请求另一个商家的订单返回了「未找到」，输入里多出来的 `merchant_id` 字段也直接被解码器忽略了。启用严格工具调用后，schema 本身也会拒绝多余的字段。\n- 对于「属于别人」和「不存在」返回相同的结果，这样这个工具就不能被用来探测哪些 ID 是真实存在的。\n\n**纵深防御。** 如果后端支持，就给工具一个只限于单个商家的凭据，或者在数据库里用行级安全来强制租户隔离。这样即使某个工具有 bug，也无法跨店铺读取数据。记录每一次工具调用，带上会话所属的商家和它访问的 ID，并在「未找到」集中爆发时告警。\n\n**权衡。** 确实有正当用户管理着多家店铺。要通过你自己的账户体系来支持：会话里保存这个用户有权访问的店铺列表，切换店铺是 UI 里的一个显式操作，而不是聊天里的一句话。",
+      "followups": [
+        "Which other tool arguments in your agent decide whose data or money is touched?",
+        "How would you test for this class of bug before release?"
+      ],
+      "followups_zh": [
+        "你的 Agent 里还有哪些工具参数会决定动的是谁的数据或钱？",
+        "你会如何在发布前测试出这一类 bug？"
+      ],
+      "vocab": [
+        {
+          "en": "confused deputy",
+          "zh": "困惑的代理人（confused deputy）"
+        },
+        {
+          "en": "tenant isolation",
+          "zh": "租户隔离"
+        },
+        {
+          "en": "authorization",
+          "zh": "授权"
+        },
+        {
+          "en": "defense in depth",
+          "zh": "纵深防御"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261122-2",
+      "topic": "Evals & Observability",
+      "difficulty": "Medium",
+      "title": "The bulk-edit agent passes 97% of the eval, and two of 300 runs changed products the merchant never selected",
+      "title_zh": "批量编辑 Agent 的评测通过率是 97%，但 300 次运行里有两次改动了商家根本没选中的商品",
+      "question": "The bulk-edit agent applies requests such as \"raise prices 10% on the summer collection\". The eval has 100 cases run 3 times each, and an LLM judge reads each transcript and the agent's final message. The headline is 97%, and the team wants to ship. Reading transcripts by hand, an engineer finds two runs that also changed products outside the selected collection. The judge passed both, because the final summary only mentioned the requested products.\n\nWhat is wrong with this eval, and how should it measure this risk?",
+      "question_zh": "批量编辑 Agent 负责执行类似「把夏季系列的价格提高 10%」这样的请求。评测有 100 个用例，每个运行 3 次，由一个 LLM 评审读取每份对话记录和 Agent 的最终消息。总分是 97%，团队想要上线。一位工程师手动阅读对话记录时，发现有两次运行还改动了所选系列之外的商品。评审让这两次都通过了，因为最终总结里只提到了被要求修改的商品。\n\n这个评测有什么问题？它应该如何度量这类风险？",
+      "answer": "**The core idea.** A single average answers \"how good is it usually?\" The question that matters for bulk edits is \"how often does it do something irreversible that nobody asked for?\" A mean over mostly easy cases hides a rare, costly failure, and a judge that reads the narration cannot see what the agent did not mention.\n\n**Fix 1: grade the end state, not the transcript.** Run every case in a disposable copy of the store, then compare what changed with what was asked. For agents that act on an environment, the environment is the answer:\n\n```go\n// offLimits reports products changed outside the merchant's selection.\nfunc offLimits(r Run) []int64 {\n\tvar bad []int64\n\tfor _, id := range r.Touched {\n\t\tif !r.Selected[id] {\n\t\t\tbad = append(bad, id)\n\t\t}\n\t}\n\treturn bad\n}\n```\n\n- Score correctness and safety as separate metrics. A run can change the right products correctly and still touch one it should not; one blended score lets the first fact hide the second.\n- Aggregate the safety metric as fail-on-any. For irreversible actions, the number to report is \"runs with off-limits changes\", and the release bar is zero, not an average.\n- Keep the judge for what a check cannot see, such as whether the summary is clear, and tell it to treat the transcript as untrusted data.\n\n**Fix 2: give rare failures a chance to show up.** Two failures in 300 runs is a rate the eval can barely see. Add cases built to tempt the failure: collections with overlapping tags, products whose names contain the collection name, and selections defined by filters that are easy to misread. Run more reps on those cases, and keep every trajectory so each failure can be traced.\n\n**Fix 3: check the harness on known-bad output.** Before trusting any grader, feed it a run that changed an extra product and confirm it fails. Here the judge would have passed it, which is how the gap stayed hidden.\n\n**Report it honestly.** Show the two metrics side by side with counts: correct in 291 of 300 runs, off-limits changes in 2 of 300. And remember what zero means: if a fixed eval later shows no off-limits changes in 300 runs, the rule of three still allows a true rate of up to about 1 in 100 at 95% confidence. Zero in a small sample is encouraging, not proof.\n\n**In production too.** The same end-state check belongs in the product: compute the set of products a bulk edit will touch before applying it, show it to the merchant, and refuse any write outside that set. The eval then measures how often the agent proposes a wrong set, not how often you got lucky.",
+      "answer_zh": "**核心思想。** 单一的平均分回答的是「它通常表现得有多好？」而对批量编辑来说，真正重要的问题是「它多久会做一次没人要求、而且无法撤销的事情？」在大部分是简单用例的情况下取平均，会把罕见但代价很高的失败藏起来；而一个只读叙述的评审，看不到 Agent 没有提到的事情。\n\n**修复 1：按最终状态评分，而不是按对话记录。** 每个用例都在店铺的一次性副本里运行，然后把实际改动和要求的改动进行对比。对于会作用于环境的 Agent，环境本身就是答案：\n\n```go\n// offLimits reports products changed outside the merchant's selection.\nfunc offLimits(r Run) []int64 {\n\tvar bad []int64\n\tfor _, id := range r.Touched {\n\t\tif !r.Selected[id] {\n\t\t\tbad = append(bad, id)\n\t\t}\n\t}\n\treturn bad\n}\n```\n\n- 把正确性和安全性作为两个独立的指标来评分。一次运行可以正确地改对商品，同时还碰了不该碰的商品；混成一个分数，前一个事实就会掩盖后一个。\n- 安全指标按「任何一次失败即失败」来汇总。对于不可撤销的操作，要报告的数字是「出现越界改动的运行次数」，上线门槛是零，而不是一个平均值。\n- 评审只用于检查无法覆盖的方面，比如总结是否清楚，并告诉它把对话记录当作不可信的数据。\n\n**修复 2：给罕见的失败一个暴露的机会。** 300 次运行里出现两次，这是评测几乎看不见的频率。加入专门诱发这种失败的用例：标签有重叠的商品系列、名称里包含系列名称的商品，以及用容易被误读的筛选条件定义的选择范围。对这些用例多跑几轮，并保存每一条执行轨迹，以便追查每一次失败。\n\n**修复 3：用已知错误的输出检验评测框架。** 在信任任何评分器之前，先喂给它一次多改了一个商品的运行，确认它会判为失败。在这个例子里，评审会让它通过，这正是漏洞一直没被发现的原因。\n\n**如实报告。** 把两个指标并排展示，并附上计数：300 次运行中 291 次正确，300 次中有 2 次越界改动。还要记住零意味着什么：如果修好后的评测在 300 次运行中没有出现越界改动，按「三法则」（rule of three），在 95% 置信度下真实发生率仍可能高达约百分之一。小样本里的零令人鼓舞，但不是证明。\n\n**在生产环境中也一样。** 同样的最终状态检查也应该放进产品里：在应用批量编辑之前，先算出它会改动哪些商品，展示给商家看，并拒绝这个集合之外的任何写入。这样评测衡量的是 Agent 多久会提出一个错误的集合，而不是你有多走运。",
+      "followups": [
+        "How many runs would you need before \"zero off-limits changes\" means something?",
+        "The judge and the end-state check disagree on a case. Which do you trust, and what do you do next?"
+      ],
+      "followups_zh": [
+        "需要多少次运行，「零越界改动」才有意义？",
+        "评审和最终状态检查在某个用例上结论不一致。你相信哪个？下一步怎么做？"
+      ],
+      "vocab": [
+        {
+          "en": "end-state grading",
+          "zh": "按最终状态评分"
+        },
+        {
+          "en": "fail-on-any",
+          "zh": "任何一次失败即失败"
+        },
+        {
+          "en": "irreversible action",
+          "zh": "不可撤销的操作"
+        },
+        {
+          "en": "known-bad output",
+          "zh": "已知错误的输出"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261122-3",
+      "topic": "Tools & MCP",
+      "difficulty": "Hard",
+      "title": "A batch tool updates 200 Meta ad sets and 37 fail: the agent reports total failure, retries everything, and doubles some budgets",
+      "title_zh": "一个批量工具更新 200 个 Meta 广告组，其中 37 个失败：Agent 报告全部失败，把所有广告组重试一遍，结果有些预算被翻倍了",
+      "question": "The ad-ops agent has an `update_ad_set_budgets` tool that takes a list of ad sets and budget changes such as \"+20%\". When any item fails, the tool returns `is_error: true` with the first error message. In one run, 163 of 200 updates succeeded, 37 failed on rate limits and a minimum-budget rule, and the agent, seeing an error, called the tool again with all 200. The 163 that had already been raised were raised again.\n\nRedesign the tool's inputs and results.",
+      "question_zh": "广告运营 Agent 有一个 `update_ad_set_budgets` 工具，接收一组广告组和预算调整，比如「+20%」。只要有任何一项失败，工具就返回 `is_error: true` 和第一条错误信息。在一次运行中，200 项更新里有 163 项成功，37 项因为限流和最低预算规则失败；Agent 看到错误后，又带着全部 200 项调用了一次工具。已经提高过的那 163 个又被提高了一次。\n\n重新设计这个工具的输入和结果。",
+      "answer": "**The core idea.** A batch is many operations, and the model needs to know the outcome of each one. A single error flag forces it to guess, and with relative changes like \"+20%\" a wrong guess is not just a wasted call: replaying it changes the result.\n\n**Fix 1: make each item safe to repeat.** Accept absolute targets, not relative changes: `daily_budget_minor: 12000`, computed once from the value read before the change. Setting a budget to 120.00 twice leaves it at 120.00. Add a client token per item when the platform supports one, and record applied items in your own store so a repeat is recognized.\n\n**Fix 2: return per-item outcomes the model can act on.**\n\n```go\ntype ItemResult struct {\n\tAdSetID string `json:\"ad_set_id\"`\n\tStatus  string `json:\"status\"` // \"updated\", \"failed\", \"unknown\"\n\tError   string `json:\"error,omitempty\"`\n\tRetry   bool   `json:\"retryable,omitempty\"`\n}\n\ntype BatchResult struct {\n\tUpdated int          `json:\"updated\"`\n\tFailed  int          `json:\"failed\"`\n\tUnknown int          `json:\"unknown\"`\n\tItems   []ItemResult `json:\"items\"` // failed and unknown items only, to keep results small\n\tNext    string       `json:\"next_step\"`\n}\n```\n\n- Separate three outcomes: updated, failed with a reason, and unknown. \"Unknown\" covers a timeout after the request was sent; the change may have happened, so the next step is to read the current state, not to retry.\n- Mark which failures are retryable. A rate limit is; a budget below the platform minimum is not, and retrying it only burns quota.\n- List only failed and unknown items, plus counts, so a 2,000-item batch does not flood the context with successes.\n- Say what to do next in plain words in the result. Claude uses informative error messages to choose a different approach, and a concrete next step is the most useful message of all.\n\n**When is it an error?** Set `is_error: true` when the call as a whole failed: bad input, no permission, nothing applied. A partial success is a successful call with a mixed result; flagging it as an error tells the model that nothing happened, which is exactly the wrong belief here.\n\n**Guard the money in code.** Cap the change per ad set per day in the tool itself, and require approval above a threshold. These limits do not depend on the model reading the result correctly.\n\n**Trade-offs.** Absolute targets need a read before the write, and a merchant's own edit between the read and the write can be overwritten; compare the current value with the one you read and skip the item if it changed. Per-item results make the tool more complex, but they turn a guessing game into a plan the model can follow.",
+      "answer_zh": "**核心思想。** 一个批量操作就是许多个操作，模型需要知道每一个的结果。只有一个错误标志，就逼着它去猜；而对于「+20%」这种相对改动，猜错不只是白调用一次：重放会改变结果。\n\n**修复 1：让每一项都可以安全重复。** 接受绝对目标值，而不是相对改动：`daily_budget_minor: 12000`，在改动前读取一次原值并据此算出。把预算设成 120.00 两次，结果仍然是 120.00。如果平台支持，给每一项加一个客户端令牌；同时在自己的存储里记录已应用的项，让重复请求能被识别出来。\n\n**修复 2：返回模型可以据此行动的逐项结果。**\n\n```go\ntype ItemResult struct {\n\tAdSetID string `json:\"ad_set_id\"`\n\tStatus  string `json:\"status\"` // \"updated\", \"failed\", \"unknown\"\n\tError   string `json:\"error,omitempty\"`\n\tRetry   bool   `json:\"retryable,omitempty\"`\n}\n\ntype BatchResult struct {\n\tUpdated int          `json:\"updated\"`\n\tFailed  int          `json:\"failed\"`\n\tUnknown int          `json:\"unknown\"`\n\tItems   []ItemResult `json:\"items\"` // failed and unknown items only, to keep results small\n\tNext    string       `json:\"next_step\"`\n}\n```\n\n- 区分三种结果：已更新、带原因的失败，以及未知。「未知」指请求发出后超时的情况；改动可能已经发生，所以下一步应该是读取当前状态，而不是重试。\n- 标明哪些失败可以重试。限流可以重试；低于平台最低预算则不行，重试只会浪费配额。\n- 只列出失败和未知的项，再加上计数，这样一个 2,000 项的批量操作就不会让成功记录塞满上下文。\n- 在结果里用平白的话说明下一步该做什么。Claude 会根据有信息量的错误消息来换一种做法，而一个具体的下一步是最有用的信息。\n\n**什么时候算错误？** 当整个调用失败时才设置 `is_error: true`：输入有误、没有权限、什么都没应用。部分成功是一次结果混杂的成功调用；把它标成错误，等于告诉模型什么都没发生，而这在这里恰恰是错误的认知。\n\n**用代码守住资金。** 在工具内部限制每个广告组每天的调整幅度，超过阈值就要求审批。这些限制不依赖于模型是否正确理解了结果。\n\n**权衡。** 绝对目标值需要先读后写；如果商家在读和写之间自己改了值，就可能被覆盖；所以要比较当前值和之前读到的值，若已变化就跳过这一项。逐项结果让工具更复杂，但它把一场猜谜游戏变成了一份模型可以照着执行的计划。",
+      "followups": [
+        "The platform's batch API itself is all-or-nothing. How does your tool's design change?",
+        "How would you show the merchant what the agent changed, and let them undo it?"
+      ],
+      "followups_zh": [
+        "如果平台的批量 API 本身就是要么全成功、要么全失败，你的工具设计要怎么变？",
+        "你会如何向商家展示 Agent 改了什么，并让他们可以撤销？"
+      ],
+      "vocab": [
+        {
+          "en": "partial success",
+          "zh": "部分成功"
+        },
+        {
+          "en": "absolute target",
+          "zh": "绝对目标值"
+        },
+        {
+          "en": "retryable",
+          "zh": "可重试的"
+        },
+        {
+          "en": "per-item result",
+          "zh": "逐项结果"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261122-4",
+      "topic": "Context & Memory",
+      "difficulty": "Hard",
+      "title": "Deep into a long chat, the campaign agent pauses \"Summer Sale - US\" when the merchant meant its copy with the same name",
+      "title_zh": "在一段很长的对话后期，广告系列 Agent 暂停了「Summer Sale - US」，而商家指的是与它同名的副本",
+      "question": "A merchant spends an hour with the campaign agent. Early on, the agent lists campaigns, including \"Summer Sale - US\" and a duplicate the merchant created, \"Summer Sale - US (copy)\". Much later, after dozens of tool calls, the merchant says \"pause the summer one we fixed earlier\". The agent pauses the original, which was the healthy campaign, and keeps spending on the copy.\n\nExplain why long conversations cause this, and design the fix.",
+      "question_zh": "一位商家和广告系列 Agent 聊了一个小时。对话早期，Agent 列出了广告系列，其中有「Summer Sale - US」，以及商家自己复制出来的「Summer Sale - US (copy)」。很久之后，在几十次工具调用之后，商家说「把我们之前修好的那个夏季系列暂停掉」。Agent 暂停了原版，也就是那个运行正常的系列，而副本仍在继续花钱。\n\n解释为什么长对话会导致这种问题，并设计修复方案。",
+      "answer": "**The core idea.** In a long conversation, the facts that matter are scattered across many turns: a list from an hour ago, a fix in the middle, a vague reference now. Names are ambiguous, and the agent resolved \"the summer one\" by name rather than by the ID it had worked with. The cure is to keep the entities the conversation is acting on in one small, current, ID-based place, and to confirm before an irreversible write.\n\n**Why it gets worse with length.** The list that showed both campaigns may have been cleared by context editing or summarized by compaction, and the fix may be visible only as a tool call with an ID and no name. What remains most prominent is the name. Nothing in the context said \"we fixed 120988\".\n\n**Fix 1: a working set maintained by the harness.** Track the entities the conversation touches, from tool results, by ID:\n\n```go\n// WorkingSet holds the entities this conversation is acting on, by ID.\n// The harness updates it from tool results, not from the model's prose.\ntype WorkingSet struct {\n\tCampaigns map[string]string // campaign ID -> name as the platform reports it\n\tFocus     string            // the campaign ID the merchant last confirmed\n}\n\nfunc (w WorkingSet) Render() string {\n\tids := make([]string, 0, len(w.Campaigns))\n\tfor id := range w.Campaigns {\n\t\tids = append(ids, id)\n\t}\n\tsort.Strings(ids) // stable order, so the text only changes when the data does\n\tvar b strings.Builder\n\tb.WriteString(\"Campaigns in this conversation (use IDs in tool calls):\\n\")\n\tfor _, id := range ids {\n\t\tmark := \"\"\n\t\tif id == w.Focus {\n\t\t\tmark = \"  <- confirmed by the merchant\"\n\t\t}\n\t\tfmt.Fprintf(&b, \"- %s: %q%s\\n\", id, w.Campaigns[id], mark)\n\t}\n\treturn b.String()\n}\n```\n\n- Put this block into the newest turn, as a mid-conversation system message where the model supports it, or as text in the user turn. Do not rewrite the system prompt each turn: anything that changes there invalidates the cached prefix after it.\n- Render it deterministically, sorted by ID, so the text only changes when the data does.\n- Have tools return the ID together with the name and a distinguishing detail, such as created date or status, so the model can tell duplicates apart when it reads them.\n\n**Fix 2: resolve and confirm before irreversible actions.** Pausing a campaign stops sales, so the tool should require an ID, and the harness should show the merchant the exact campaign (name, ID, spend today) before it runs. When two entities match a reference, the agent asks which one; an extra question is cheap next to pausing the wrong campaign.\n\n**Fix 3: keep history append-only.** Do not trim or rewrite earlier turns client-side to save space. On models that run the preserved-thinking check, that invalidates later thinking blocks, and it also breaks the cache. Use server-side context editing or compaction to make room, and let the working set carry what must survive them.\n\n**Trade-offs.** A working set adds tokens to every turn and code to maintain, so keep it to the entities in play and drop ones the merchant has finished with. Confirmation adds friction; apply it to irreversible or costly actions, not to reads.",
+      "answer_zh": "**核心思想。** 在长对话里，重要的事实散落在很多轮之中：一小时前的列表、中途的一次修复、现在的一句模糊指代。名称是有歧义的，而 Agent 是按名称来理解「那个夏季系列」，而不是按它处理过的 ID。解决办法是把对话正在操作的实体，集中放在一个小而新、以 ID 为准的地方，并在不可撤销的写操作之前进行确认。\n\n**为什么对话越长越糟。** 同时显示两个系列的那份列表，可能已经被上下文编辑清掉，或者被压缩成了摘要；而那次修复可能只剩下一条带 ID、不带名称的工具调用。最显眼的只剩下名称。上下文里没有任何地方写着「我们修的是 120988」。\n\n**修复 1：由框架维护的工作集。** 根据工具结果，按 ID 跟踪对话涉及的实体：\n\n```go\n// WorkingSet holds the entities this conversation is acting on, by ID.\n// The harness updates it from tool results, not from the model's prose.\ntype WorkingSet struct {\n\tCampaigns map[string]string // campaign ID -> name as the platform reports it\n\tFocus     string            // the campaign ID the merchant last confirmed\n}\n\nfunc (w WorkingSet) Render() string {\n\tids := make([]string, 0, len(w.Campaigns))\n\tfor id := range w.Campaigns {\n\t\tids = append(ids, id)\n\t}\n\tsort.Strings(ids) // stable order, so the text only changes when the data does\n\tvar b strings.Builder\n\tb.WriteString(\"Campaigns in this conversation (use IDs in tool calls):\\n\")\n\tfor _, id := range ids {\n\t\tmark := \"\"\n\t\tif id == w.Focus {\n\t\t\tmark = \"  <- confirmed by the merchant\"\n\t\t}\n\t\tfmt.Fprintf(&b, \"- %s: %q%s\\n\", id, w.Campaigns[id], mark)\n\t}\n\treturn b.String()\n}\n```\n\n- 把这个块放进最新的一轮里：模型支持的话，作为对话中途的系统消息；否则作为用户轮次里的文本。不要每轮都改写系统提示词：那里的任何变化，都会让它之后的缓存前缀失效。\n- 以确定的方式渲染，按 ID 排序，这样只有在数据变化时文本才会变化。\n- 让工具在返回名称的同时返回 ID，以及一个能区分的细节，比如创建日期或状态，这样模型读到重复项时也能把它们分开。\n\n**修复 2：在不可撤销的操作之前先确认对象。** 暂停广告系列会让销售停下来，所以工具应当要求传入 ID，框架应当在执行前把确切的系列（名称、ID、今日花费）展示给商家。当一个指代能匹配上两个实体时，Agent 应当询问是哪一个；与暂停错系列相比，多问一句的代价很小。\n\n**修复 3：保持历史只追加。** 不要为了省空间在客户端裁剪或改写之前的轮次。在会执行 preserved thinking 检查的模型上，这会让之后的 thinking 块失效，还会破坏缓存。用服务端的上下文编辑或压缩来腾出空间，让工作集来承载那些必须保留下来的信息。\n\n**权衡。** 工作集会给每一轮增加 token，也增加需要维护的代码，所以只保留正在处理的实体，并移除商家已经处理完的。确认会增加操作步骤；只对不可撤销或代价高的操作使用，不要用在读取操作上。",
+      "followups": [
+        "How would you decide when an entity leaves the working set?",
+        "The merchant says \"undo everything we did today\". What does the agent need in context to do that safely?"
+      ],
+      "followups_zh": [
+        "你会如何决定一个实体什么时候离开工作集？",
+        "商家说「把我们今天做的全部撤销」。Agent 需要上下文里有什么，才能安全地做到？"
+      ],
+      "vocab": [
+        {
+          "en": "working set",
+          "zh": "工作集"
+        },
+        {
+          "en": "entity resolution",
+          "zh": "实体消歧"
+        },
+        {
+          "en": "append-only",
+          "zh": "只追加"
+        },
+        {
+          "en": "confirmation step",
+          "zh": "确认步骤"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261122-5",
+      "topic": "Production",
+      "difficulty": "Senior",
+      "title": "Shipping a new version of the support agent to 30,000 merchants: canary, conversations already in progress, and a rollback that does not break them",
+      "title_zh": "向 3 万个商家发布新版客服 Agent：灰度发布、正在进行中的对话，以及不会把它们搞坏的回滚",
+      "question": "The next version of the merchant support agent changes the system prompt, renames two tools, adds a refund tool and moves to a newer model. Last quarter's release was a big-bang deploy: conversations that were already open started failing with 400s, the cache hit rate dropped to near zero for a day, and rolling back broke them again.\n\nDesign the rollout.",
+      "question_zh": "新版商家客服 Agent 改了系统提示词，重命名了两个工具，新增了一个退款工具，还换成了更新的模型。上个季度的发布是一次性全量上线：已经打开的对话开始报 400 错误，缓存命中率在一天之内几乎降到零，而回滚又把它们弄坏了一次。\n\n设计这次发布方案。",
+      "answer": "**The core idea.** An agent version is not just code. It is a bundle of model, prompt, tools and harness behaviour, and a conversation is built on the bundle it started with. Change the bundle under a live conversation and the conversation's own history stops matching. So version the bundle, pin each conversation to one, and move traffic by starting new conversations on the new version.\n\n**Why open conversations broke.** Three mechanisms, all documented:\n\n- The prompt cache is a prefix match over tools, system and messages, and caches are per model. Any change to tools or the system prompt, or a model switch, restarts the cache for every open conversation at once.\n- On models that run preserved thinking, thinking blocks are tied to the model and the conversation. Changing the system prompt or tools under an existing conversation can make the thinking blocks already in it invalid, and the request can fail with a 400.\n- Renamed tools leave the history full of `tool_use` blocks for tools that no longer exist, which the model and your dispatcher must now interpret.\n\n**The design: pin per conversation, route new ones.**\n\n```go\n// pick runs once per new conversation; the result is stored on the conversation\n// and reused for every later turn, so a conversation never changes version mid-way.\nfunc pick(merchantID string, canaryPercent uint32, killSwitch bool) AgentVersion {\n\tif killSwitch {\n\t\treturn stable\n\t}\n\th := fnv.New32a()\n\th.Write([]byte(merchantID))\n\tif h.Sum32()%100 < canaryPercent {\n\t\treturn canary\n\t}\n\treturn stable\n}\n```\n\n- Store the version on the conversation when it starts and use it for every later turn. Old conversations finish on the old version and expire naturally; on Managed Agents, sessions already pin to an agent version, which gives you this for free.\n- Canary by merchant, not by request, so one merchant never sees two behaviours on the same day. Start small, watch, then widen.\n- The kill switch only affects new conversations. Rolling back means \"start new conversations on the old version\", which is safe because no live conversation changes underneath.\n\n**What to watch during the canary.** Compare canary and stable on the same metrics, per version: escalation and resolution rates, tool error rates, refusal rate, cost and latency per resolved conversation, and the new refund tool's approvals and reversals. Run the eval suite against the new bundle before the canary starts; the canary tells you what the eval missed, not whether the build works.\n\n**When an open conversation must move.** Sometimes you have to move live conversations, for example when a model is retired. Then start a fresh request from your stored history on the new bundle, leave out the earlier thinking blocks, and accept a cold cache once. For tools you expect to add mid-conversation, declaring them up front with `defer_loading` is the form that stays valid.\n\n**Trade-offs.** Running two versions side by side means two prompts, two tool sets and two sets of dashboards for days or weeks, and a fix must sometimes go into both. That cost is what buys a rollback that is a configuration change instead of an incident.",
+      "answer_zh": "**核心思想。** 一个 Agent 版本不只是代码。它是模型、提示词、工具和框架行为的组合，而一段对话建立在它开始时的那个组合之上。在一段进行中的对话下面换掉这个组合，对话自己的历史就对不上了。所以要给这个组合做版本管理，把每段对话固定在某一个版本上，并通过让新对话使用新版本来迁移流量。\n\n**为什么打开的对话会坏掉。** 三种机制，都有文档说明：\n\n- 提示缓存是对 tools、system 和 messages 的前缀匹配，并且缓存按模型区分。对工具或系统提示词的任何改动，或者换模型，都会让所有打开的对话同时从头开始缓存。\n- 在执行 preserved thinking 的模型上，thinking 块与模型和对话绑定。在现有对话下修改系统提示词或工具，可能会让对话里已有的 thinking 块失效，请求可能以 400 失败。\n- 工具改名之后，历史里会留下大量调用已不存在的工具的 `tool_use` 块，模型和你的分发器现在都得去处理它们。\n\n**设计：按对话固定版本，路由新对话。**\n\n```go\n// pick runs once per new conversation; the result is stored on the conversation\n// and reused for every later turn, so a conversation never changes version mid-way.\nfunc pick(merchantID string, canaryPercent uint32, killSwitch bool) AgentVersion {\n\tif killSwitch {\n\t\treturn stable\n\t}\n\th := fnv.New32a()\n\th.Write([]byte(merchantID))\n\tif h.Sum32()%100 < canaryPercent {\n\t\treturn canary\n\t}\n\treturn stable\n}\n```\n\n- 在对话开始时把版本存到对话上，之后的每一轮都使用它。旧对话在旧版本上完成，并自然过期；在 Managed Agents 上，会话本来就会固定到某个 Agent 版本，这一点是现成的。\n- 按商家而不是按请求做灰度，这样同一个商家在同一天里不会看到两种行为。从小比例开始，观察，再逐步扩大。\n- 紧急开关只影响新对话。回滚的含义是「让新对话使用旧版本」，这是安全的，因为没有任何进行中的对话会在底下被换掉。\n\n**灰度期间要看什么。** 按版本对比灰度组和稳定组的同一组指标：转人工率和解决率、工具错误率、拒答率、每段已解决对话的成本和延迟，以及新退款工具的审批和撤销情况。在灰度开始之前先用评测集测一遍新组合；灰度告诉你的是评测漏掉了什么，而不是这个版本能不能用。\n\n**必须迁移进行中的对话时。** 有时你不得不迁移正在进行的对话，比如某个模型要退役。这时，用你存储的历史在新组合上发起一个全新的请求，去掉之前的 thinking 块，并接受一次冷缓存。对于预计会在对话中途加入的工具，事先用 `defer_loading` 声明，是能保持有效的做法。\n\n**权衡。** 两个版本并行运行，意味着几天甚至几周内要维护两套提示词、两套工具和两套看板，有时一个修复还得同时打进两个版本。正是这份代价，换来了一次只需改配置、而不会变成事故的回滚。",
+      "followups": [
+        "A security fix must reach every conversation today, including open ones. How do you ship it?",
+        "How do you keep old and new tool names working in your dispatcher during the overlap?",
+        "Which metric would make you stop the canary at 5%?"
+      ],
+      "followups_zh": [
+        "一个安全修复今天必须覆盖所有对话，包括进行中的对话。你会如何发布？",
+        "在新旧版本重叠期间，你会如何让分发器同时兼容新旧工具名？",
+        "哪个指标会让你在 5% 时就叫停灰度？"
+      ],
+      "vocab": [
+        {
+          "en": "canary release",
+          "zh": "灰度发布"
+        },
+        {
+          "en": "version pinning",
+          "zh": "版本固定"
+        },
+        {
+          "en": "kill switch",
+          "zh": "紧急开关"
+        },
+        {
+          "en": "rollback",
+          "zh": "回滚"
+        },
+        {
+          "en": "cold cache",
+          "zh": "冷缓存"
+        }
+      ]
+    }
+  ]
+}

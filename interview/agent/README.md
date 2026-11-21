@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 45 个模块、209 道题。
+共 46 个模块、214 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -621,3 +621,17 @@ Five new agent questions: a retry that refunded twice, rewriting follow-up quest
 | 3 | Tools & MCP | Hard | [A theme-fixing agent on Managed Agents can push branches to a merchant's theme repo but cannot open pull requests, and sessions fail to start after networking was locked down](modules/daily-2026-11-21.md#q3) | Managed Agents 上的主题修复 Agent 能向商家的主题仓库推送分支，却无法创建 Pull Request；收紧网络之后，会话还启动不了了 |
 | 4 | Multi-agent | Hard | [The SEO agent and the compliance agent both edit product listings, and each one keeps undoing the other's changes](modules/daily-2026-11-21.md#q4) | SEO Agent 和合规 Agent 都在修改商品详情，结果互相撤销对方的改动 |
 | 5 | Context & Memory | Senior | [A catalog migration takes the agent three days and many sessions: what to carry between sessions, and how to resume without trusting stale notes](modules/daily-2026-11-21.md#q5) | 一次商品目录迁移要花 Agent 三天、跨很多个会话：会话之间要带上什么，以及如何在不盲信过时笔记的前提下继续 |
+
+## [Daily set · Nov 22 · 每日新题 · 11 月 22 日](modules/daily-2026-11-22.md)
+
+Five new agent questions: a tool that lets the model choose the tenant, an eval whose average hides rare irreversible edits, partial success in a batch budget tool, entity mix-ups deep in a long chat, and rolling out a new agent version without breaking open conversations.
+
+> 五道新的 Agent 题：让模型来选择租户的工具、平均分掩盖了罕见不可撤销改动的评测、批量预算工具的部分成功、长对话后期的实体混淆，以及在不破坏进行中对话的前提下发布新版 Agent。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Safety & Security | Medium | [The order-lookup tool takes merchant_id as an argument, and one merchant's assistant reads another merchant's orders](modules/daily-2026-11-22.md#q1) | 订单查询工具把 merchant_id 当作参数，结果一个商家的助手读到了另一个商家的订单 |
+| 2 | Evals & Observability | Medium | [The bulk-edit agent passes 97% of the eval, and two of 300 runs changed products the merchant never selected](modules/daily-2026-11-22.md#q2) | 批量编辑 Agent 的评测通过率是 97%，但 300 次运行里有两次改动了商家根本没选中的商品 |
+| 3 | Tools & MCP | Hard | [A batch tool updates 200 Meta ad sets and 37 fail: the agent reports total failure, retries everything, and doubles some budgets](modules/daily-2026-11-22.md#q3) | 一个批量工具更新 200 个 Meta 广告组，其中 37 个失败：Agent 报告全部失败，把所有广告组重试一遍，结果有些预算被翻倍了 |
+| 4 | Context & Memory | Hard | [Deep into a long chat, the campaign agent pauses "Summer Sale - US" when the merchant meant its copy with the same name](modules/daily-2026-11-22.md#q4) | 在一段很长的对话后期，广告系列 Agent 暂停了「Summer Sale - US」，而商家指的是与它同名的副本 |
+| 5 | Production | Senior | [Shipping a new version of the support agent to 30,000 merchants: canary, conversations already in progress, and a rollback that does not break them](modules/daily-2026-11-22.md#q5) | 向 3 万个商家发布新版客服 Agent：灰度发布、正在进行中的对话，以及不会把它们搞坏的回滚 |
