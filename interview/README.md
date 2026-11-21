@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 41 天、205 道题。
+共 42 天、210 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-22](days/2026-11-22.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Medium | [A JSONL product feed import reports success but stops after a few thousand lines, always at a product with a long description](days/2026-11-22.md#q1) | JSONL 商品源导入报告成功，却在几千行之后就停了，而且总是停在一个描述很长的商品上 |
+| 2 | System Design | Hard | [Gift cards for 100,000 stores: balances that never go negative, split payments, refunds back to the card, and two checkouts at once](days/2026-11-22.md#q2) | 为 10 万家店铺设计礼品卡：余额永不为负、组合支付、退款退回礼品卡，以及两笔结账同时发生 |
+| 3 | Database | Hard | [The ad dashboard's planner expects 1 row where 60 come back: account and campaign filters that the planner treats as independent](days/2026-11-22.md#q3) | 广告看板的查询计划预估 1 行，实际返回 60 行：规划器把账户和广告系列两个过滤条件当成了相互独立 |
+| 4 | Middleware | Medium | [The OAuth state stored in Redis is accepted twice when the install callback arrives twice at the same moment](days/2026-11-22.md#q4) | 当安装回调同时到达两次时，存在 Redis 里的 OAuth state 被接受了两次 |
+| 5 | Java & CS | Senior | [An LRU cache built on LinkedHashMap with a read-write lock grows past its limit and loses entries, with no exception anywhere](days/2026-11-22.md#q5) | 一个基于 LinkedHashMap 加读写锁实现的 LRU 缓存超出了容量上限，还丢了条目，而且没有任何异常 |
 
 ## [2026-11-21](days/2026-11-21.md)
 
