@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 46 个模块、214 道题。
+共 47 个模块、219 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -635,3 +635,17 @@ Five new agent questions: a tool that lets the model choose the tenant, an eval 
 | 3 | Tools & MCP | Hard | [A batch tool updates 200 Meta ad sets and 37 fail: the agent reports total failure, retries everything, and doubles some budgets](modules/daily-2026-11-22.md#q3) | 一个批量工具更新 200 个 Meta 广告组，其中 37 个失败：Agent 报告全部失败，把所有广告组重试一遍，结果有些预算被翻倍了 |
 | 4 | Context & Memory | Hard | [Deep into a long chat, the campaign agent pauses "Summer Sale - US" when the merchant meant its copy with the same name](modules/daily-2026-11-22.md#q4) | 在一段很长的对话后期，广告系列 Agent 暂停了「Summer Sale - US」，而商家指的是与它同名的副本 |
 | 5 | Production | Senior | [Shipping a new version of the support agent to 30,000 merchants: canary, conversations already in progress, and a rollback that does not break them](modules/daily-2026-11-22.md#q5) | 向 3 万个商家发布新版客服 Agent：灰度发布、正在进行中的对话，以及不会把它们搞坏的回滚 |
+
+## [Daily set · Nov 23 · 每日新题 · 11 月 23 日](modules/daily-2026-11-23.md)
+
+Five new agent questions: a plan followed after it stopped making sense, an index that keeps changed and deleted articles, three overlapping catalog tools, failing over from the Claude API to Amazon Bedrock, and contracts between the agents of a creative pipeline.
+
+> 五道新的 Agent 题：在失去意义后仍被执行的计划、保留了已修改和已删除文章的索引、三个功能重叠的商品工具、从 Claude API 故障切换到 Amazon Bedrock，以及创意流水线中 Agent 之间的契约。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Agent Loop | Medium | [The migration agent writes a 40-step plan up front and keeps following it after step 6 fails, because the plan says so](modules/daily-2026-11-23.md#q1) | 迁移 Agent 一开始就写好了 40 步的计划，第 6 步失败后仍然照着计划往下走，因为计划上就是这么写的 |
+| 2 | RAG | Medium | [The help assistant still quotes a return policy that was changed last week, and one that was deleted entirely](modules/daily-2026-11-23.md#q2) | 帮助助手仍在引用上周已经修改过的退货政策，甚至还有一条已被彻底删除的政策 |
+| 3 | Tools & MCP | Hard | [Three overlapping catalog tools, search_products, list_products and get_catalog, give the agent different answers to the same question](modules/daily-2026-11-23.md#q3) | 三个功能重叠的商品工具 search_products、list_products 和 get_catalog，让 Agent 对同一个问题给出不同的答案 |
+| 4 | Production | Hard | [During a Claude API outage, the team flips the merchant assistant to Amazon Bedrock, and web search, file uploads and nightly batches stop working](modules/daily-2026-11-23.md#q4) | Claude API 故障期间，团队把商家助手切换到了 Amazon Bedrock，结果网页搜索、文件上传和夜间批处理都不能用了 |
+| 5 | Multi-agent | Senior | [A four-agent ad-creative pipeline lets one stage's bad output flow silently downstream: designing contracts between agents](modules/daily-2026-11-23.md#q5) | 一个由四个 Agent 组成的广告创意流水线，让某一环节的错误输出悄无声息地流向下游：设计 Agent 之间的契约 |
