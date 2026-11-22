@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 42 天、210 道题。
+共 43 天、215 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-23](days/2026-11-23.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Hard | [After a request-signing wrapper was added, retried conversion uploads reach the ad platform with an empty body, and the retry helper reports success](days/2026-11-23.md#q1) | 加了请求签名包装器之后，重试的转化回传以空请求体到达广告平台，而重试辅助函数还报告成功 |
+| 2 | System Design | Senior | [Fraud screening at checkout for 100,000 stores: decide within 300 ms, avoid blocking good shoppers, and learn from chargebacks that arrive weeks later](days/2026-11-23.md#q2) | 为 10 万家店铺做结账反欺诈：300 毫秒内给出结论，避免误拦正常顾客，并从几周后才到来的拒付中学习 |
+| 3 | Database | Medium | [A bulk SKU lookup and a batch upsert fail only for the largest merchants with "number of parameters must be between 0 and 65535"](days/2026-11-23.md#q3) | 批量 SKU 查询和批量 upsert 只对最大的商家失败，报错「number of parameters must be between 0 and 65535」 |
+| 4 | Middleware | Hard | [Stock reservations with Redis WATCH work in tests, and during a flash sale they burn CPU on retries while checkout latency explodes](days/2026-11-23.md#q4) | 用 Redis WATCH 实现的库存预留在测试中正常，到了闪购时却在重试上耗尽 CPU，结账延迟暴涨 |
+| 5 | Java & CS | Medium | [A wholesale order of 12,000 units shows a negative total, although the total is stored in a long](days/2026-11-23.md#q5) | 一笔 12,000 件的批发订单显示总额为负数，尽管总额是存在 long 里的 |
 
 ## [2026-11-22](days/2026-11-22.md)
 
