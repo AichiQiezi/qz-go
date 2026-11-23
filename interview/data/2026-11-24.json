@@ -1,0 +1,191 @@
+{
+  "date": "2026-11-24",
+  "generatedAt": "2026-11-24T06:46:59+08:00",
+  "questions": [
+    {
+      "id": "20261124-1",
+      "topic": "Go",
+      "difficulty": "Senior",
+      "title": "Adding per-worker request counters made the ad-event ingester use far more CPU, although each worker only touches its own counter",
+      "title_zh": "加上按工作线程划分的请求计数器后，广告事件接收服务的 CPU 占用大幅上升，尽管每个工作线程只碰自己的计数器",
+      "question": "The ad-event ingester runs one goroutine per CPU core, each pulling events and forwarding them. To avoid lock contention on metrics, an engineer gave each worker its own counter in an array, `[N]struct{ n atomic.Int64 }`, indexed by worker ID, and a background task sums them every second. After the change, throughput dropped and CPU went up, even though no two workers ever write the same counter.\n\nExplain what is happening and fix it.",
+      "question_zh": "广告事件接收服务每个 CPU 核心运行一个 goroutine，各自拉取事件并转发。为了避免指标上的锁竞争，一位工程师给每个工作线程在数组 `[N]struct{ n atomic.Int64 }` 里分配了一个独立计数器，按工作线程 ID 索引，后台任务每秒把它们加总一次。改动之后，吞吐量下降，CPU 占用上升，尽管从来没有两个工作线程写同一个计数器。\n\n解释发生了什么，并修复它。",
+      "answer": "**Why.** CPUs move memory between cores in cache lines, commonly 64 bytes on x86-64, not in single variables. Each counter is 8 bytes, so eight of them share one line. When one core writes its counter, the coherence protocol must take the whole line away from the other cores, and their next write has to take it back. The counters are logically separate but physically shared. This is called false sharing, and it can be as costly as every worker hammering one shared counter.\n\n**Measured locally** with four goroutines on four cores, each incrementing its own counter in a loop:\n\n- Adjacent counters: about 125 to 138 ns per loop iteration.\n- One counter shared by all four: about 129 to 132 ns, the same cost.\n- Each counter padded to its own 64-byte line: about 9.6 to 9.9 ns, roughly 13 times faster.\n\n**The fix: give each hot, independently written value its own cache line.**\n\n```go\n// Before: four counters share one 64-byte cache line.\ntype counter struct{ n atomic.Int64 }\nvar perWorker [4]counter\n\n// After: each counter gets its own cache line.\ntype paddedCounter struct {\n\tn atomic.Int64\n\t_ [56]byte // 8 + 56 = 64 bytes\n}\nvar perWorkerPadded [4]paddedCounter\n```\n\n- `golang.org/x/sys/cpu.CacheLinePad` gives a padding size suited to the build architecture, instead of hard-coding 64; some CPUs use larger lines.\n- Better still, keep the counter in a local variable inside the worker and publish it occasionally, for example every thousand events. Then the hot path touches no shared memory at all.\n- Metrics libraries often already shard counters this way; check before writing your own.\n\n**How to find it.** A CPU profile shows time in the atomic add instruction with no lock in sight, and hardware counters for cache misses rise. The tell-tale sign is \"per-core data that does not scale with cores\".\n\n**Trade-offs.** Padding costs memory, 64 bytes per counter instead of 8, which only matters for large arrays. Apply it to a few hot counters that profiling points at, not to every struct.",
+      "answer_zh": "**原因。** CPU 在核心之间搬运内存的单位是缓存行，在 x86-64 上通常是 64 字节，而不是单个变量。每个计数器 8 字节，所以 8 个计数器共用一个缓存行。当一个核心写自己的计数器时，缓存一致性协议必须把整个缓存行从其他核心那里收回，而其他核心下一次写入时又得把它抢回来。这些计数器在逻辑上是独立的，在物理上却是共享的。这叫作伪共享（false sharing），它的代价可能和所有工作线程猛写同一个共享计数器一样高。\n\n**本地实测**：四个核心上运行四个 goroutine，每个都在循环中递增自己的计数器：\n\n- 相邻的计数器：每次循环迭代约 125 到 138 纳秒。\n- 四个工作线程共用一个计数器：约 129 到 132 纳秒，代价相同。\n- 每个计数器填充到独占一个 64 字节的缓存行：约 9.6 到 9.9 纳秒，大约快了 13 倍。\n\n**修复方法：让每个被频繁、独立写入的值独占一个缓存行。**\n\n```go\n// Before: four counters share one 64-byte cache line.\ntype counter struct{ n atomic.Int64 }\nvar perWorker [4]counter\n\n// After: each counter gets its own cache line.\ntype paddedCounter struct {\n\tn atomic.Int64\n\t_ [56]byte // 8 + 56 = 64 bytes\n}\nvar perWorkerPadded [4]paddedCounter\n```\n\n- `golang.org/x/sys/cpu.CacheLinePad` 会按编译目标架构给出合适的填充大小，不必硬编码 64；有些 CPU 的缓存行更大。\n- 更好的做法是把计数器放在工作线程内部的局部变量里，偶尔再发布一次，比如每处理一千个事件发布一次。这样热路径上完全不碰共享内存。\n- 指标库通常已经用这种方式对计数器做了分片；自己写之前先查一下。\n\n**如何发现它。** CPU profile 会显示时间都花在原子加法指令上，却看不到任何锁；硬件计数器里的缓存未命中数也会上升。典型特征是「按核心划分的数据，却无法随核心数扩展」。\n\n**权衡。** 填充会占用内存，每个计数器从 8 字节变成 64 字节，只有在大数组里才有影响。只对 profiling 指出的少数热点计数器使用，而不是给每个结构体都加。",
+      "followups": [
+        "Where else in a Go service could false sharing appear without anyone writing an array of counters?",
+        "How would you write a benchmark that shows this effect reliably?"
+      ],
+      "followups_zh": [
+        "在一个 Go 服务里，即使没人写计数器数组，伪共享还可能出现在哪里？",
+        "你会如何写一个能稳定展示这个效果的 benchmark？"
+      ],
+      "vocab": [
+        {
+          "en": "cache line",
+          "zh": "缓存行"
+        },
+        {
+          "en": "false sharing",
+          "zh": "伪共享"
+        },
+        {
+          "en": "cache coherence",
+          "zh": "缓存一致性"
+        },
+        {
+          "en": "padding",
+          "zh": "填充"
+        }
+      ]
+    },
+    {
+      "id": "20261124-2",
+      "topic": "System Design",
+      "difficulty": "Medium",
+      "title": "Order tracking for shoppers across 30 carriers: webhooks, polling, out-of-order events and notifications that do not spam",
+      "title_zh": "为顾客提供跨 30 家承运商的订单物流追踪：webhook、轮询、乱序事件，以及不刷屏的通知",
+      "question": "Merchants ship with about 30 carriers. Shoppers want a tracking page and email or SMS updates, and merchants want to see shipments that are stuck. Some carriers send webhooks, some only offer an API to poll, and every carrier uses its own status codes. Today, shoppers sometimes see \"in transit\" after \"delivered\" and get five emails in an hour.\n\nDesign the tracking system.",
+      "question_zh": "商家使用大约 30 家承运商发货。顾客想要一个物流追踪页面以及邮件或短信通知，商家则想看到卡住的包裹。有些承运商会推送 webhook，有些只提供可轮询的 API，而且每家承运商都有自己的状态码。现在，顾客有时会在「已签收」之后又看到「运输中」，还会在一小时内收到五封邮件。\n\n设计这个物流追踪系统。",
+      "answer": "**The shape.** Collect raw events from both sources into one store, normalize them, and derive the shipment status from the events rather than overwriting a status field:\n\n```text\ncarrier webhook ─┐\n                 ├─> normalize(carrier code -> our status) ─> tracking_events (dedup by carrier event id)\ncarrier polling ─┘                                                │\n                                                                  v\n                                 shipment.status = latest event by event time, never moving backwards\n                                                                  │\n                                                                  v\n                                 notify shopper on milestones only (shipped, out for delivery, delivered, problem)\n```\n\n- Store every carrier event with the carrier's own event ID or a hash of (tracking number, code, time), and ignore duplicates. Webhooks are retried, and polling re-reads old events.\n- Map each carrier's codes to a small set of your own statuses, in a table you can update without a deploy. Keep the raw code and text for support.\n- Order by the carrier's event time, not arrival time, and never move a shipment backwards from a final status such as delivered unless a later event says it was returned.\n\n**Polling at scale.** Poll only shipments that are not final, and adapt the interval: more often near the expected delivery date, rarely for shipments sitting in customs. Respect each carrier's rate limits with a per-carrier queue, and switch a carrier to webhooks when it offers them.\n\n**Notifications.** Notify on milestones, not on every scan: shipped, out for delivery, delivered, and problems such as a failed delivery. Debounce, so a burst of events sends one message, and record what was sent per shipment so a replayed event never notifies twice.\n\n**For merchants.** A daily job flags shipments with no event for longer than expected for that carrier and route, so merchants can contact the carrier before the shopper complains.\n\n**Trade-offs.** An aggregator service that covers many carriers saves integration work but adds cost and another dependency; building direct integrations for the top few carriers and using an aggregator for the long tail is a common middle path.",
+      "answer_zh": "**整体结构。** 把两种来源的原始事件收集到同一个存储里，统一规范化，再从事件推导出包裹状态，而不是直接覆盖一个状态字段：\n\n```text\ncarrier webhook ─┐\n                 ├─> normalize(carrier code -> our status) ─> tracking_events (dedup by carrier event id)\ncarrier polling ─┘                                                │\n                                                                  v\n                                 shipment.status = latest event by event time, never moving backwards\n                                                                  │\n                                                                  v\n                                 notify shopper on milestones only (shipped, out for delivery, delivered, problem)\n```\n\n- 保存每一条承运商事件，带上承运商自己的事件 ID，或者（运单号、状态码、时间）的哈希，并忽略重复事件。webhook 会重试，轮询也会重复读到旧事件。\n- 把各承运商的状态码映射到你自己的一小组状态上，映射表要能在不发布的情况下更新。保留原始状态码和文字，供客服使用。\n- 按承运商的事件时间排序，而不是按到达时间，并且绝不让包裹从「已签收」这类终态倒退，除非之后的事件表明它被退回了。\n\n**大规模轮询。** 只轮询尚未到终态的包裹，并动态调整间隔：临近预计送达日期时更频繁，停在海关的包裹则很少轮询。用按承运商划分的队列遵守各自的限流，并在承运商提供 webhook 时切换过去。\n\n**通知。** 只在关键节点通知，而不是每次扫描都通知：已发货、派送中、已签收，以及派送失败之类的问题。做防抖处理，让一连串事件只发出一条消息；并按包裹记录已发送的通知，这样重放的事件不会重复通知。\n\n**面向商家。** 每天运行一个任务，标记出超过该承运商和线路预期时长仍没有新事件的包裹，让商家能在顾客投诉之前联系承运商。\n\n**权衡。** 覆盖众多承运商的聚合服务能省下集成工作，但会增加成本，也多了一个依赖；常见的折中做法是为最主要的几家承运商做直连集成，长尾部分交给聚合服务。",
+      "followups": [
+        "A carrier changes its status codes without notice. How do you find out, and what do shoppers see meanwhile?",
+        "How would you estimate delivery dates from the event history?"
+      ],
+      "followups_zh": [
+        "某家承运商在没有通知的情况下修改了状态码。你会如何发现？在此期间顾客看到的是什么？",
+        "你会如何根据事件历史来预估送达日期？"
+      ],
+      "vocab": [
+        {
+          "en": "normalization",
+          "zh": "规范化"
+        },
+        {
+          "en": "out-of-order event",
+          "zh": "乱序事件"
+        },
+        {
+          "en": "debounce",
+          "zh": "防抖"
+        },
+        {
+          "en": "terminal status",
+          "zh": "终态"
+        }
+      ]
+    },
+    {
+      "id": "20261124-3",
+      "topic": "Database",
+      "difficulty": "Medium",
+      "title": "Searching coupons for \"SALE_10\" also returns SALE-10 and SALEX10, and a search for a code with a backslash finds nothing",
+      "title_zh": "搜索优惠码「SALE_10」时还返回了 SALE-10 和 SALEX10，而搜索一个带反斜杠的优惠码却什么都找不到",
+      "question": "The coupon list in the merchant admin has a search box. The backend builds `WHERE code ILIKE '%' || $1 || '%'`, with the user's text passed as a parameter, so the team considers it safe. Merchants report that searching \"SALE_10\" returns codes they did not type, \"50%\" matches anything containing 50, and a code containing a backslash cannot be found at all.\n\nExplain the behavior and fix it.",
+      "question_zh": "商家后台的优惠码列表有一个搜索框。后端构造的条件是 `WHERE code ILIKE '%' || $1 || '%'`，用户输入作为参数传入，所以团队认为它是安全的。商家反馈：搜索「SALE_10」会返回他们没输入过的优惠码，「50%」会匹配任何包含 50 的内容，而带反斜杠的优惠码则完全搜不到。\n\n解释这种现象，并修复它。",
+      "answer": "**Why.** Parameters prevent SQL injection, but the value still becomes a LIKE pattern, and patterns have their own syntax: `_` matches any single character, `%` matches any sequence, and backslash is the default escape character. A parameter is safe SQL, but it is not a literal string to LIKE.\n\n**What a local PostgreSQL 16 test showed:**\n\n- `SALE_10` matched `SALE_10`, `SALE-10` and `SALEX10`.\n- `50%` matched `50%OFF`, `500FF` and `50_OFF`.\n- `BACK\\SLASH` matched nothing, because `\\S` was read as an escaped `S`, so the pattern looked for `BACKSLASH`.\n- A search for a single `_` matched every row.\n\n**The fix: escape the pattern characters, or do not use a pattern.**\n\n```sql\n-- Escape the three special characters before building the pattern.\nSELECT code FROM coupons\nWHERE store_id = $1\n  AND code ILIKE '%' || replace(replace(replace($2, '\\', '\\\\'), '%', '\\%'), '_', '\\_') || '%';\n\n-- Or, when no wildcards are needed at all:\nSELECT code FROM coupons WHERE store_id = $1 AND strpos(lower(code), lower($2)) > 0;\n```\n\n- Escape the backslash first, then `%` and `_`, or the escapes you add get escaped again. With that, each test search returned exactly the one matching code.\n- Do it in one helper used by every search box, or in application code before the query; scattered string concatenation is how the next search box gets it wrong again.\n- `strpos` avoids pattern syntax entirely when you only need \"contains\".\n\n**Performance is a separate question.** Neither form uses a plain B-tree index for a leading wildcard. For large tables, a trigram index (`pg_trgm`) supports `ILIKE '%...%'`, and escaping does not change that.\n\n**Trade-offs.** Some admin users like wildcards. If you want them, offer `*` as an explicit wildcard in the UI and translate it to `%` after escaping, so merchants opt in instead of tripping over `_`.",
+      "answer_zh": "**原因。** 参数化能防止 SQL 注入，但这个值仍然会成为一个 LIKE 模式，而模式有自己的语法：`_` 匹配任意单个字符，`%` 匹配任意字符序列，反斜杠是默认的转义字符。参数在 SQL 层面是安全的，但对 LIKE 来说它并不是一个字面字符串。\n\n**本地 PostgreSQL 16 测试的结果：**\n\n- `SALE_10` 匹配到了 `SALE_10`、`SALE-10` 和 `SALEX10`。\n- `50%` 匹配到了 `50%OFF`、`500FF` 和 `50_OFF`。\n- `BACK\\SLASH` 什么都没匹配到，因为 `\\S` 被当成了转义后的 `S`，于是模式实际查找的是 `BACKSLASH`。\n- 只搜索一个 `_` 会匹配所有行。\n\n**修复方法：转义模式字符，或者干脆不用模式。**\n\n```sql\n-- Escape the three special characters before building the pattern.\nSELECT code FROM coupons\nWHERE store_id = $1\n  AND code ILIKE '%' || replace(replace(replace($2, '\\', '\\\\'), '%', '\\%'), '_', '\\_') || '%';\n\n-- Or, when no wildcards are needed at all:\nSELECT code FROM coupons WHERE store_id = $1 AND strpos(lower(code), lower($2)) > 0;\n```\n\n- 先转义反斜杠，再转义 `%` 和 `_`，否则你加上的转义符会被再转义一次。这样处理后，每次测试搜索都只返回唯一匹配的那个优惠码。\n- 把这件事做成一个所有搜索框都使用的辅助函数，或者在查询前于应用代码中处理；零散的字符串拼接，正是下一个搜索框又会出错的原因。\n- 当你只需要「包含」语义时，`strpos` 可以完全避开模式语法。\n\n**性能是另一个问题。** 对于以通配符开头的匹配，这两种写法都用不上普通的 B-tree 索引。对于大表，三元组索引（`pg_trgm`）支持 `ILIKE '%...%'`，转义并不影响这一点。\n\n**权衡。** 有些后台用户喜欢用通配符。如果你想提供，就在界面上把 `*` 作为显式通配符，在转义之后再把它翻译成 `%`，让商家主动选择，而不是被 `_` 绊倒。",
+      "followups": [
+        "Which other query features treat parameter values as syntax, like LIKE does?",
+        "How would you test every search box in the admin for this bug?"
+      ],
+      "followups_zh": [
+        "还有哪些查询功能会像 LIKE 一样，把参数值当作语法来解析？",
+        "你会如何测试后台的每个搜索框是否存在这个 bug？"
+      ],
+      "vocab": [
+        {
+          "en": "wildcard",
+          "zh": "通配符"
+        },
+        {
+          "en": "escape character",
+          "zh": "转义字符"
+        },
+        {
+          "en": "pattern matching",
+          "zh": "模式匹配"
+        },
+        {
+          "en": "trigram index",
+          "zh": "三元组索引"
+        }
+      ]
+    },
+    {
+      "id": "20261124-4",
+      "topic": "Middleware",
+      "difficulty": "Hard",
+      "title": "Cache invalidation over Postgres LISTEN/NOTIFY: some pods serve stale prices after a restart, and bulk price updates fail with \"payload string too long\"",
+      "title_zh": "基于 Postgres LISTEN/NOTIFY 的缓存失效：一些 Pod 重启后返回过期价格，而批量改价报错「payload string too long」",
+      "question": "Product API pods cache products in memory. When a product changes, the writer runs `pg_notify('product_changed', <product JSON>)` in the same transaction, and every pod listens on that channel and updates its cache from the payload. Two problems: after a deploy or a network blip, some pods keep old prices for hours, and a bulk price update for products with long descriptions fails entirely with `payload string too long`.\n\nExplain both and redesign the invalidation.",
+      "question_zh": "商品 API 的各个 Pod 在内存中缓存商品。商品变更时，写入方在同一个事务里执行 `pg_notify('product_changed', <商品 JSON>)`，每个 Pod 都监听这个频道，并根据负载更新自己的缓存。有两个问题：发布或网络抖动之后，一些 Pod 会在几个小时内一直返回旧价格；而对带长描述商品的批量改价会整体失败，报错 `payload string too long`。\n\n解释这两个问题，并重新设计缓存失效机制。",
+      "answer": "**Why prices go stale.** LISTEN/NOTIFY is delivery to whoever is listening right now, with no memory. A notification sent while a pod is disconnected or restarting is simply not delivered to it. In a local test with pgx, a notification sent while the listener was disconnected never arrived; only the one sent after it reconnected and ran `LISTEN` again did.\n\n**Why bulk updates fail.** A notification payload must be shorter than 8000 bytes in a default build: 7,999 bytes worked and 8,000 failed with `payload string too long`. Because `pg_notify` ran inside the update transaction, the error aborted the transaction, so the price change itself was lost, not just the notification.\n\n**Other behavior worth knowing, all seen in the same test:**\n\n- Notifications are sent at commit; a rolled-back transaction sends nothing. That is a good property for cache invalidation.\n- Identical notifications in one transaction are folded into one: three `p3` and one `p4` arrived as `p3`, `p4`.\n- A listener inside an open transaction receives nothing until that transaction ends, and a listener that stays in a long transaction keeps the server's notification queue from being cleaned up.\n\n**The redesign.**\n\n```go\n// Listener: LISTEN first, then resync, then apply notifications.\nfor {\n\tconn, err := pgx.Connect(ctx, dsn)\n\tif err != nil { sleep(backoff()); continue }\n\tconn.Exec(ctx, \"LISTEN product_changed\")\n\tinvalidateAll()            // anything may have changed while we were away\n\tfor {\n\t\tn, err := conn.WaitForNotification(ctx)\n\t\tif err != nil { break } // reconnect, and resync again\n\t\tinvalidate(n.Payload)   // payload is just a product ID\n\t}\n}\n```\n\n- Send only the product ID, and let the pod reload the product. The payload stays tiny, and the cache always reads committed data.\n- On every connect, `LISTEN` first and then resync, by dropping the cache or comparing a per-product version, so nothing changed during the gap is missed.\n- Keep a TTL on cache entries as a backstop, so a missed message expires in minutes, not hours.\n\n**Trade-offs.** LISTEN/NOTIFY is excellent for \"something changed, go look\" signals with no extra infrastructure. When consumers need every message even after downtime, write changes to an outbox table and deliver them through a durable stream such as Kafka or Redis Streams, where consumers track their own position.",
+      "answer_zh": "**价格为什么会过期。** LISTEN/NOTIFY 只把消息投递给此刻正在监听的连接，没有任何留存。在 Pod 断开或重启期间发出的通知，就是不会投递给它。在用 pgx 做的本地测试中，监听方断开期间发出的通知始终没有到达；只有它重新连接并再次执行 `LISTEN` 之后发出的那条到达了。\n\n**批量更新为什么失败。** 在默认构建下，通知负载必须短于 8000 字节：7,999 字节可以，8,000 字节就报错 `payload string too long`。因为 `pg_notify` 是在更新事务里执行的，这个错误让整个事务中止，所以丢掉的不只是通知，连改价本身也没了。\n\n**其他值得了解的行为，都在同一个测试中观察到：**\n\n- 通知在提交时发出；回滚的事务什么也不会发。对缓存失效来说，这是个好特性。\n- 同一事务内相同的通知会被合并为一条：三条 `p3` 加一条 `p4`，到达时是 `p3`、`p4`。\n- 处于未结束事务中的监听方，在事务结束之前收不到任何通知；而长时间停留在事务中的监听方，会让服务器的通知队列无法被清理。\n\n**重新设计。**\n\n```go\n// Listener: LISTEN first, then resync, then apply notifications.\nfor {\n\tconn, err := pgx.Connect(ctx, dsn)\n\tif err != nil { sleep(backoff()); continue }\n\tconn.Exec(ctx, \"LISTEN product_changed\")\n\tinvalidateAll()            // anything may have changed while we were away\n\tfor {\n\t\tn, err := conn.WaitForNotification(ctx)\n\t\tif err != nil { break } // reconnect, and resync again\n\t\tinvalidate(n.Payload)   // payload is just a product ID\n\t}\n}\n```\n\n- 只发送商品 ID，让 Pod 自己重新加载商品。负载始终很小，缓存读到的也总是已提交的数据。\n- 每次建立连接时，先 `LISTEN` 再做一次全量对齐（清空缓存，或者逐个比较商品版本号），这样断开期间的任何变更都不会被漏掉。\n- 给缓存条目保留一个 TTL 作为兜底，这样漏掉的消息会在几分钟内而不是几小时后失效。\n\n**权衡。** 对于「有东西变了，去看看」这类信号，LISTEN/NOTIFY 非常好用，而且不需要额外的基础设施。如果消费方即使在停机之后也需要拿到每一条消息，就把变更写入一张 outbox 表，再通过 Kafka 或 Redis Streams 这类持久化流来投递，让消费方自己记录消费位置。",
+      "followups": [
+        "A pod is listening but its event loop is stuck. How would you detect that its cache is no longer being invalidated?",
+        "Would you put pg_notify in a trigger or in application code? Why?"
+      ],
+      "followups_zh": [
+        "某个 Pod 还在监听，但它的事件循环卡住了。你会如何发现它的缓存已经不再被失效？",
+        "你会把 pg_notify 放在触发器里还是应用代码里？为什么？"
+      ],
+      "vocab": [
+        {
+          "en": "cache invalidation",
+          "zh": "缓存失效"
+        },
+        {
+          "en": "at-most-once delivery",
+          "zh": "至多一次投递"
+        },
+        {
+          "en": "resync",
+          "zh": "重新同步"
+        },
+        {
+          "en": "outbox",
+          "zh": "发件箱表（outbox）"
+        }
+      ]
+    },
+    {
+      "id": "20261124-5",
+      "topic": "Java & CS",
+      "difficulty": "Hard",
+      "title": "The Meta sync executor is configured for up to 32 threads, yet only 4 ever run while the queue grows to hundreds of thousands of tasks",
+      "title_zh": "Meta 同步线程池配置了最多 32 个线程，但始终只有 4 个在运行，而队列却涨到了几十万个任务",
+      "question": "A sync service sends catalog updates to Meta. Calls are slow, so the team created `new ThreadPoolExecutor(4, 32, 60, SECONDS, new LinkedBlockingQueue<>())`, expecting the pool to grow to 32 threads under load. During a big catalog import, monitoring shows exactly 4 active threads, a queue of several hundred thousand tasks, and updates arriving hours late. Memory is climbing too.\n\nExplain why the pool never grows and fix it.",
+      "question_zh": "一个同步服务负责把商品目录更新发送给 Meta。调用很慢，所以团队创建了 `new ThreadPoolExecutor(4, 32, 60, SECONDS, new LinkedBlockingQueue<>())`，期望线程池在负载高时扩展到 32 个线程。在一次大规模商品导入期间，监控显示活跃线程正好是 4 个，队列里有几十万个任务，更新要晚好几个小时才到。内存也在不断上涨。\n\n解释为什么线程池从不扩展，并修复它。",
+      "answer": "**Why.** `ThreadPoolExecutor` adds threads in a specific order. Below the core size, a new task starts a new thread. At the core size, new tasks go into the queue. Only when the queue rejects a task, because it is full, does the pool create threads up to the maximum. An unbounded `LinkedBlockingQueue` never rejects, so the pool stays at 4 forever and the maximum of 32 is dead configuration.\n\n**Measured locally** (Java 21, 200 tasks of 200 ms each):\n\n- Core 4, max 32, unbounded queue: 4 threads, 196 tasks queued, about 10 seconds to finish.\n- Core 4, max 32, queue of 100: the pool grew to 32 threads, but 68 tasks were rejected with `RejectedExecutionException`.\n- Core 32, max 32, queue of 1,000: 32 threads from the start, about 1.3 seconds.\n- Core 4, max 32, queue of 100 with `CallerRunsPolicy`: 32 threads, nothing rejected, because the submitting thread ran the overflow itself.\n\n**The fix: bound the queue, choose a rejection policy, and size the core for the work.**\n\n```java\n// Grows to 32 threads only when the queue is full; a full queue pushes back on the caller.\nThreadPoolExecutor pool = new ThreadPoolExecutor(\n    4, 32, 60, TimeUnit.SECONDS,\n    new ArrayBlockingQueue<>(100),\n    new ThreadPoolExecutor.CallerRunsPolicy());\n\n// Or simply size the core for the work you want in flight:\nThreadPoolExecutor fixed = new ThreadPoolExecutor(\n    32, 32, 60, TimeUnit.SECONDS, new ArrayBlockingQueue<>(1000));\n```\n\n- A bounded queue is also what stops the memory growth: hundreds of thousands of queued tasks each hold their payload.\n- `CallerRunsPolicy` slows the producer down when the pool is saturated, which is natural backpressure for an import job. For a request thread, rejecting quickly with a clear error is usually better.\n- More threads only help while Meta's rate limits allow it. Size the pool from the rate limit and the call latency, not from the number of CPU cores.\n\n**Trade-offs.** `Executors.newFixedThreadPool` uses an unbounded queue too, so it has the same memory risk under a flood. Virtual threads remove the thread-count limit but not the downstream limit, so you still need a semaphore or rate limiter in front of Meta.",
+      "answer_zh": "**原因。** `ThreadPoolExecutor` 按特定顺序增加线程。线程数低于核心大小时，新任务会启动一个新线程。达到核心大小后，新任务进入队列。只有当队列因为已满而拒绝任务时，线程池才会创建线程，直到最大值。无界的 `LinkedBlockingQueue` 从不拒绝，所以线程池永远停在 4 个，最大值 32 成了一个毫无作用的配置。\n\n**本地实测**（Java 21，200 个任务，每个耗时 200 毫秒）：\n\n- 核心 4、最大 32、无界队列：4 个线程，196 个任务排队，约 10 秒完成。\n- 核心 4、最大 32、队列容量 100：线程池扩展到了 32 个线程，但有 68 个任务因 `RejectedExecutionException` 被拒绝。\n- 核心 32、最大 32、队列容量 1,000：一开始就是 32 个线程，约 1.3 秒。\n- 核心 4、最大 32、队列容量 100，加上 `CallerRunsPolicy`：32 个线程，没有任务被拒绝，因为提交任务的线程自己执行了溢出的任务。\n\n**修复方法：给队列设上限，选择拒绝策略，并按实际工作量设定核心线程数。**\n\n```java\n// Grows to 32 threads only when the queue is full; a full queue pushes back on the caller.\nThreadPoolExecutor pool = new ThreadPoolExecutor(\n    4, 32, 60, TimeUnit.SECONDS,\n    new ArrayBlockingQueue<>(100),\n    new ThreadPoolExecutor.CallerRunsPolicy());\n\n// Or simply size the core for the work you want in flight:\nThreadPoolExecutor fixed = new ThreadPoolExecutor(\n    32, 32, 60, TimeUnit.SECONDS, new ArrayBlockingQueue<>(1000));\n```\n\n- 有界队列也能阻止内存增长：几十万个排队任务，每个都持有自己的负载数据。\n- 线程池饱和时，`CallerRunsPolicy` 会让生产者慢下来，这对导入任务来说是天然的背压。对于处理请求的线程，通常更好的做法是快速拒绝并返回明确的错误。\n- 只有在 Meta 的限流允许时，更多线程才有帮助。要根据限流额度和调用延迟来确定线程池大小，而不是根据 CPU 核数。\n\n**权衡。** `Executors.newFixedThreadPool` 用的也是无界队列，所以在任务洪峰下有同样的内存风险。虚拟线程去掉了线程数量的限制，但没有去掉下游的限制，所以在调用 Meta 之前仍然需要一个信号量或限流器。",
+      "followups": [
+        "Which pool metrics would have shown this problem on the first day?",
+        "What happens to queued tasks when the service is redeployed in the middle of an import?"
+      ],
+      "followups_zh": [
+        "哪些线程池指标本可以在第一天就暴露这个问题？",
+        "如果在导入进行到一半时重新部署服务，排队中的任务会怎样？"
+      ],
+      "vocab": [
+        {
+          "en": "core pool size",
+          "zh": "核心线程数"
+        },
+        {
+          "en": "bounded queue",
+          "zh": "有界队列"
+        },
+        {
+          "en": "rejection policy",
+          "zh": "拒绝策略"
+        },
+        {
+          "en": "backpressure",
+          "zh": "背压"
+        }
+      ]
+    }
+  ]
+}

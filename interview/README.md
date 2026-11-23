@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 43 天、215 道题。
+共 44 天、220 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-24](days/2026-11-24.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Senior | [Adding per-worker request counters made the ad-event ingester use far more CPU, although each worker only touches its own counter](days/2026-11-24.md#q1) | 加上按工作线程划分的请求计数器后，广告事件接收服务的 CPU 占用大幅上升，尽管每个工作线程只碰自己的计数器 |
+| 2 | System Design | Medium | [Order tracking for shoppers across 30 carriers: webhooks, polling, out-of-order events and notifications that do not spam](days/2026-11-24.md#q2) | 为顾客提供跨 30 家承运商的订单物流追踪：webhook、轮询、乱序事件，以及不刷屏的通知 |
+| 3 | Database | Medium | [Searching coupons for "SALE_10" also returns SALE-10 and SALEX10, and a search for a code with a backslash finds nothing](days/2026-11-24.md#q3) | 搜索优惠码「SALE_10」时还返回了 SALE-10 和 SALEX10，而搜索一个带反斜杠的优惠码却什么都找不到 |
+| 4 | Middleware | Hard | [Cache invalidation over Postgres LISTEN/NOTIFY: some pods serve stale prices after a restart, and bulk price updates fail with "payload string too long"](days/2026-11-24.md#q4) | 基于 Postgres LISTEN/NOTIFY 的缓存失效：一些 Pod 重启后返回过期价格，而批量改价报错「payload string too long」 |
+| 5 | Java & CS | Hard | [The Meta sync executor is configured for up to 32 threads, yet only 4 ever run while the queue grows to hundreds of thousands of tasks](days/2026-11-24.md#q5) | Meta 同步线程池配置了最多 32 个线程，但始终只有 4 个在运行，而队列却涨到了几十万个任务 |
 
 ## [2026-11-23](days/2026-11-23.md)
 
