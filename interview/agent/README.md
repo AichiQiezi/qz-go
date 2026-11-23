@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 47 个模块、219 道题。
+共 48 个模块、224 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -649,3 +649,17 @@ Five new agent questions: a plan followed after it stopped making sense, an inde
 | 3 | Tools & MCP | Hard | [Three overlapping catalog tools, search_products, list_products and get_catalog, give the agent different answers to the same question](modules/daily-2026-11-23.md#q3) | 三个功能重叠的商品工具 search_products、list_products 和 get_catalog，让 Agent 对同一个问题给出不同的答案 |
 | 4 | Production | Hard | [During a Claude API outage, the team flips the merchant assistant to Amazon Bedrock, and web search, file uploads and nightly batches stop working](modules/daily-2026-11-23.md#q4) | Claude API 故障期间，团队把商家助手切换到了 Amazon Bedrock，结果网页搜索、文件上传和夜间批处理都不能用了 |
 | 5 | Multi-agent | Senior | [A four-agent ad-creative pipeline lets one stage's bad output flow silently downstream: designing contracts between agents](modules/daily-2026-11-23.md#q5) | 一个由四个 Agent 组成的广告创意流水线，让某一环节的错误输出悄无声息地流向下游：设计 Agent 之间的契约 |
+
+## [Daily set · Nov 24 · 每日新题 · 11 月 24 日](modules/daily-2026-11-24.md)
+
+Five new agent questions: a tool that hands the model a shopper's whole profile, merchant policy versus platform defaults in retrieval, editing and regenerating messages as conversation branches, a judge upgrade that looked like a quality drop, and thirty workers sharing one API rate limit.
+
+> 五道新的 Agent 题：把顾客完整资料交给模型的工具、检索中商家政策与平台默认规则的冲突、把编辑和重新生成消息当作对话分支、一次看起来像质量下降的评审升级，以及三十个工作 Agent 共享同一个 API 限额。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Safety & Security | Medium | [The order-status tool returns the shopper's whole profile, and phone numbers and street addresses start showing up in chat replies and traces](modules/daily-2026-11-24.md#q1) | 订单状态工具返回了顾客的完整资料，于是电话号码和街道地址开始出现在聊天回复和链路追踪里 |
+| 2 | RAG | Medium | [The help assistant tells a shopper returns are accepted for 30 days, quoting the platform's default, while the merchant's own policy says 14](modules/daily-2026-11-24.md#q2) | 帮助助手告诉顾客退货期限是 30 天，引用的是平台默认规则，而商家自己的政策写的是 14 天 |
+| 3 | Context & Memory | Hard | [Merchants can edit an earlier message or regenerate a reply in the planning chat, and the team's in-place edits break caching and fail on newer models](modules/daily-2026-11-24.md#q3) | 商家可以在规划聊天里编辑之前的消息或重新生成回复，而团队采用的原地修改方式破坏了缓存，并在较新的模型上报错 |
+| 4 | Evals & Observability | Hard | [After the LLM judge was moved to a newer model, the support-quality dashboard dropped 9 points overnight, and nothing about the agent had changed](modules/daily-2026-11-24.md#q4) | 把 LLM 评审换成更新的模型后，客服质量看板一夜之间掉了 9 个点，而 Agent 本身没有任何改动 |
+| 5 | Multi-agent | Senior | [Thirty parallel worker agents hit the Meta Marketing API rate limit together, all retry at once, and the coordinator marks half the ad accounts as failed](modules/daily-2026-11-24.md#q5) | 三十个并行的工作 Agent 同时撞上 Meta Marketing API 的限流，一起重试，协调者把一半的广告账户标记为失败 |
