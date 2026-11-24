@@ -1,0 +1,203 @@
+{
+  "id": "daily-2026-11-25",
+  "order": 20261125,
+  "kind": "daily",
+  "title": "Daily set · Nov 25",
+  "title_zh": "每日新题 · 11 月 25 日",
+  "summary": "Five new agent questions: recording and replaying agent runs to debug a wrong deletion, server-side request forgery through a URL-fetching tool, an eval set that missed a new product line, a batch read tool instead of 40 calls, and keeping one merchant's bulk job from rate-limiting everyone's live chat.",
+  "summary_zh": "五道新的 Agent 题：通过录制与回放来调试一次删错的操作、借抓取 URL 的工具实施的服务端请求伪造、漏掉新产品线的评测集、用批量读取工具代替 40 次调用，以及防止一个商家的批量任务让所有人的实时聊天被限流。",
+  "generatedAt": "2026-11-25T06:54:47+08:00",
+  "questions": [
+    {
+      "id": "agent-daily-20261125-1",
+      "topic": "Agent Loop",
+      "difficulty": "Hard",
+      "title": "A merchant says the agent deleted the wrong discount yesterday, and nobody can reproduce it: building record and replay for agent runs",
+      "title_zh": "商家说 Agent 昨天删错了一个折扣，可谁都复现不出来：为 Agent 运行构建录制与回放",
+      "question": "A merchant asked the store assistant to \"remove the Black Friday VIP discount\", and it deleted the public Black Friday code instead. The team reran the same request against a staging copy and the agent did the right thing every time. The logs keep the final reply and a list of tool names, but not the tool inputs or results. Leadership asks what happened and how to make the next incident debuggable.\n\nExplain why rerunning did not help and design the fix.",
+      "question_zh": "一位商家让店铺助手「删除黑五 VIP 折扣」，结果它删掉的是公开的黑五折扣码。团队在预发环境的副本上重跑同一个请求，Agent 每次都做对了。日志只保留了最终回复和一串工具名称，没有工具的输入和结果。管理层想知道发生了什么，以及怎样让下一次事故可以被调试。\n\n解释为什么重跑没有帮助，并设计修复方案。",
+      "answer": "**The core idea.** An agent run is the product of the model's choices and the world it saw: the tool results at that moment. Rerunning today changes both. To debug a run you need the exact inputs it saw, recorded at the time, and a way to replay them without touching production.\n\n**Why the rerun was useless.**\n\n- The world changed: yesterday the store had two codes with similar names; staging had different data, so the ambiguity never appeared.\n- The model's output varies from run to run, and you cannot pin it with sampling settings: from API version `2026-10-21`, sending `temperature`, `top_p` or `top_k` returns a 400 on every model. Determinism has to come from the harness, not the model.\n- The logs dropped exactly what mattered: the inputs and results of the tool calls.\n\n**Record.** For every run, store the request each turn sent (system prompt version, tool definitions version, messages), each response as returned including `stop_reason`, and every tool call with its input, result and timing. Store them with the run ID and keep them as long as your retention policy allows, with personal data redacted.\n\n**Replay.** Feed the recorded tool results back instead of calling real tools:\n\n```go\n// Replayer serves recorded results in order and refuses anything the\n// recording does not contain, so a replay can never touch production.\ntype Replayer struct {\n\tsteps []Step\n\tnext  int\n}\n\nvar ErrDiverged = errors.New(\"replay diverged from the recording\")\n\nfunc (r *Replayer) Call(tool, input string) (Step, error) {\n\tif r.next >= len(r.steps) {\n\t\treturn Step{}, fmt.Errorf(\"%w: extra call %s(%s)\", ErrDiverged, tool, input)\n\t}\n\ts := r.steps[r.next]\n\tif s.Tool != tool || s.Input != input {\n\t\treturn Step{}, fmt.Errorf(\"%w at step %d: recorded %s(%s), got %s(%s)\",\n\t\t\tErrDiverged, r.next, s.Tool, s.Input, tool, input)\n\t}\n\tr.next++\n\treturn s, nil\n}\n```\n\n- With the recording alone, you can read exactly what the agent saw. Here, `list_discounts` returned `BF20` and `BF20-VIP`, and the model chose an ID; the bug is visible without calling the model again.\n- When testing a fix, replay with the model in the loop. The replayer serves recorded results and stops at the first call that differs; in a local run it reported the divergence at step 1 instead of deleting anything.\n- Run replays many times: one good replay proves little when outputs vary. Count how often the old prompt picks the wrong ID versus the new one.\n\n**Fix the actual bug too.** Ambiguous names plus an irreversible delete is a design problem: the tool should show what it is about to delete and require confirmation, and a recorded incident becomes an eval case.\n\n**Trade-offs.** Full recording costs storage and needs strict access control, because transcripts contain merchant data. Record everything for side-effecting tools and sample read-only ones if volume is a problem.",
+      "answer_zh": "**核心思想。** 一次 Agent 运行，是模型的选择和它所看到的世界共同作用的结果，也就是当时的工具结果。今天重跑会让这两者都发生变化。要调试一次运行，你需要当时记录下来的、它所看到的确切输入，以及一种不触碰生产环境就能回放它们的方法。\n\n**为什么重跑没有用。**\n\n- 世界变了：昨天店铺里有两个名称相近的折扣码；预发环境的数据不同，所以那种歧义根本没有出现。\n- 模型的输出每次运行都会不同，而且你无法通过采样参数把它固定住：从 API 版本 `2026-10-21` 起，在任何模型上发送 `temperature`、`top_p` 或 `top_k` 都会返回 400。确定性必须来自框架，而不是模型。\n- 日志恰恰丢掉了最关键的东西：工具调用的输入和结果。\n\n**录制。** 对每一次运行，保存每一轮发出的请求（系统提示词版本、工具定义版本、消息）、原样返回的每个响应（包括 `stop_reason`），以及每一次工具调用的输入、结果和耗时。把它们和运行 ID 一起保存，并在保留策略允许的范围内保留，同时对个人数据做脱敏。\n\n**回放。** 把录制下来的工具结果喂回去，而不是调用真实工具：\n\n```go\n// Replayer serves recorded results in order and refuses anything the\n// recording does not contain, so a replay can never touch production.\ntype Replayer struct {\n\tsteps []Step\n\tnext  int\n}\n\nvar ErrDiverged = errors.New(\"replay diverged from the recording\")\n\nfunc (r *Replayer) Call(tool, input string) (Step, error) {\n\tif r.next >= len(r.steps) {\n\t\treturn Step{}, fmt.Errorf(\"%w: extra call %s(%s)\", ErrDiverged, tool, input)\n\t}\n\ts := r.steps[r.next]\n\tif s.Tool != tool || s.Input != input {\n\t\treturn Step{}, fmt.Errorf(\"%w at step %d: recorded %s(%s), got %s(%s)\",\n\t\t\tErrDiverged, r.next, s.Tool, s.Input, tool, input)\n\t}\n\tr.next++\n\treturn s, nil\n}\n```\n\n- 仅凭录制内容，你就能准确读出 Agent 当时看到了什么。在这个例子里，`list_discounts` 返回了 `BF20` 和 `BF20-VIP`，模型选了一个 ID；不用再次调用模型，bug 就一目了然。\n- 测试修复时，让模型参与回放。回放器提供录制下来的结果，并在第一个不一致的调用处停下；在本地运行中，它在第 1 步报告了分歧，而没有删除任何东西。\n- 回放要跑很多次：输出本身会变化，一次正确的回放说明不了什么。统计旧提示词选错 ID 的频率，再和新提示词对比。\n\n**也要修复真正的 bug。** 名称有歧义、再加上不可撤销的删除，这是一个设计问题：工具应当展示它将要删除的对象并要求确认；而这次录制下来的事故，也应当变成一个评测用例。\n\n**权衡。** 完整录制会占用存储，而且需要严格的访问控制，因为对话记录里包含商家数据。对有副作用的工具要全部录制；如果数据量是个问题，只读工具可以抽样录制。",
+      "followups": [
+        "How long would you keep recordings, and who may read them?",
+        "How would you turn a recorded incident into a regression test that stays useful after tools change?"
+      ],
+      "followups_zh": [
+        "录制内容你会保留多久？谁可以查看？",
+        "你会如何把一次录制下来的事故变成回归测试，并在工具变化后依然有用？"
+      ],
+      "vocab": [
+        {
+          "en": "record and replay",
+          "zh": "录制与回放"
+        },
+        {
+          "en": "divergence",
+          "zh": "分歧"
+        },
+        {
+          "en": "nondeterminism",
+          "zh": "非确定性"
+        },
+        {
+          "en": "regression test",
+          "zh": "回归测试"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261125-2",
+      "topic": "Safety & Security",
+      "difficulty": "Hard",
+      "title": "The product-import agent fetches any URL a merchant pastes, and a security researcher makes it read the cloud metadata service",
+      "title_zh": "商品导入 Agent 会抓取商家粘贴的任意 URL，一位安全研究员借此让它读取了云元数据服务",
+      "question": "Merchants can say \"import products from this supplier page\" and paste a link. The agent calls a custom `fetch_url` tool that runs in the import service and returns the page text. A researcher pasted a link to an internal address, and the agent returned data from the cloud provider's metadata endpoint. A second attempt used a public domain that redirected to an internal address and also worked.\n\nExplain the vulnerability and fix it.",
+      "question_zh": "商家可以说「从这个供应商页面导入商品」，并粘贴一个链接。Agent 会调用一个自定义的 `fetch_url` 工具，它运行在导入服务里，返回页面文本。一位研究员粘贴了一个指向内网地址的链接，Agent 返回了云厂商元数据端点的数据。第二次尝试用了一个会重定向到内网地址的公网域名，同样成功了。\n\n解释这个漏洞，并修复它。",
+      "answer": "**The core idea.** This is server-side request forgery (SSRF): the attacker cannot reach your internal network, but your server can, and it will fetch whatever URL it is given. Putting an agent in the middle changes nothing except that the URL may now come from a prompt, a product description or a supplier page rather than a form field.\n\n**Why simple checks fail.** Checking the hostname string misses names that resolve to internal IPs, and checking once before fetching misses redirects and DNS answers that change between the check and the connection. The decision has to happen at connect time, on the IP actually being dialed.\n\n**The fix: a fetch client that refuses internal destinations on every connection.**\n\n```go\n// safeControl runs after DNS resolution, on the exact IP being dialed,\n// so DNS tricks and redirects cannot reach internal addresses.\nfunc safeControl(network, address string, _ syscall.RawConn) error {\n\thost, _, err := net.SplitHostPort(address)\n\tif err != nil {\n\t\treturn err\n\t}\n\tip := net.ParseIP(host)\n\tif ip == nil || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||\n\t\tip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {\n\t\treturn fmt.Errorf(\"%w: %s\", errBlocked, ip)\n\t}\n\treturn nil\n}\n\nfunc newFetchClient() *http.Client {\n\td := &net.Dialer{Timeout: 5 * time.Second, Control: safeControl}\n\treturn &http.Client{\n\t\tTimeout:   15 * time.Second,\n\t\tTransport: &http.Transport{DialContext: d.DialContext, Proxy: nil},\n\t\tCheckRedirect: func(req *http.Request, via []*http.Request) error {\n\t\t\tif len(via) >= 3 {\n\t\t\t\treturn errors.New(\"too many redirects\")\n\t\t\t}\n\t\t\treturn nil // each redirect dials again and passes safeControl again\n\t\t},\n\t}\n}\n```\n\n- In a local test, a plain client read a secret from a server on 127.0.0.1, and this client refused the connection. The check blocked 169.254.169.254, 10.0.0.5, `::1` and `fd00::1`, and allowed a public address.\n- Redirects dial again, so each hop passes the same check. Disable proxies for this client, or the proxy makes the connection instead.\n- Extend the list for your network: shared address ranges such as 100.64.0.0/10 are not covered by `IsPrivate`, and your own service subnets may need to be added.\n\n**Defense in depth.** Run fetching in a separate service with no credentials and egress only to the internet, require the cloud's token-based metadata access so a plain GET returns nothing useful, cap response size and time, allow only http and https, and return text, not headers, to the model.\n\n**The agent angle.** The model will try URLs it finds in content it reads, so treat every URL from a tool result or a user as untrusted. On the Claude API, the server-side web fetch tool only fetches URLs already present in the conversation and runs on Anthropic's infrastructure rather than inside your network; it can replace a home-grown fetcher where its limits fit.\n\n**Trade-offs.** Some merchants host suppliers' catalogs on private networks reachable through a VPN; those need an explicit allow list per merchant, never a general exception.",
+      "answer_zh": "**核心思想。** 这是服务端请求伪造（SSRF）：攻击者访问不到你的内网，但你的服务器可以，而且给它什么 URL 它就抓什么。在中间放一个 Agent 并不会改变什么，唯一的区别是 URL 现在可能来自提示词、商品描述或供应商页面，而不是表单字段。\n\n**为什么简单的检查会失败。** 检查主机名字符串，会漏掉那些解析到内网 IP 的域名；在抓取前检查一次，又会漏掉重定向，以及在检查和连接之间发生变化的 DNS 解析结果。判断必须发生在建立连接时，针对的是实际要连接的那个 IP。\n\n**修复方法：一个在每次连接时都拒绝内网目标的抓取客户端。**\n\n```go\n// safeControl runs after DNS resolution, on the exact IP being dialed,\n// so DNS tricks and redirects cannot reach internal addresses.\nfunc safeControl(network, address string, _ syscall.RawConn) error {\n\thost, _, err := net.SplitHostPort(address)\n\tif err != nil {\n\t\treturn err\n\t}\n\tip := net.ParseIP(host)\n\tif ip == nil || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||\n\t\tip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {\n\t\treturn fmt.Errorf(\"%w: %s\", errBlocked, ip)\n\t}\n\treturn nil\n}\n\nfunc newFetchClient() *http.Client {\n\td := &net.Dialer{Timeout: 5 * time.Second, Control: safeControl}\n\treturn &http.Client{\n\t\tTimeout:   15 * time.Second,\n\t\tTransport: &http.Transport{DialContext: d.DialContext, Proxy: nil},\n\t\tCheckRedirect: func(req *http.Request, via []*http.Request) error {\n\t\t\tif len(via) >= 3 {\n\t\t\t\treturn errors.New(\"too many redirects\")\n\t\t\t}\n\t\t\treturn nil // each redirect dials again and passes safeControl again\n\t\t},\n\t}\n}\n```\n\n- 在本地测试中，普通客户端从 127.0.0.1 上的服务读到了秘密数据，而这个客户端拒绝了连接。这个检查拦截了 169.254.169.254、10.0.0.5、`::1` 和 `fd00::1`，放行了公网地址。\n- 重定向会重新建立连接，所以每一跳都会经过同样的检查。要为这个客户端禁用代理，否则建立连接的就变成了代理。\n- 根据你的网络扩充这份列表：像 100.64.0.0/10 这样的共享地址段不在 `IsPrivate` 的覆盖范围内，你自己的服务网段也可能需要加进去。\n\n**纵深防御。** 让抓取在一个单独的服务里运行，它不持有任何凭据，出站只能访问互联网；云元数据访问要求使用基于令牌的方式，这样一个普通的 GET 拿不到任何有用的东西；限制响应大小和时间，只允许 http 和 https，并且只把文本（而不是响应头）返回给模型。\n\n**Agent 视角。** 模型会尝试它在读到的内容里发现的 URL，所以要把来自工具结果或用户的每个 URL 都当作不可信的。在 Claude API 上，服务端的 web fetch 工具只抓取对话中已经出现过的 URL，而且运行在 Anthropic 的基础设施上，而不是你的内网里；在它的限制能满足需求时，可以用它来替代自研的抓取器。\n\n**权衡。** 有些商家把供应商的商品目录放在只能通过 VPN 访问的私有网络里；这种情况需要为每个商家单独配置明确的白名单，绝不能开一个通用的例外。",
+      "followups": [
+        "How would you test the fetcher against DNS rebinding?",
+        "Which other agent tools in your system make outbound requests on the model's behalf?"
+      ],
+      "followups_zh": [
+        "你会如何测试这个抓取器能否抵御 DNS 重绑定？",
+        "你的系统里还有哪些 Agent 工具会代表模型发起出站请求？"
+      ],
+      "vocab": [
+        {
+          "en": "server-side request forgery",
+          "zh": "服务端请求伪造（SSRF）"
+        },
+        {
+          "en": "metadata endpoint",
+          "zh": "元数据端点"
+        },
+        {
+          "en": "egress",
+          "zh": "出站流量"
+        },
+        {
+          "en": "allow list",
+          "zh": "白名单"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261125-3",
+      "topic": "Evals & Observability",
+      "difficulty": "Medium",
+      "title": "The support agent passes every eval after launching subscriptions, while subscription questions fill the escalation queue",
+      "title_zh": "上线订阅功能后，客服 Agent 通过了所有评测，而订阅相关的问题却塞满了转人工队列",
+      "question": "The platform launched subscription products last month. The support agent's eval suite, built last spring from real tickets, still passes at the usual level after every prompt change. Meanwhile, the escalation queue is full of questions like \"how do I skip next month's box\" and \"why was I charged twice for my plan\", which the agent answers badly.\n\nWhy did the eval miss this, and how should the eval set stay current?",
+      "question_zh": "平台上个月上线了订阅类商品。客服 Agent 的评测集是去年春天基于真实工单建立的，每次修改提示词后，它仍然以往常的水平通过。与此同时，转人工队列里塞满了「怎么跳过下个月的盒子」「为什么我的订阅被扣了两次款」这类问题，而 Agent 回答得很糟糕。\n\n评测为什么漏掉了这些？评测集应当如何保持与时俱进？",
+      "answer": "**The core idea.** An eval measures the agent on the questions in the eval, not on the questions customers ask today. When the product changes, the traffic changes, and an eval built from old traffic keeps passing while the new part of the business goes unmeasured. A green eval with a rising escalation rate is the signature of coverage drift.\n\n**Detect the gap.** Classify production conversations by intent with a cheap model or rules, and compare that mix with the eval set's mix every week:\n\n```go\n// coverage compares how often each intent appears in recent production\n// traffic with how often it appears in the eval set.\nfunc coverage(prod, eval map[string]int) []string {\n\tvar pt, et int\n\tfor _, n := range prod {\n\t\tpt += n\n\t}\n\tfor _, n := range eval {\n\t\tet += n\n\t}\n\tvar out []string\n\tfor intent, n := range prod {\n\t\tps := float64(n) / float64(pt)\n\t\tes := float64(eval[intent]) / float64(et)\n\t\tif ps >= 0.05 && es < ps/2 {\n\t\t\tout = append(out, fmt.Sprintf(\"%s: %.0f%% of traffic, %.0f%% of eval\", intent, 100*ps, 100*es))\n\t\t}\n\t}\n\tsort.Strings(out)\n\treturn out\n}\n```\n\nWith the snippet's sample data, subscriptions were 24% of traffic and 1% of the eval, which is exactly the hole the escalation queue revealed.\n\n**Refresh the set.** Sample new cases from production every month, weighted toward under-covered intents and toward escalations, label them, and add them. Keep a stable core that never changes so scores stay comparable over time, and report the new slices separately until they have history.\n\n- Report scores per intent, not just overall; a 94% average can hide a 40% slice.\n- Tie launches to the eval: a new product area is not ready for the agent until it has eval cases and the policies the agent needs to answer them.\n- Watch production signals that need no labels, such as escalation rate, repeat contacts and thumbs-down by intent, as an early warning between eval refreshes.\n\n**Learn from escalations directly.** Every escalated conversation already has a human's answer attached. Turn a weekly sample of them into eval cases, with the human reply as the reference and a rubric of what a correct answer must contain, and you get cases from exactly the place the agent is failing.\n\n**Trade-offs.** Labeling new cases costs time, and a set that keeps changing makes long-term trends harder to read; the stable core plus dated slices is the compromise. Synthetic cases written by a model can fill a gap quickly but should be checked against real tickets, because invented questions are often easier than real ones.",
+      "answer_zh": "**核心思想。** 评测衡量的是 Agent 在评测集里那些问题上的表现，而不是客户今天在问的问题。产品变了，流量就会变；基于旧流量建立的评测会一直通过，而业务的新部分却无人度量。评测全绿、转人工率却在上升，这正是覆盖漂移的典型特征。\n\n**发现缺口。** 用一个便宜的模型或规则按意图给生产对话分类，并每周把这个分布和评测集的分布做对比：\n\n```go\n// coverage compares how often each intent appears in recent production\n// traffic with how often it appears in the eval set.\nfunc coverage(prod, eval map[string]int) []string {\n\tvar pt, et int\n\tfor _, n := range prod {\n\t\tpt += n\n\t}\n\tfor _, n := range eval {\n\t\tet += n\n\t}\n\tvar out []string\n\tfor intent, n := range prod {\n\t\tps := float64(n) / float64(pt)\n\t\tes := float64(eval[intent]) / float64(et)\n\t\tif ps >= 0.05 && es < ps/2 {\n\t\t\tout = append(out, fmt.Sprintf(\"%s: %.0f%% of traffic, %.0f%% of eval\", intent, 100*ps, 100*es))\n\t\t}\n\t}\n\tsort.Strings(out)\n\treturn out\n}\n```\n\n用代码片段里的示例数据计算，订阅类问题占流量的 24%，却只占评测集的 1%，这正是转人工队列暴露出来的那个漏洞。\n\n**更新评测集。** 每月从生产环境抽样新用例，偏重于覆盖不足的意图和被转人工的对话，标注后加入评测集。保留一个永远不变的稳定核心，让分数在时间上保持可比；新增的部分要单独报告，直到它们积累了足够的历史数据。\n\n- 按意图分别报告分数，而不只是给一个总分；94% 的平均分可能掩盖一个只有 40% 的分组。\n- 把功能发布和评测绑定：一个新的产品领域，在拥有评测用例、以及 Agent 回答这些问题所需的政策文档之前，就不算准备好交给 Agent。\n- 关注那些不需要标注的生产信号，比如按意图统计的转人工率、重复咨询和差评，作为两次评测更新之间的预警。\n\n**直接从转人工的对话中学习。** 每一段转人工的对话都已经附带了人工的回答。每周从中抽样，把它们变成评测用例：以人工回复作为参考答案，再加上一份说明正确答案必须包含哪些内容的评分标准，这样你得到的用例，恰恰来自 Agent 正在失败的地方。\n\n**权衡。** 标注新用例需要时间，而不断变化的评测集会让长期趋势更难解读；稳定核心加上按日期划分的新增部分，就是折中方案。由模型生成的合成用例可以快速填补缺口，但要对照真实工单检查，因为编造的问题往往比真实问题更简单。",
+      "followups": [
+        "How would you classify intents in production without sending all conversations to a human?",
+        "What should block a prompt change from shipping: the overall score or a per-intent score?"
+      ],
+      "followups_zh": [
+        "你会如何在不把所有对话都交给人工的情况下，对生产环境中的意图进行分类？",
+        "应该由什么来阻止一次提示词变更上线：总分，还是按意图的分数？"
+      ],
+      "vocab": [
+        {
+          "en": "coverage drift",
+          "zh": "覆盖漂移"
+        },
+        {
+          "en": "intent",
+          "zh": "意图"
+        },
+        {
+          "en": "stable core",
+          "zh": "稳定核心"
+        },
+        {
+          "en": "slice",
+          "zh": "分组（切片）"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261125-4",
+      "topic": "Tools & MCP",
+      "difficulty": "Medium",
+      "title": "\"Which of my 40 bestsellers are out of stock?\" makes the agent call get_product 40 times, filling the context with full product records",
+      "title_zh": "「我的 40 个畅销品里哪些缺货了？」让 Agent 调用了 40 次 get_product，上下文里塞满了完整的商品记录",
+      "question": "The merchant assistant has a `get_product(id)` tool that returns the full product: title, description, variants, images, SEO fields and inventory. For a question about 40 products, the agent makes 40 calls, the context grows by tens of thousands of tokens of descriptions nobody needed, and answers get slower and more expensive. Sometimes the agent gives up halfway and answers from the first 20.\n\nRedesign the tool.",
+      "question_zh": "商家助手有一个 `get_product(id)` 工具，它返回完整的商品：标题、描述、变体、图片、SEO 字段和库存。对于一个涉及 40 个商品的问题，Agent 会调用 40 次，上下文增加了几万个没人需要的描述 token，回答变得更慢也更贵。有时 Agent 做到一半就放弃了，只根据前 20 个来回答。\n\n重新设计这个工具。",
+      "answer": "**The core idea.** Tools should fit the questions, not the database. A question about many items needs one call that takes many IDs and returns only the fields asked for. Otherwise the model pays, in turns and tokens, for work that code could do in one query.\n\n**The fix: a batch read tool with field selection.**\n\n```go\ntype getProductsInput struct {\n\tIDs    []string `json:\"ids\"`    // up to 100 per call\n\tFields []string `json:\"fields\"` // e.g. [\"title\",\"price\",\"inventory\"]\n}\n\ntype productResult struct {\n\tFound    []map[string]any `json:\"found\"`\n\tNotFound []string         `json:\"not_found,omitempty\"`\n}\n\nfunc getProducts(raw []byte, db map[string]map[string]any) (productResult, error) {\n\tvar in getProductsInput\n\tif err := json.Unmarshal(raw, &in); err != nil {\n\t\treturn productResult{}, err\n\t}\n\tif len(in.IDs) == 0 || len(in.IDs) > 100 {\n\t\treturn productResult{}, fmt.Errorf(\"ids must have 1 to 100 entries, got %d\", len(in.IDs))\n\t}\n\tvar out productResult\n\tfor _, id := range in.IDs {\n\t\tp, ok := db[id]\n\t\tif !ok {\n\t\t\tout.NotFound = append(out.NotFound, id)\n\t\t\tcontinue\n\t\t}\n\t\trow := map[string]any{\"id\": id}\n\t\tfor _, f := range in.Fields {\n\t\t\tif v, ok := p[f]; ok {\n\t\t\t\trow[f] = v\n\t\t\t}\n\t\t}\n\t\tout.Found = append(out.Found, row)\n\t}\n\treturn out, nil\n}\n```\n\n- In a local run, one call for three IDs returned two products with only `title` and `inventory`, plus the missing ID in `not_found`, so the model knows the answer is complete.\n- Cap the batch size and say so in the description; return a clear error that names the limit when the model asks for more.\n- Better still for this question: a filter tool, \"bestsellers where inventory is 0\", so the database does the work and the model reads only the answer.\n\n**When parallel calls are fine.** Claude can issue several tool calls in one turn, and your harness should run them concurrently and return all results in a single user message. That helps for a handful of different lookups. It does not fix 40 calls that each return a large record, because every result still lands in the context.\n\n**Another option.** With programmatic tool calling, the model writes code in the code execution tool that calls your tool in a loop and keeps only the filtered result, so intermediate records never enter the context. Anthropic's documentation reports fewer input tokens for agentic search workloads with it. It suits exploratory questions where you cannot predict the right batch tool.\n\n**Write the description for the model.** Say in the tool description that it takes many IDs at once and that the model should request only the fields it needs, with an example. Models follow the shape a description shows; a tool described as \"get a product\" will be called once per product.\n\n**Trade-offs.** More specific tools mean more tools to describe and maintain; keep the set small by giving a few tools good parameters rather than adding one tool per question.",
+      "answer_zh": "**核心思想。** 工具应当适配问题，而不是适配数据库。涉及很多条目的问题，需要一次接受多个 ID、只返回所需字段的调用。否则，模型就要用轮次和 token 为本可以用一次查询完成的工作买单。\n\n**修复方法：一个支持字段选择的批量读取工具。**\n\n```go\ntype getProductsInput struct {\n\tIDs    []string `json:\"ids\"`    // up to 100 per call\n\tFields []string `json:\"fields\"` // e.g. [\"title\",\"price\",\"inventory\"]\n}\n\ntype productResult struct {\n\tFound    []map[string]any `json:\"found\"`\n\tNotFound []string         `json:\"not_found,omitempty\"`\n}\n\nfunc getProducts(raw []byte, db map[string]map[string]any) (productResult, error) {\n\tvar in getProductsInput\n\tif err := json.Unmarshal(raw, &in); err != nil {\n\t\treturn productResult{}, err\n\t}\n\tif len(in.IDs) == 0 || len(in.IDs) > 100 {\n\t\treturn productResult{}, fmt.Errorf(\"ids must have 1 to 100 entries, got %d\", len(in.IDs))\n\t}\n\tvar out productResult\n\tfor _, id := range in.IDs {\n\t\tp, ok := db[id]\n\t\tif !ok {\n\t\t\tout.NotFound = append(out.NotFound, id)\n\t\t\tcontinue\n\t\t}\n\t\trow := map[string]any{\"id\": id}\n\t\tfor _, f := range in.Fields {\n\t\t\tif v, ok := p[f]; ok {\n\t\t\t\trow[f] = v\n\t\t\t}\n\t\t}\n\t\tout.Found = append(out.Found, row)\n\t}\n\treturn out, nil\n}\n```\n\n- 在本地运行中，一次针对三个 ID 的调用返回了两个商品，只包含 `title` 和 `inventory`，缺失的 ID 列在 `not_found` 里，这样模型就知道答案是完整的。\n- 限制批量大小，并在描述中写明；当模型请求超出上限时，返回一个点明限制的清晰错误。\n- 对这个问题来说更好的做法是：提供一个筛选工具，比如「库存为 0 的畅销品」，让数据库去完成工作，模型只读取答案。\n\n**什么时候并行调用是可以的。** Claude 可以在一轮里发起多个工具调用，你的框架应当并发执行它们，并在一条用户消息里返回全部结果。这对少量不同的查询有帮助。但它解决不了 40 次调用各自返回一大条记录的问题，因为每个结果仍然会进入上下文。\n\n**另一种选择。** 使用程序化工具调用时，模型会在代码执行工具里写代码，循环调用你的工具，只保留过滤后的结果，这样中间记录永远不会进入上下文。Anthropic 的文档显示，在智能体搜索类工作负载中，它能减少输入 token。它适合那些你无法预先设计出合适批量工具的探索性问题。\n\n**为模型写好描述。** 在工具描述里说明它一次可以接收多个 ID，模型应当只请求它需要的字段，并附上一个示例。模型会照着描述所展示的方式来调用；一个被描述为「获取一个商品」的工具，就会被逐个商品地调用。\n\n**权衡。** 工具越专门，需要描述和维护的工具就越多；与其每个问题加一个工具，不如给少数几个工具设计好参数，让工具集保持精简。",
+      "followups": [
+        "How would you decide the default fields a batch tool returns when the model does not ask for any?",
+        "When would you prefer programmatic tool calling over adding a new tool?"
+      ],
+      "followups_zh": [
+        "当模型没有指定字段时，你会如何决定批量工具默认返回哪些字段？",
+        "什么时候你会选择程序化工具调用，而不是新增一个工具？"
+      ],
+      "vocab": [
+        {
+          "en": "batch read",
+          "zh": "批量读取"
+        },
+        {
+          "en": "field selection",
+          "zh": "字段选择"
+        },
+        {
+          "en": "parallel tool calls",
+          "zh": "并行工具调用"
+        },
+        {
+          "en": "programmatic tool calling",
+          "zh": "程序化工具调用"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261125-5",
+      "topic": "Production",
+      "difficulty": "Senior",
+      "title": "One merchant's bulk description job uses the whole Claude rate limit, and live shopper chat for every other store starts getting 429s",
+      "title_zh": "一个商家的批量商品描述任务用光了整个 Claude 速率限额，其他所有店铺的顾客实时聊天开始收到 429",
+      "question": "All AI features share one Claude organization. On Monday morning a large merchant started regenerating descriptions for 80,000 products. Within minutes, the shopper chat assistant for every other store began failing with rate-limit errors, and the SDK's automatic retries made it worse. The bulk job itself finished fine.\n\nDesign how features and tenants share the capacity.",
+      "question_zh": "所有 AI 功能共用一个 Claude 组织。周一早上，一个大商家开始为 8 万个商品重新生成描述。几分钟之内，其他所有店铺的顾客聊天助手都开始因限流错误而失败，SDK 的自动重试让情况更糟。而那个批量任务自己倒是顺利完成了。\n\n设计各功能和各租户如何共享这份容量。",
+      "answer": "**The core idea.** A rate limit is a shared budget, and without rules the most aggressive caller wins. Live, interactive traffic and bulk background work have very different value per second, so they must not compete on equal terms, and one tenant's job must not be able to take all of the background share either.\n\n**Move bulk work off the shared path.** Description generation does not need an answer in seconds. Send it through Message Batches, which run asynchronously at half the price and keep that work out of the real-time traffic. That alone would have prevented Monday.\n\n**Admission control for what stays real-time.**\n\n```go\n// Budget splits one organization-wide tokens-per-minute allowance.\ntype Budget struct {\n\tmu        sync.Mutex\n\tperMinute int\n\treserved  int // kept for Interactive traffic\n\tused      map[Class]int\n\tperTenant map[string]int\n\ttenantCap int // max share of Background for one merchant\n\twindow    time.Time\n}\n\nfunc (b *Budget) Allow(c Class, tenant string, tokens int, now time.Time) bool {\n\tb.mu.Lock()\n\tdefer b.mu.Unlock()\n\tif now.Sub(b.window) >= time.Minute {\n\t\tb.window, b.used, b.perTenant = now, map[Class]int{}, map[string]int{}\n\t}\n\ttotal := b.used[Interactive] + b.used[Background]\n\tif total+tokens > b.perMinute {\n\t\treturn false\n\t}\n\tif c == Background {\n\t\tif b.used[Background]+tokens > b.perMinute-b.reserved {\n\t\t\treturn false // leave the reserve for live chat\n\t\t}\n\t\tif b.perTenant[tenant]+tokens > b.tenantCap {\n\t\t\treturn false // one merchant cannot take all background capacity\n\t\t}\n\t\tb.perTenant[tenant] += tokens\n\t}\n\tb.used[c] += tokens\n\treturn true\n}\n```\n\n- Reserve a share for interactive traffic, so background work can only use what is left.\n- Cap each tenant's share of the background budget. In a local run, one merchant got 5 of 10 requests, another merchant still got through, and live chat was still allowed.\n- Count tokens from each response's `usage`, not request counts, since a long description job and a short chat turn differ by orders of magnitude.\n\n**Retries and degradation.** When the API returns 429, honor `retry-after` and do not let every layer retry independently; the SDKs already retry twice by default. Under pressure, degrade in a fixed order: pause background jobs first, then shorten or skip optional AI features, and keep checkout-adjacent and support chat for last. Fast mode has its own rate limit, which can serve as separate headroom for the few latency-critical routes that justify its price.\n\n**Make it visible.** Dashboards per feature and per tenant for tokens, 429s and queue time, and an alert when interactive traffic sees any rate-limit errors, because that should never happen if the reserve works.\n\n**Trade-offs.** A reserve leaves capacity idle when chat is quiet; let background work borrow it with short leases that are revoked first under load. Per-tenant caps can slow a large merchant's legitimate job, so expose job progress and an expected finish time rather than letting it fail silently.",
+      "answer_zh": "**核心思想。** 速率限额是一份共享预算，没有规则的话，最激进的调用方就会胜出。实时交互流量和批量后台任务，每秒带来的价值截然不同，所以它们不能平等竞争；同时，单个租户的任务也不能占满全部后台份额。\n\n**把批量工作移出共享链路。** 商品描述生成不需要在几秒内给出答案。把它交给 Message Batches，它以异步方式运行、价格减半，并且让这部分工作不进入实时流量。单这一点就足以避免周一的事故。\n\n**对仍然需要实时处理的流量做准入控制。**\n\n```go\n// Budget splits one organization-wide tokens-per-minute allowance.\ntype Budget struct {\n\tmu        sync.Mutex\n\tperMinute int\n\treserved  int // kept for Interactive traffic\n\tused      map[Class]int\n\tperTenant map[string]int\n\ttenantCap int // max share of Background for one merchant\n\twindow    time.Time\n}\n\nfunc (b *Budget) Allow(c Class, tenant string, tokens int, now time.Time) bool {\n\tb.mu.Lock()\n\tdefer b.mu.Unlock()\n\tif now.Sub(b.window) >= time.Minute {\n\t\tb.window, b.used, b.perTenant = now, map[Class]int{}, map[string]int{}\n\t}\n\ttotal := b.used[Interactive] + b.used[Background]\n\tif total+tokens > b.perMinute {\n\t\treturn false\n\t}\n\tif c == Background {\n\t\tif b.used[Background]+tokens > b.perMinute-b.reserved {\n\t\t\treturn false // leave the reserve for live chat\n\t\t}\n\t\tif b.perTenant[tenant]+tokens > b.tenantCap {\n\t\t\treturn false // one merchant cannot take all background capacity\n\t\t}\n\t\tb.perTenant[tenant] += tokens\n\t}\n\tb.used[c] += tokens\n\treturn true\n}\n```\n\n- 为交互流量预留一部分份额，让后台任务只能使用剩下的部分。\n- 限制每个租户在后台预算中的份额。在本地运行中，一个商家的 10 个请求只放行了 5 个，另一个商家的请求依然能通过，实时聊天也仍然被允许。\n- 按每个响应 `usage` 中的 token 计数，而不是按请求次数，因为一个长描述任务和一轮简短的聊天相差好几个数量级。\n\n**重试与降级。** 当 API 返回 429 时，遵守 `retry-after`，不要让每一层各自独立重试；SDK 默认已经会重试两次。在压力之下，按固定顺序降级：先暂停后台任务，再缩短或跳过可选的 AI 功能，把与结账相关的功能和客服聊天留到最后。快速模式有自己独立的速率限额，可以为少数值得付出其价格、对延迟要求很高的链路提供额外的余量。\n\n**让它可见。** 按功能和按租户建立 token、429 和排队时间的看板，并在交互流量出现任何限流错误时告警，因为如果预留份额生效，这种情况本不应该发生。\n\n**权衡。** 预留份额会在聊天流量较少时闲置容量；可以让后台任务以短期租约的方式借用它，在负载升高时最先收回。按租户设置上限可能会拖慢大商家的正当任务，所以要展示任务进度和预计完成时间，而不是让它悄无声息地失败。",
+      "followups": [
+        "How would you size the interactive reserve, and how would you know it is too small?",
+        "A merchant pays for a premium plan with faster bulk jobs. How does your design change?",
+        "When would you split traffic across separate API keys or workspaces instead of one shared budget?"
+      ],
+      "followups_zh": [
+        "你会如何确定交互流量的预留份额？又如何知道它太小了？",
+        "某个商家付费购买了批量任务更快的高级套餐。你的设计要怎么改？",
+        "什么时候你会把流量拆到不同的 API key 或 workspace 上，而不是共用一份预算？"
+      ],
+      "vocab": [
+        {
+          "en": "rate limit",
+          "zh": "速率限制"
+        },
+        {
+          "en": "admission control",
+          "zh": "准入控制"
+        },
+        {
+          "en": "priority class",
+          "zh": "优先级类别"
+        },
+        {
+          "en": "load shedding",
+          "zh": "负载削减"
+        },
+        {
+          "en": "noisy neighbor",
+          "zh": "吵闹的邻居（资源争抢的租户）"
+        }
+      ]
+    }
+  ]
+}

@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 48 个模块、224 道题。
+共 49 个模块、229 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -663,3 +663,17 @@ Five new agent questions: a tool that hands the model a shopper's whole profile,
 | 3 | Context & Memory | Hard | [Merchants can edit an earlier message or regenerate a reply in the planning chat, and the team's in-place edits break caching and fail on newer models](modules/daily-2026-11-24.md#q3) | 商家可以在规划聊天里编辑之前的消息或重新生成回复，而团队采用的原地修改方式破坏了缓存，并在较新的模型上报错 |
 | 4 | Evals & Observability | Hard | [After the LLM judge was moved to a newer model, the support-quality dashboard dropped 9 points overnight, and nothing about the agent had changed](modules/daily-2026-11-24.md#q4) | 把 LLM 评审换成更新的模型后，客服质量看板一夜之间掉了 9 个点，而 Agent 本身没有任何改动 |
 | 5 | Multi-agent | Senior | [Thirty parallel worker agents hit the Meta Marketing API rate limit together, all retry at once, and the coordinator marks half the ad accounts as failed](modules/daily-2026-11-24.md#q5) | 三十个并行的工作 Agent 同时撞上 Meta Marketing API 的限流，一起重试，协调者把一半的广告账户标记为失败 |
+
+## [Daily set · Nov 25 · 每日新题 · 11 月 25 日](modules/daily-2026-11-25.md)
+
+Five new agent questions: recording and replaying agent runs to debug a wrong deletion, server-side request forgery through a URL-fetching tool, an eval set that missed a new product line, a batch read tool instead of 40 calls, and keeping one merchant's bulk job from rate-limiting everyone's live chat.
+
+> 五道新的 Agent 题：通过录制与回放来调试一次删错的操作、借抓取 URL 的工具实施的服务端请求伪造、漏掉新产品线的评测集、用批量读取工具代替 40 次调用，以及防止一个商家的批量任务让所有人的实时聊天被限流。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Agent Loop | Hard | [A merchant says the agent deleted the wrong discount yesterday, and nobody can reproduce it: building record and replay for agent runs](modules/daily-2026-11-25.md#q1) | 商家说 Agent 昨天删错了一个折扣，可谁都复现不出来：为 Agent 运行构建录制与回放 |
+| 2 | Safety & Security | Hard | [The product-import agent fetches any URL a merchant pastes, and a security researcher makes it read the cloud metadata service](modules/daily-2026-11-25.md#q2) | 商品导入 Agent 会抓取商家粘贴的任意 URL，一位安全研究员借此让它读取了云元数据服务 |
+| 3 | Evals & Observability | Medium | [The support agent passes every eval after launching subscriptions, while subscription questions fill the escalation queue](modules/daily-2026-11-25.md#q3) | 上线订阅功能后，客服 Agent 通过了所有评测，而订阅相关的问题却塞满了转人工队列 |
+| 4 | Tools & MCP | Medium | ["Which of my 40 bestsellers are out of stock?" makes the agent call get_product 40 times, filling the context with full product records](modules/daily-2026-11-25.md#q4) | 「我的 40 个畅销品里哪些缺货了？」让 Agent 调用了 40 次 get_product，上下文里塞满了完整的商品记录 |
+| 5 | Production | Senior | [One merchant's bulk description job uses the whole Claude rate limit, and live shopper chat for every other store starts getting 429s](modules/daily-2026-11-25.md#q5) | 一个商家的批量商品描述任务用光了整个 Claude 速率限额，其他所有店铺的顾客实时聊天开始收到 429 |
