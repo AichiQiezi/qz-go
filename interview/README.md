@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 44 天、220 道题。
+共 45 天、225 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-25](days/2026-11-25.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Hard | [The refund gateway approves a refund of 10.00, and the Go service behind it pays out 9,000.00 from the same JSON body](days/2026-11-25.md#q1) | 退款网关批准了一笔 10.00 的退款，而它后面的 Go 服务却根据同一个 JSON 请求体付出了 9,000.00 |
+| 2 | System Design | Hard | [A waiting room for limited-edition drops: 300,000 shoppers arrive in the first minute for 2,000 sneakers, and checkout must stay up](days/2026-11-25.md#q2) | 为限量款发售设计排队等候室：首分钟涌入 30 万顾客抢 2,000 双球鞋，结账系统必须保持可用 |
+| 3 | Database | Senior | [One large merchant's reporting queries slow down checkout for every store on a shared Postgres cluster: isolating tenants inside one database](days/2026-11-25.md#q3) | 一个大商家的报表查询拖慢了共享 Postgres 集群上所有店铺的结账：在同一个数据库内隔离租户 |
+| 4 | Middleware | Medium | [The collection page reads 2,000 prices from Redis one by one, and the page takes 90 ms even though every call is a cache hit](days/2026-11-25.md#q4) | 商品集合页从 Redis 逐个读取 2,000 个价格，尽管每次都命中缓存，页面仍要花 90 毫秒 |
+| 5 | Java & CS | Medium | [Deduplicating SKUs before a catalog import takes minutes for large merchants, although the code looks like a simple loop](days/2026-11-25.md#q5) | 商品目录导入前对 SKU 去重，在大商家那里要花好几分钟，尽管代码看起来只是一个简单的循环 |
 
 ## [2026-11-24](days/2026-11-24.md)
 
