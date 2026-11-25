@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 49 个模块、229 道题。
+共 50 个模块、234 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -677,3 +677,17 @@ Five new agent questions: recording and replaying agent runs to debug a wrong de
 | 3 | Evals & Observability | Medium | [The support agent passes every eval after launching subscriptions, while subscription questions fill the escalation queue](modules/daily-2026-11-25.md#q3) | 上线订阅功能后，客服 Agent 通过了所有评测，而订阅相关的问题却塞满了转人工队列 |
 | 4 | Tools & MCP | Medium | ["Which of my 40 bestsellers are out of stock?" makes the agent call get_product 40 times, filling the context with full product records](modules/daily-2026-11-25.md#q4) | 「我的 40 个畅销品里哪些缺货了？」让 Agent 调用了 40 次 get_product，上下文里塞满了完整的商品记录 |
 | 5 | Production | Senior | [One merchant's bulk description job uses the whole Claude rate limit, and live shopper chat for every other store starts getting 429s](modules/daily-2026-11-25.md#q5) | 一个商家的批量商品描述任务用光了整个 Claude 速率限额，其他所有店铺的顾客实时聊天开始收到 429 |
+
+## [Daily set · Nov 26 · 每日新题 · 11 月 26 日](modules/daily-2026-11-26.md)
+
+Five new agent questions: making a help assistant abstain when the help center has no answer, handling Stop in the middle of a tool loop, giving the agent the store's local date without breaking the cache, telling a real eval gain from noise, and keeping thirty translation workers consistent.
+
+> 五道新的 Agent 题：在帮助中心没有答案时让帮助助手放弃作答、在工具循环中途处理「停止」、在不破坏缓存的前提下把店铺本地日期告诉 Agent、区分评测的真实提升与噪声，以及让三十个翻译 worker 保持一致。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | RAG | Medium | ["Do you ship to Brazil?" The help assistant answers a confident yes, although no document in the store's help center says so](modules/daily-2026-11-26.md#q1) | 「你们发货到巴西吗？」帮助助手自信地回答「可以」，可店铺帮助中心里没有任何文档这么说 |
+| 2 | Agent Loop | Hard | [The merchant presses Stop halfway through a bulk price change: the next message fails, the agent does not know what was changed, and one edit kept running](modules/daily-2026-11-26.md#q2) | 商家在批量改价进行到一半时按下「停止」：下一条消息报错，Agent 不知道改了什么，还有一个修改仍在继续执行 |
+| 3 | Context & Memory | Medium | ["How did yesterday go?" The sales assistant reports the wrong day for merchants in California, and putting the current time in the system prompt broke caching](modules/daily-2026-11-26.md#q3) | 「昨天卖得怎么样？」销售助手给加州商家报的是错误的那一天，而把当前时间写进系统提示词又让缓存失效了 |
+| 4 | Evals & Observability | Hard | [A prompt change lifted the support eval from 84% to 87%, and rerunning the old prompt scored 86%: is the win real?](modules/daily-2026-11-26.md#q4) | 一次提示词修改把客服评测从 84% 提到了 87%，可重跑旧提示词也得了 86%：这个提升是真的吗？ |
+| 5 | Multi-agent | Senior | [Thirty worker agents translate a 5,000-product catalog into German, and the same product term comes out four different ways](modules/daily-2026-11-26.md#q5) | 三十个 worker Agent 把 5,000 个商品的目录翻译成德语，同一个商品术语却出现了四种译法 |
