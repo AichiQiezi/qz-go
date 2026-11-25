@@ -1,0 +1,195 @@
+{
+  "date": "2026-11-26",
+  "generatedAt": "2026-11-26T06:46:04+08:00",
+  "questions": [
+    {
+      "id": "20261126-1",
+      "topic": "Go",
+      "difficulty": "Medium",
+      "title": "The product feed file changes on every run although no product changed, and the ad platform re-processes the whole catalog each night",
+      "title_zh": "商品源文件每次运行都会变化，尽管没有任何商品改动，广告平台每晚都要重新处理整个目录",
+      "question": "A nightly job writes a CSV feed of products sorted by sales, best sellers first, and uploads it only when its hash differs from yesterday's. Lately the hash differs every night, every upload triggers a full re-review on the ad platform, and some products briefly stop serving. Product data has not changed. The products are loaded into a `map[string]int` of SKU to sales, copied into a slice and sorted with `sort.Slice` by sales.\n\nExplain the bug and fix it.",
+      "question_zh": "一个夜间任务会生成一个按销量排序（畅销品在前）的 CSV 商品源，只有当它的哈希与昨天不同时才上传。最近每晚的哈希都不一样，每次上传都会在广告平台上触发一次完整的重新审核，一些商品会短暂停止投放。商品数据并没有变化。这些商品先被加载进一个 SKU 到销量的 `map[string]int`，再复制到切片里，用 `sort.Slice` 按销量排序。\n\n解释这个 bug，并修复它。",
+      "answer": "**Why.** Two things combine. Go deliberately randomizes map iteration order, so the slice starts in a different order each run. Then many products tie on sales, often zero, and a sort only orders items by the key you give it: equal items can end up in any order, and `sort.Slice` is not stable. The file's content is the same set of rows, but their order, and therefore the hash, changes.\n\n**What a local Go 1.24 test showed** with 200 SKUs, most of them tied:\n\n- `sort.Slice` by sales alone produced 5 different feed hashes in 5 runs.\n- `sort.SliceStable` did not help either, also 5 out of 5: a stable sort keeps the input order of ties, and the input order came from the map.\n- Adding the SKU as a tie-breaker produced the same hash every run.\n\n**The fix: make the order total.**\n\n```go\nslices.SortFunc(ps, func(a, b P) int {\n\tif c := cmp.Compare(b.Sales, a.Sales); c != 0 {\n\t\treturn c // best sellers first\n\t}\n\treturn cmp.Compare(a.SKU, b.SKU) // tie-breaker: a total order\n})\n```\n\n- Any unique field works as the last key; the SKU or product ID is the natural choice.\n- Apply the same rule wherever output must be reproducible: exports, signatures, cache keys, test golden files.\n\n**Better change detection.** Hashing a whole file to decide whether anything changed is fragile. Compare per-product content hashes against what was last sent and upload only the products that differ, which most ad platforms' item-level APIs support.\n\n**Trade-offs.** A tie-breaker costs almost nothing. Sorting a map's keys first and then using a stable sort also works, but it is slower and easier to break later; an explicit total order states the intent.",
+      "answer_zh": "**原因。** 两件事叠加在一起。Go 会刻意打乱 map 的遍历顺序，所以每次运行时切片的初始顺序都不同。然后，很多商品的销量相同（通常是零），而排序只会按你给出的键来排列：相等的元素可能以任意顺序出现，并且 `sort.Slice` 不是稳定排序。文件内容还是同样的那些行，但它们的顺序、进而文件的哈希都变了。\n\n**本地 Go 1.24 测试的结果**（200 个 SKU，其中大部分销量相同）：\n\n- 只按销量用 `sort.Slice` 排序，5 次运行得到了 5 个不同的文件哈希。\n- `sort.SliceStable` 也没用，同样是 5 次中 5 个不同：稳定排序会保留相等元素在输入中的顺序，而输入顺序来自 map。\n- 加上 SKU 作为次要排序键后，每次运行都得到相同的哈希。\n\n**修复方法：让排序成为全序。**\n\n```go\nslices.SortFunc(ps, func(a, b P) int {\n\tif c := cmp.Compare(b.Sales, a.Sales); c != 0 {\n\t\treturn c // best sellers first\n\t}\n\treturn cmp.Compare(a.SKU, b.SKU) // tie-breaker: a total order\n})\n```\n\n- 任何唯一字段都可以作为最后一个排序键；SKU 或商品 ID 是最自然的选择。\n- 凡是输出需要可复现的地方，都要应用同样的规则：导出文件、签名、缓存键、测试的基准文件。\n\n**更好的变更检测。** 用整个文件的哈希来判断是否有变化是很脆弱的。应当按商品比较内容哈希与上次发送的版本，只上传有差异的商品，大多数广告平台的商品级 API 都支持这种方式。\n\n**权衡。** 加一个次要排序键几乎没有成本。先对 map 的键排序、再做稳定排序也可行，但更慢，也更容易在以后被改坏；显式的全序把意图表达得很清楚。",
+      "followups": [
+        "Where else could map iteration order leak into something that must be reproducible?",
+        "How would you write a test that catches nondeterministic output?"
+      ],
+      "followups_zh": [
+        "还有哪些地方，map 的遍历顺序可能泄漏到必须可复现的东西里？",
+        "你会如何写一个能发现输出不确定的测试？"
+      ],
+      "vocab": [
+        {
+          "en": "total order",
+          "zh": "全序"
+        },
+        {
+          "en": "stable sort",
+          "zh": "稳定排序"
+        },
+        {
+          "en": "tie-breaker",
+          "zh": "次要排序键"
+        },
+        {
+          "en": "deterministic output",
+          "zh": "确定性输出"
+        }
+      ]
+    },
+    {
+      "id": "20261126-2",
+      "topic": "System Design",
+      "difficulty": "Senior",
+      "title": "Routing orders across warehouses and third-party logistics partners: split shipments, cross-border rules and stock that is never quite accurate",
+      "title_zh": "在多个仓库和第三方物流之间分配订单：拆单发货、跨境规则，以及永远不太准确的库存",
+      "question": "Larger merchants now stock products in two of their own warehouses in the US, a third-party logistics partner in Europe and a supplier who drop-ships from China. Today every order goes to the merchant's default location, so some orders wait for transfers, some ship from the wrong continent, and the merchant overpays for shipping. You are asked to design order routing for the platform.\n\nDesign the routing decision, the inventory it depends on, and how it handles failures.",
+      "question_zh": "较大的商家现在在美国有两个自营仓库，在欧洲有一家第三方物流合作方，还有一家从中国直接代发货的供应商。目前每笔订单都发往商家的默认地点，于是有些订单要等调拨，有些从错误的大洲发货，商家还多付了运费。你需要为平台设计订单分配。\n\n设计分配决策、它所依赖的库存，以及它如何处理失败情况。",
+      "answer": "**The decision.** For each order, pick locations that can legally ship to the destination and have the stock, preferring one shipment over several, then lower cost, then faster delivery. Merchants need to override parts of this, such as \"never ship Europe from the US\", so rules come first and scoring second.\n\n```go\n// route prefers one location that can ship the whole order; otherwise it\n// splits greedily, cheapest first, and reports anything it cannot fill.\nfunc route(lines []Line, locs []Location) Plan {\n\tsort.Slice(locs, func(i, j int) bool {\n\t\tif locs[i].ShipCost != locs[j].ShipCost {\n\t\t\treturn locs[i].ShipCost < locs[j].ShipCost\n\t\t}\n\t\treturn locs[i].ID < locs[j].ID // stable tie-break\n\t})\n\tfor _, l := range locs {\n\t\tif !l.Allowed {\n\t\t\tcontinue\n\t\t}\n\t\tall := true\n\t\tfor _, ln := range lines {\n\t\t\tif l.Stock[ln.SKU] < ln.Qty {\n\t\t\t\tall = false\n\t\t\t\tbreak\n\t\t\t}\n\t\t}\n\t\tif all {\n\t\t\treturn Plan{Shipments: map[string][]Line{l.ID: lines}}\n\t\t}\n\t}\n\tp := Plan{Shipments: map[string][]Line{}}\n\tfor _, ln := range lines {\n\t\tneed := ln.Qty\n\t\tfor _, l := range locs {\n\t\t\tif !l.Allowed || need == 0 {\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\ttake := min(need, l.Stock[ln.SKU])\n\t\t\tif take > 0 {\n\t\t\t\tp.Shipments[l.ID] = append(p.Shipments[l.ID], Line{ln.SKU, take})\n\t\t\t\tneed -= take\n\t\t\t}\n\t\t}\n\t\tif need > 0 {\n\t\t\tp.Unfilled = append(p.Unfilled, Line{ln.SKU, need})\n\t\t}\n\t}\n\treturn p\n}\n```\n\nIn a local run, an order for two tees and a cap could not ship complete from any single location, so it split: tees from the cheaper US East warehouse and the cap from US West. The China partner was excluded by the destination rule even though it had stock.\n\n- **Inventory is an estimate.** Partners report stock with a delay. Keep available-to-promise per location as on hand minus reservations minus a safety buffer, reserve at order time, and reconcile with each partner's feed.\n- **Routing is a decision, not a fact.** Store the plan with its reasons, send each part to its location, and expect rejections. A partner that cannot fill a line returns it, and the router reruns for the remainder without that location.\n- **Cross-border.** Duties, restricted items and carrier limits differ by route. Keep them as data per location and destination, so legal changes are a configuration update.\n\n**Trade-offs.** Greedy routing is simple and explainable but not optimal across orders; batch optimization saves money for high-volume merchants at the cost of delay and complexity. Whether to split or wait a day for one package should be a merchant setting, and checkout should quote delivery from the same router.",
+      "answer_zh": "**分配决策。** 对每笔订单，选择那些依法可以发往目的地、并且有库存的地点；优先一个包裹而不是多个包裹，其次是成本更低，再次是送达更快。商家需要能覆盖其中一部分规则，比如「欧洲订单永远不从美国发货」，所以先应用规则，再进行打分。\n\n```go\n// route prefers one location that can ship the whole order; otherwise it\n// splits greedily, cheapest first, and reports anything it cannot fill.\nfunc route(lines []Line, locs []Location) Plan {\n\tsort.Slice(locs, func(i, j int) bool {\n\t\tif locs[i].ShipCost != locs[j].ShipCost {\n\t\t\treturn locs[i].ShipCost < locs[j].ShipCost\n\t\t}\n\t\treturn locs[i].ID < locs[j].ID // stable tie-break\n\t})\n\tfor _, l := range locs {\n\t\tif !l.Allowed {\n\t\t\tcontinue\n\t\t}\n\t\tall := true\n\t\tfor _, ln := range lines {\n\t\t\tif l.Stock[ln.SKU] < ln.Qty {\n\t\t\t\tall = false\n\t\t\t\tbreak\n\t\t\t}\n\t\t}\n\t\tif all {\n\t\t\treturn Plan{Shipments: map[string][]Line{l.ID: lines}}\n\t\t}\n\t}\n\tp := Plan{Shipments: map[string][]Line{}}\n\tfor _, ln := range lines {\n\t\tneed := ln.Qty\n\t\tfor _, l := range locs {\n\t\t\tif !l.Allowed || need == 0 {\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\ttake := min(need, l.Stock[ln.SKU])\n\t\t\tif take > 0 {\n\t\t\t\tp.Shipments[l.ID] = append(p.Shipments[l.ID], Line{ln.SKU, take})\n\t\t\t\tneed -= take\n\t\t\t}\n\t\t}\n\t\tif need > 0 {\n\t\t\tp.Unfilled = append(p.Unfilled, Line{ln.SKU, need})\n\t\t}\n\t}\n\treturn p\n}\n```\n\n在本地运行中，一笔两件 T 恤加一顶帽子的订单，没有任何单个地点能完整发货，于是被拆分：T 恤从更便宜的美东仓发出，帽子从美西仓发出。中国的合作方虽然有库存，但被目的地规则排除了。\n\n- **库存只是估计值。** 合作方报告库存存在延迟。为每个地点维护可承诺量（现有库存减去已预留量，再减去安全余量），在下单时预留，并与每个合作方的数据源对账。\n- **分配是一个决策，而不是一个事实。** 把分配方案连同理由一起保存，把每部分发往对应的地点，并预期会被拒绝。无法履行某行的合作方会把它退回，分配器再针对剩余部分重新运行，并排除该地点。\n- **跨境。** 关税、受限商品和承运商限制因线路而异。把它们作为按地点和目的地组织的数据来维护，这样法规变化只需更新配置。\n\n**权衡。** 贪心分配简单、可解释，但在多笔订单之间并非最优；批量优化能为高订单量的商家省钱，代价是延迟和复杂度。是拆单还是多等一天换取单个包裹，应当是商家的一个配置项；结账时的送达预估也应当来自同一个分配器。",
+      "followups": [
+        "A partner's stock feed is 6 hours late. How does routing behave until it catches up?",
+        "How would you explain to a merchant why an order shipped from a more expensive location?"
+      ],
+      "followups_zh": [
+        "某个合作方的库存数据延迟了 6 小时。在它追上之前，分配逻辑应该如何运作？",
+        "你会如何向商家解释，为什么一笔订单从更贵的地点发货？"
+      ],
+      "vocab": [
+        {
+          "en": "order routing",
+          "zh": "订单分配"
+        },
+        {
+          "en": "split shipment",
+          "zh": "拆单发货"
+        },
+        {
+          "en": "available to promise",
+          "zh": "可承诺量"
+        },
+        {
+          "en": "drop shipping",
+          "zh": "代发货"
+        },
+        {
+          "en": "third-party logistics",
+          "zh": "第三方物流（3PL）"
+        }
+      ]
+    },
+    {
+      "id": "20261126-3",
+      "topic": "Database",
+      "difficulty": "Hard",
+      "title": "An index-only scan for low-stock reports is fast in the morning and 20 times slower by afternoon, with the same plan",
+      "title_zh": "一个用于低库存报表的仅索引扫描，早上很快，到了下午却慢了 20 倍，而执行计划完全相同",
+      "question": "The low-stock dashboard counts variants with `qty < 5` for a range of stores. The plan is an index-only scan on `(store_id, qty)` and is fast after the nightly maintenance. By afternoon, after a day of inventory updates, the same query with the same plan takes many times longer and reads thousands of buffers. Nothing in `EXPLAIN` without `ANALYZE` looks different.\n\nExplain what changes during the day and fix it.",
+      "question_zh": "低库存看板会针对一批店铺统计 `qty < 5` 的变体数量。执行计划是在 `(store_id, qty)` 上的仅索引扫描，夜间维护之后很快。到了下午，经过一整天的库存更新，同样的查询、同样的计划，耗时变成了好几倍，还要读取数千个缓冲区。不带 `ANALYZE` 的 `EXPLAIN` 看不出任何不同。\n\n解释白天发生了什么变化，并修复它。",
+      "answer": "**Why.** An index does not store whether a row version is visible to your transaction. An index-only scan can skip the table only for pages that the visibility map marks all-visible. Every update writes a new row version and clears that bit for the page, so the scan must visit the table again to check visibility. Only VACUUM sets the bits again.\n\n**Measured on PostgreSQL 16** with 2 million rows and the same query:\n\n- Right after VACUUM: `Heap Fetches: 0`, about 1.5 ms.\n- After updating one row in seven: `Heap Fetches: 10374`, about 10,700 buffers, about 26 ms. The plan was identical.\n- After VACUUM again: back to 0 heap fetches and about 1.3 ms.\n\n**Why autovacuum did not run.** By default a table is vacuumed after dead rows exceed a fraction of its size; the local default for `autovacuum_vacuum_scale_factor` was 0.2. On a large, busy table, updating a seventh of the rows stays under that threshold, yet it touches most pages and clears most of the visibility map.\n\n**The fix: vacuum the hot table often, per table.**\n\n```sql\n-- How often does an index-only scan still visit the table?\nEXPLAIN (ANALYZE, BUFFERS) SELECT count(*) FROM inventory_levels\nWHERE store_id BETWEEN 1 AND 200 AND qty < 5;   -- look at \"Heap Fetches\"\n\n-- Vacuum this hot table far more often than the global default.\nALTER TABLE inventory_levels SET (\n  autovacuum_vacuum_scale_factor = 0.01,\n  autovacuum_vacuum_insert_scale_factor = 0.01\n);\n```\n\n- Watch `Heap Fetches` in `EXPLAIN (ANALYZE, BUFFERS)`, and `n_dead_tup` and `last_autovacuum` in `pg_stat_user_tables`.\n- Make sure autovacuum has enough workers and cost budget that it can actually keep up; frequent small vacuums are cheaper than rare large ones.\n- Avoid needless updates: writing `qty = qty` still creates a new row version and clears the bit. Skip the write when nothing changed.\n\n**Trade-offs.** Aggressive vacuuming costs I/O on a busy table, so tune it per table rather than globally. For dashboards that can be a few minutes stale, a summary table maintained by the inventory writer avoids scanning at all.",
+      "answer_zh": "**原因。** 索引并不保存某个行版本对你的事务是否可见。只有对于可见性映射（visibility map）标记为全部可见的页面，仅索引扫描才能跳过回表。每次更新都会写入新的行版本，并清除该页面的这个标志位，于是扫描必须重新访问表来检查可见性。只有 VACUUM 才会把这些标志位重新设置回去。\n\n**在 PostgreSQL 16 上实测**（200 万行，同一个查询）：\n\n- 刚执行完 VACUUM：`Heap Fetches: 0`，约 1.5 毫秒。\n- 每七行更新一行之后：`Heap Fetches: 10374`，约 10,700 个缓冲区，约 26 毫秒。执行计划完全相同。\n- 再次执行 VACUUM 之后：回到 0 次回表，约 1.3 毫秒。\n\n**为什么 autovacuum 没有运行。** 默认情况下，只有当死元组数量超过表大小的一定比例时，才会触发 vacuum；本地 `autovacuum_vacuum_scale_factor` 的默认值是 0.2。在一张大而繁忙的表上，更新七分之一的行仍然低于这个阈值，但它会触及大部分页面，并清除大部分可见性映射。\n\n**修复方法：按表设置，频繁地对热表执行 vacuum。**\n\n```sql\n-- How often does an index-only scan still visit the table?\nEXPLAIN (ANALYZE, BUFFERS) SELECT count(*) FROM inventory_levels\nWHERE store_id BETWEEN 1 AND 200 AND qty < 5;   -- look at \"Heap Fetches\"\n\n-- Vacuum this hot table far more often than the global default.\nALTER TABLE inventory_levels SET (\n  autovacuum_vacuum_scale_factor = 0.01,\n  autovacuum_vacuum_insert_scale_factor = 0.01\n);\n```\n\n- 关注 `EXPLAIN (ANALYZE, BUFFERS)` 中的 `Heap Fetches`，以及 `pg_stat_user_tables` 中的 `n_dead_tup` 和 `last_autovacuum`。\n- 确保 autovacuum 有足够的工作进程和成本额度，真正跟得上；频繁的小规模 vacuum 比偶尔一次的大规模 vacuum 更便宜。\n- 避免无意义的更新：写入 `qty = qty` 依然会产生新的行版本并清除标志位。没有变化时就跳过写入。\n\n**权衡。** 在繁忙的表上频繁 vacuum 会消耗 I/O，所以要按表调整，而不是全局调整。对于可以容忍几分钟延迟的看板，由库存写入方维护一张汇总表，就可以完全避免扫描。",
+      "followups": [
+        "Why can a long-running transaction elsewhere make this worse even after VACUUM runs?",
+        "How would you decide the autovacuum settings for this one table?"
+      ],
+      "followups_zh": [
+        "为什么即使 VACUUM 运行了，别处一个长时间运行的事务也可能让情况更糟？",
+        "你会如何为这一张表确定 autovacuum 参数？"
+      ],
+      "vocab": [
+        {
+          "en": "index-only scan",
+          "zh": "仅索引扫描"
+        },
+        {
+          "en": "visibility map",
+          "zh": "可见性映射"
+        },
+        {
+          "en": "heap fetch",
+          "zh": "回表"
+        },
+        {
+          "en": "autovacuum",
+          "zh": "自动清理（autovacuum）"
+        }
+      ]
+    },
+    {
+      "id": "20261126-4",
+      "topic": "Middleware",
+      "difficulty": "Hard",
+      "title": "After autoscaling to 300 pods for a sale, new pods fail to reach Redis with \"connection reset\", while Redis CPU is low",
+      "title_zh": "为大促自动扩容到 300 个 Pod 后，新 Pod 连接 Redis 时报「connection reset」，而 Redis 的 CPU 却很低",
+      "question": "Ahead of a big sale, the storefront scaled from 60 to 300 pods. Each pod's Redis client has a pool of up to 50 connections, and a few background workers per pod hold blocking reads. New pods started failing health checks with errors like `connection reset by peer` and `broken pipe` from the Redis client. Redis itself showed low CPU and memory, and older pods kept working.\n\nFind the cause and fix it.",
+      "question_zh": "在一次大促之前，店铺前台从 60 个 Pod 扩容到了 300 个。每个 Pod 的 Redis 客户端连接池最多 50 个连接，每个 Pod 还有几个后台工作线程在做阻塞读取。新的 Pod 开始健康检查失败，Redis 客户端报出 `connection reset by peer` 和 `broken pipe` 之类的错误。Redis 本身的 CPU 和内存占用都很低，老的 Pod 也一直正常工作。\n\n找出原因，并修复它。",
+      "answer": "**Why.** Redis caps the number of client connections with `maxclients`, on the local build 10,000 by default. 300 pods times up to 50 connections, plus workers, can exceed it. Once the cap is reached, Redis accepts a new connection, replies `ERR max number of clients reached`, and closes it. Old pods already hold their connections, so only new ones fail.\n\n**Why the error was confusing.** In a local test with `maxclients` lowered, `redis-cli` printed the clear message, but go-redis surfaced the same rejection as `broken pipe` and `connection reset by peer`, and Redis counted the refusals in `rejected_connections`. Check that counter whenever you see connection errors with low Redis load.\n\n**The fix: budget connections across the fleet.**\n\n```go\nrdb := redis.NewClient(&redis.Options{\n\tAddr:            addr,\n\tPoolSize:        20,               // per pod; pods x PoolSize must fit maxclients\n\tMinIdleConns:    2,\n\tConnMaxIdleTime: 5 * time.Minute,  // give idle connections back\n})\n```\n\n- Size pools from the fleet: maximum pods times pool size plus workers must stay well under `maxclients`. Most requests need a connection for microseconds, so a pool of 50 per pod is usually far more than needed.\n- Let idle connections close. Redis's own `timeout` was 0 locally, meaning idle clients are never disconnected, so the client side should release them.\n- Give blocking workers their own small client, so they do not hold connections from the shared pool.\n- `maxclients` can be raised, but it is also bounded by the process's file descriptor limit, and every connection costs memory on the server.\n\n**Alert before it bites.** Alert on `connected_clients` as a share of `maxclients`, and on any increase in `rejected_connections`, and include Redis connection math in capacity plans for autoscaling.\n\n**Trade-offs.** Smaller pools can add waiting under bursts; measure pool wait time. A proxy in front of Redis multiplexes many client connections onto fewer server connections, at the cost of another component and hop.",
+      "answer_zh": "**原因。** Redis 用 `maxclients` 限制客户端连接数，在本地构建中默认值是 10,000。300 个 Pod 乘以每个最多 50 个连接，再加上工作线程，就可能超过这个上限。一旦达到上限，Redis 会接受新连接，回复 `ERR max number of clients reached`，然后关闭它。老 Pod 已经持有自己的连接，所以只有新 Pod 失败。\n\n**为什么这个错误让人困惑。** 在本地把 `maxclients` 调低之后测试，`redis-cli` 打印出了明确的错误信息，而 go-redis 把同样的拒绝表现为 `broken pipe` 和 `connection reset by peer`，Redis 则在 `rejected_connections` 中记录了这些被拒绝的连接。每当你在 Redis 负载很低时看到连接错误，就去检查这个计数器。\n\n**修复方法：为整个集群规划连接预算。**\n\n```go\nrdb := redis.NewClient(&redis.Options{\n\tAddr:            addr,\n\tPoolSize:        20,               // per pod; pods x PoolSize must fit maxclients\n\tMinIdleConns:    2,\n\tConnMaxIdleTime: 5 * time.Minute,  // give idle connections back\n})\n```\n\n- 根据整个集群来确定连接池大小：最大 Pod 数乘以连接池大小再加上工作线程，必须远低于 `maxclients`。大多数请求只需要占用连接几微秒，所以每个 Pod 50 个连接通常远远超出需要。\n- 让空闲连接关闭。本地 Redis 自身的 `timeout` 为 0，意味着空闲客户端永远不会被断开，所以要由客户端来释放它们。\n- 给阻塞读取的工作线程配一个独立的小客户端，这样它们就不会占用共享连接池里的连接。\n- `maxclients` 可以调高，但它同时受进程文件描述符上限的约束，而且每个连接都会占用服务器内存。\n\n**在出问题之前告警。** 对 `connected_clients` 占 `maxclients` 的比例告警，对 `rejected_connections` 的任何增长告警，并把 Redis 连接数的计算纳入自动扩容的容量规划。\n\n**权衡。** 更小的连接池在突发流量下可能增加等待；要度量连接池的等待时间。在 Redis 前面加一层代理，可以把许多客户端连接复用到更少的服务端连接上，代价是多一个组件和一跳网络。",
+      "followups": [
+        "How would you compute the right pool size per pod from request rate and Redis latency?",
+        "Which other shared backends have a connection cap that autoscaling can hit?"
+      ],
+      "followups_zh": [
+        "你会如何根据请求速率和 Redis 延迟，算出每个 Pod 合适的连接池大小？",
+        "还有哪些共享后端存在自动扩容可能撞上的连接数上限？"
+      ],
+      "vocab": [
+        {
+          "en": "connection limit",
+          "zh": "连接数上限"
+        },
+        {
+          "en": "connection pool",
+          "zh": "连接池"
+        },
+        {
+          "en": "autoscaling",
+          "zh": "自动扩缩容"
+        },
+        {
+          "en": "file descriptor",
+          "zh": "文件描述符"
+        }
+      ]
+    },
+    {
+      "id": "20261126-5",
+      "topic": "Java & CS",
+      "difficulty": "Medium",
+      "title": "A currency allow-list built with Set.of crashes the webhook handler with NullPointerException when a partner omits the currency",
+      "title_zh": "一个用 Set.of 构建的货币白名单，在合作方漏传货币字段时让 webhook 处理器抛出 NullPointerException 崩溃",
+      "question": "An order webhook handler checks `ALLOWED.contains(order.currency())`, where `ALLOWED` was recently changed from a `HashSet` to `Set.of(\"USD\", \"EUR\", \"GBP\")` in a cleanup. One partner occasionally sends orders without a currency. Before the cleanup, those orders were rejected as unsupported; now the handler throws `NullPointerException` and the partner keeps retrying the webhook.\n\nExplain the change in behavior and fix it.",
+      "question_zh": "一个订单 webhook 处理器会检查 `ALLOWED.contains(order.currency())`，其中 `ALLOWED` 在最近一次代码清理中从 `HashSet` 改成了 `Set.of(\"USD\", \"EUR\", \"GBP\")`。有一家合作方偶尔会发送没有货币字段的订单。清理之前，这些订单会被当作不支持的货币拒绝；现在处理器会抛出 `NullPointerException`，而合作方会不断重试这个 webhook。\n\n解释行为为什么变了，并修复它。",
+      "answer": "**Why.** The immutable collections from `Set.of`, `List.of`, `Map.of` and `copyOf` reject `null` entirely: not only as elements, but also as arguments to lookups. `HashSet.contains(null)` simply returns `false`; `Set.of(...).contains(null)` throws. The refactor looked like a pure cleanup but changed the contract.\n\n**What a local Java 21 test showed:**\n\n- `Set.of(...).contains(null)` and `List.of(...).contains(null)` threw `NullPointerException`.\n- `Map.of(...).get(null)` and `containsKey(null)` threw as well, and `List.copyOf(...).indexOf(null)` threw.\n- `HashSet`, `HashMap` and `Collections.unmodifiableSet` returned `false` or `null` without throwing.\n- `Set.copyOf` of a list containing `null` threw at construction.\n\n**The fix: handle missing values explicitly at the boundary.**\n\n```java\nstatic final Set<String> ALLOWED = Set.of(\"USD\", \"EUR\", \"GBP\");\n\n// Throws NullPointerException when currency is null.\nboolean ok = ALLOWED.contains(order.currency());\n\n// Decide what a missing value means first, then look it up.\nString c = order.currency();\nif (c == null) throw new BadWebhookException(\"currency missing\");\nboolean ok2 = ALLOWED.contains(c);\n```\n\n- Validate the webhook payload when it arrives and reject missing required fields with a clear 4xx, so the partner stops retrying a request that can never succeed.\n- Keep `Set.of` for constants: rejecting nulls is a feature that catches bad data early, as long as the code decides what null means before the lookup.\n\n**Trade-offs.** Swapping collection types during a refactor needs the same review as an API change: check every call that can pass null. Static analysis with nullability annotations catches many of these before they ship.",
+      "answer_zh": "**原因。** `Set.of`、`List.of`、`Map.of` 和 `copyOf` 生成的不可变集合会完全拒绝 `null`：不仅不能作为元素，也不能作为查询方法的参数。`HashSet.contains(null)` 只会返回 `false`；而 `Set.of(...).contains(null)` 会抛出异常。这次重构看起来只是纯粹的代码清理，实际上却改变了契约。\n\n**本地 Java 21 测试的结果：**\n\n- `Set.of(...).contains(null)` 和 `List.of(...).contains(null)` 都抛出了 `NullPointerException`。\n- `Map.of(...).get(null)` 和 `containsKey(null)` 同样抛出了异常，`List.copyOf(...).indexOf(null)` 也抛出了异常。\n- `HashSet`、`HashMap` 和 `Collections.unmodifiableSet` 返回了 `false` 或 `null`，没有抛出异常。\n- 对包含 `null` 的列表调用 `Set.copyOf`，在构造时就抛出了异常。\n\n**修复方法：在边界处显式处理缺失值。**\n\n```java\nstatic final Set<String> ALLOWED = Set.of(\"USD\", \"EUR\", \"GBP\");\n\n// Throws NullPointerException when currency is null.\nboolean ok = ALLOWED.contains(order.currency());\n\n// Decide what a missing value means first, then look it up.\nString c = order.currency();\nif (c == null) throw new BadWebhookException(\"currency missing\");\nboolean ok2 = ALLOWED.contains(c);\n```\n\n- 在 webhook 请求到达时就校验负载，对缺失的必填字段返回明确的 4xx，让合作方停止重试一个永远不会成功的请求。\n- 常量集合继续用 `Set.of`：拒绝 null 是一种能尽早发现坏数据的特性，只要代码在查找之前先决定 null 意味着什么。\n\n**权衡。** 重构时替换集合类型，需要像修改 API 一样仔细审查：检查每一个可能传入 null 的调用。配合可空性注解的静态分析，可以在上线前发现很多这类问题。",
+      "followups": [
+        "Which other refactors look behavior-preserving in Java but change exception behavior?",
+        "How should the webhook handler respond so the partner stops retrying bad payloads?"
+      ],
+      "followups_zh": [
+        "在 Java 中，还有哪些重构看起来不改变行为，实际上却改变了异常行为？",
+        "webhook 处理器应该如何响应，才能让合作方停止重试有问题的负载？"
+      ],
+      "vocab": [
+        {
+          "en": "immutable collection",
+          "zh": "不可变集合"
+        },
+        {
+          "en": "null-hostile",
+          "zh": "拒绝 null 的"
+        },
+        {
+          "en": "contract",
+          "zh": "契约"
+        },
+        {
+          "en": "payload validation",
+          "zh": "负载校验"
+        }
+      ]
+    }
+  ]
+}

@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 45 天、225 道题。
+共 46 天、230 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-26](days/2026-11-26.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Medium | [The product feed file changes on every run although no product changed, and the ad platform re-processes the whole catalog each night](days/2026-11-26.md#q1) | 商品源文件每次运行都会变化，尽管没有任何商品改动，广告平台每晚都要重新处理整个目录 |
+| 2 | System Design | Senior | [Routing orders across warehouses and third-party logistics partners: split shipments, cross-border rules and stock that is never quite accurate](days/2026-11-26.md#q2) | 在多个仓库和第三方物流之间分配订单：拆单发货、跨境规则，以及永远不太准确的库存 |
+| 3 | Database | Hard | [An index-only scan for low-stock reports is fast in the morning and 20 times slower by afternoon, with the same plan](days/2026-11-26.md#q3) | 一个用于低库存报表的仅索引扫描，早上很快，到了下午却慢了 20 倍，而执行计划完全相同 |
+| 4 | Middleware | Hard | [After autoscaling to 300 pods for a sale, new pods fail to reach Redis with "connection reset", while Redis CPU is low](days/2026-11-26.md#q4) | 为大促自动扩容到 300 个 Pod 后，新 Pod 连接 Redis 时报「connection reset」，而 Redis 的 CPU 却很低 |
+| 5 | Java & CS | Medium | [A currency allow-list built with Set.of crashes the webhook handler with NullPointerException when a partner omits the currency](days/2026-11-26.md#q5) | 一个用 Set.of 构建的货币白名单，在合作方漏传货币字段时让 webhook 处理器抛出 NullPointerException 崩溃 |
 
 ## [2026-11-25](days/2026-11-25.md)
 
