@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 46 天、230 道题。
+共 47 天、235 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-27](days/2026-11-27.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Senior | [A merchant's bulk edit sends 100,000 product webhooks in a minute, and the Go ingestion service starts a goroutine for each one until it is OOMKilled](days/2026-11-27.md#q1) | 一个商家的批量编辑在一分钟内发来 10 万个商品 webhook，Go 接入服务为每一个都启动一个 goroutine，直到被 OOMKill |
+| 2 | System Design | Hard | [A merchant sets a $10,000 monthly ad budget across Meta, Google and TikTok: design a guard that stops spending before the cap, when every platform reports spend hours late](days/2026-11-27.md#q2) | 商家为 Meta、Google 和 TikTok 设定了每月 1 万美元的总广告预算：设计一个在达到上限之前停止花费的保护机制，而每个平台报告花费都要晚上几个小时 |
+| 3 | Database | Medium | [The VAT report and the invoices disagree by one cent on some orders: round() gives different answers for numeric and double precision in Postgres](days/2026-11-27.md#q3) | 增值税报表和发票在部分订单上差一分钱：在 Postgres 里，round() 对 numeric 和 double precision 给出的结果不同 |
+| 4 | Middleware | Medium | [A pickup-point finder on Redis GEO rejects every Australian location, finds nothing near Berlin, and shows distances 1,000 times too large](days/2026-11-27.md#q4) | 一个基于 Redis GEO 的自提点查询服务，拒收所有澳大利亚的地点，在柏林附近什么也找不到，显示的距离还大了 1000 倍 |
+| 5 | Java & CS | Hard | [Two catalog syncs run at once for the same merchant despite synchronized(merchantId), and the intern() fix makes unrelated code block](days/2026-11-27.md#q5) | 尽管用了 synchronized(merchantId)，同一个商家的两次目录同步仍会同时运行，而改用 intern() 的修复又让不相关的代码被阻塞 |
 
 ## [2026-11-26](days/2026-11-26.md)
 
