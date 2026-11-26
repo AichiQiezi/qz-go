@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 50 个模块、234 道题。
+共 51 个模块、239 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -691,3 +691,17 @@ Five new agent questions: making a help assistant abstain when the help center h
 | 3 | Context & Memory | Medium | ["How did yesterday go?" The sales assistant reports the wrong day for merchants in California, and putting the current time in the system prompt broke caching](modules/daily-2026-11-26.md#q3) | 「昨天卖得怎么样？」销售助手给加州商家报的是错误的那一天，而把当前时间写进系统提示词又让缓存失效了 |
 | 4 | Evals & Observability | Hard | [A prompt change lifted the support eval from 84% to 87%, and rerunning the old prompt scored 86%: is the win real?](modules/daily-2026-11-26.md#q4) | 一次提示词修改把客服评测从 84% 提到了 87%，可重跑旧提示词也得了 86%：这个提升是真的吗？ |
 | 5 | Multi-agent | Senior | [Thirty worker agents translate a 5,000-product catalog into German, and the same product term comes out four different ways](modules/daily-2026-11-26.md#q5) | 三十个 worker Agent 把 5,000 个商品的目录翻译成德语，同一个商品术语却出现了四种译法 |
+
+## [Daily set · Nov 27 · 每日新题 · 11 月 27 日](modules/daily-2026-11-27.md)
+
+Five new agent questions: memory that overrules the merchant's current request, AI-written HTML that ran a script on the storefront, a slow export tool that the agent started four times, review questions that need counting instead of top-k retrieval, and capacity planning for Black Friday.
+
+> 五道新的 Agent 题：推翻商家当前要求的记忆、在店铺前台执行了脚本的 AI 生成 HTML、被 Agent 启动了四次的慢速导出工具、需要统计而不是 Top-k 检索的评论问题，以及黑五的容量规划。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Context & Memory | Medium | [The copywriting assistant keeps using the formal German "Sie" a merchant asked for in April, ignores today's request for casual copy, and then overwrites the saved preference with a guess](modules/daily-2026-11-27.md#q1) | 文案助手一直沿用商家 4 月要求的德语敬称「Sie」，无视今天要用随意语气的要求，后来又用一个猜测覆盖了已保存的偏好 |
+| 2 | Safety & Security | Hard | [AI-written product descriptions are published as HTML, and one copied an image tag with an onerror script from a supplier's page onto the storefront](modules/daily-2026-11-27.md#q2) | AI 撰写的商品描述以 HTML 形式发布，其中一条把供应商页面上带 onerror 脚本的图片标签照搬到了店铺前台 |
+| 3 | Tools & MCP | Medium | [The catalog-export tool takes eight minutes, the tool call times out after 60 seconds, and the agent starts the same export three more times](modules/daily-2026-11-27.md#q3) | 目录导出工具需要 8 分钟，工具调用在 60 秒后超时，于是 Agent 又把同一个导出任务启动了三次 |
+| 4 | RAG | Hard | ["Does this jacket run small?" The assistant quotes three angry reviews, while 700 of 800 reviewers say the fit is true to size](modules/daily-2026-11-27.md#q4) | 「这件夹克偏小吗？」助手引用了三条愤怒的评论，而 800 位评论者中有 700 位说尺码标准 |
+| 5 | Production | Senior | [Black Friday is three weeks away: capacity planning for the shopper chat agent, from token forecasts and rate limits to what to switch off first](modules/daily-2026-11-27.md#q5) | 距离黑五还有三周：为顾客聊天 Agent 做容量规划，从 token 预测、速率限制，到先关掉哪些功能 |
