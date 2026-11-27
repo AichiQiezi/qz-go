@@ -3,11 +3,21 @@
 后端面试题（Go 为主、Java 为辅），中英双语，每天 5 道，覆盖 Go、System Design、Database、Middleware、Java & CS。
 每题包含题目、参考答案（默认折叠）、追问和词汇表。
 
-共 47 天、235 道题。
+共 48 天、240 道题。
 
 - 数据：`interview/data/YYYY-MM-DD.json`（与 Interview Drill 页面的 `days` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render`
 - Agent 面试速成：[agent/README.md](agent/README.md)
+
+## [2026-11-28](days/2026-11-28.md)
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Go | Hard | [Retries of conversion uploads to Google Ads all fail within a millisecond with "context deadline exceeded" once the first attempt is slow](days/2026-11-28.md#q1) | 向 Google Ads 回传转化的重试，只要第一次尝试慢了，后面的每次重试都会在 1 毫秒内以「context deadline exceeded」失败 |
+| 2 | System Design | Senior | [Merchants want to sell gift boxes made of three existing products: inventory, pricing, refunds and ad catalogs for bundles](days/2026-11-28.md#q2) | 商家想把三个现有商品组合成礼盒出售：捆绑商品的库存、定价、退款和广告目录 |
+| 3 | Database | Hard | [A nightly price job locks a merchant's products, and every checkout for those products waits until the job commits, although checkout never updates products](days/2026-11-28.md#q3) | 夜间改价任务锁住了一个商家的商品，于是这些商品的每一次结账都要等到任务提交，尽管结账根本不会更新商品表 |
+| 4 | Middleware | Medium | [Deleted products come back in the Google feed after the catalog-sync service rebuilds its cache from a compacted Kafka topic](days/2026-11-28.md#q4) | 目录同步服务从一个开启了压缩的 Kafka topic 重建缓存后，已删除的商品又回到了 Google feed 里 |
+| 5 | Java & CS | Medium | [Vietnamese and Indonesian merchants' products are rejected by an ad platform because prices are sent as "1.25E7"](days/2026-11-28.md#q5) | 越南和印尼商家的商品被广告平台拒收，因为价格被发送成了「1.25E7」 |
 
 ## [2026-11-27](days/2026-11-27.md)
 

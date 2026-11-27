@@ -1,0 +1,197 @@
+{
+  "date": "2026-11-28",
+  "generatedAt": "2026-11-28T06:45:38+08:00",
+  "questions": [
+    {
+      "id": "20261128-1",
+      "topic": "Go",
+      "difficulty": "Hard",
+      "title": "Retries of conversion uploads to Google Ads all fail within a millisecond with \"context deadline exceeded\" once the first attempt is slow",
+      "title_zh": "向 Google Ads 回传转化的重试，只要第一次尝试慢了，后面的每次重试都会在 1 毫秒内以「context deadline exceeded」失败",
+      "question": "A Go worker uploads offline conversions to Google Ads. It wraps the call in a retry loop with three attempts and a 2-second timeout. During a slow period on the ad platform, the logs show attempt 1 failing after about 2 seconds, then attempts 2 and 3 failing instantly with the same error. Conversions are being dropped, although most retries would have succeeded.\n\nThe code creates the timeout with `context.WithTimeout(ctx, 2*time.Second)` before the loop. Explain the bug and fix it.",
+      "question_zh": "一个 Go worker 负责把线下转化回传给 Google Ads。它把调用包在一个重试循环里，最多尝试三次，超时 2 秒。在广告平台变慢的一段时间里，日志显示第 1 次尝试约 2 秒后失败，紧接着第 2、3 次尝试都立刻以同样的错误失败。转化数据在不断丢失，尽管大多数重试本来是能成功的。\n\n代码在循环之前用 `context.WithTimeout(ctx, 2*time.Second)` 创建超时。解释这个 bug 并修复它。",
+      "answer": "**Why it happens.** A context's deadline is a fixed point in time, not a duration that restarts. The loop created one deadline for all attempts. The first attempt used the whole 2 seconds, so attempts 2 and 3 started with a context that had already expired, and `http.Client` returned at once without sending anything. In a local test against a server that was slow only once, the broken loop failed all three attempts, the later ones after 0 ms.\n\n**The fix: a timeout per attempt, under the caller's budget.**\n\n```go\n// Fixed: a per-attempt timeout under an overall budget from the caller,\n// and no retry once the caller's own context is done.\nfunc uploadFixed(ctx context.Context, url string) error {\n\tvar err error\n\tfor attempt := 1; attempt <= 3; attempt++ {\n\t\tactx, cancel := context.WithTimeout(ctx, 1*time.Second)\n\t\tstart := time.Now()\n\t\terr = do(actx, url)\n\t\tcancel()\n\t\tfmt.Printf(\"  fixed attempt %d: %v after %v\\n\", attempt, err, time.Since(start).Round(time.Millisecond))\n\t\tif err == nil || ctx.Err() != nil {\n\t\t\treturn errors.Join(err, ctx.Err())\n\t\t}\n\t\ttime.Sleep(100 * time.Millisecond) // backoff (jitter omitted)\n\t}\n\treturn err\n}\n```\n\nIn the same test, attempt 1 timed out after 1 second and attempt 2 succeeded.\n\n- Derive each attempt's context from the parent and `cancel()` it right after the call. A `defer cancel()` inside the loop would keep every timer until the function returns.\n- Keep an overall budget from the caller, and stop retrying once it is done; a job shutting down should not keep retrying.\n- Retry only errors that can succeed later: timeouts, 429 and 5xx. Add exponential backoff with jitter so many workers do not retry in step.\n\n**Retries need idempotency.** A timeout does not mean the upload failed: the platform may have accepted it. Send the same order ID or transaction identifier on every attempt so the ad platform can deduplicate, and record the outcome per conversion so a later job does not upload it again.\n\n**Trade-offs.** Shorter per-attempt timeouts recover faster from one slow node but fail more often when the whole API is slow. Choose them from the platform's observed latency, not from a round number.",
+      "answer_zh": "**原因。** context 的截止时间是一个固定的时间点，而不是一段会重新计时的时长。这个循环为所有尝试只创建了一个截止时间。第一次尝试用光了整整 2 秒，于是第 2、3 次尝试一开始拿到的就是已经过期的 context，`http.Client` 什么都没发送就立即返回了。在一次本地测试中，服务器只慢了一次，可错误的循环让三次尝试全部失败，后两次耗时都是 0 ms。\n\n**修复方案：每次尝试单独设超时，并受调用方的总预算约束。**\n\n```go\n// Fixed: a per-attempt timeout under an overall budget from the caller,\n// and no retry once the caller's own context is done.\nfunc uploadFixed(ctx context.Context, url string) error {\n\tvar err error\n\tfor attempt := 1; attempt <= 3; attempt++ {\n\t\tactx, cancel := context.WithTimeout(ctx, 1*time.Second)\n\t\tstart := time.Now()\n\t\terr = do(actx, url)\n\t\tcancel()\n\t\tfmt.Printf(\"  fixed attempt %d: %v after %v\\n\", attempt, err, time.Since(start).Round(time.Millisecond))\n\t\tif err == nil || ctx.Err() != nil {\n\t\t\treturn errors.Join(err, ctx.Err())\n\t\t}\n\t\ttime.Sleep(100 * time.Millisecond) // backoff (jitter omitted)\n\t}\n\treturn err\n}\n```\n\n在同样的测试中，第 1 次尝试 1 秒后超时，第 2 次尝试成功了。\n\n- 每次尝试的 context 都从父 context 派生，并在调用结束后立即 `cancel()`。如果在循环里写 `defer cancel()`，那么每个计时器都要等到函数返回时才会被释放。\n- 保留来自调用方的总预算，一旦预算用完就停止重试；正在停机的任务不应该继续重试。\n- 只重试那些之后有可能成功的错误：超时、429 和 5xx。加上带随机抖动的指数退避，避免大量 worker 同步重试。\n\n**重试需要幂等性。** 超时并不代表上传失败：平台可能已经接收了。每次尝试都发送相同的订单 ID 或交易标识，让广告平台能够去重，并按每条转化记录结果，避免之后的任务再上传一遍。\n\n**权衡。** 每次尝试的超时设得越短，越能快速从单个慢节点中恢复，但在整个 API 都变慢时失败得也越多。要根据平台实际观测到的延迟来设定，而不是随手取一个整数。",
+      "followups": [
+        "How would you test retry behavior without calling the real Google Ads API?",
+        "The platform returns 429 with a Retry-After header longer than your remaining budget. What should the worker do?"
+      ],
+      "followups_zh": [
+        "你会如何在不调用真实 Google Ads API 的情况下测试重试行为？",
+        "平台返回 429，Retry-After 头给出的等待时间比你剩余的预算还长。worker 应该怎么做？"
+      ],
+      "vocab": [
+        {
+          "en": "deadline",
+          "zh": "截止时间"
+        },
+        {
+          "en": "per-attempt timeout",
+          "zh": "单次尝试超时"
+        },
+        {
+          "en": "retry budget",
+          "zh": "重试预算"
+        },
+        {
+          "en": "jitter",
+          "zh": "随机抖动"
+        }
+      ]
+    },
+    {
+      "id": "20261128-2",
+      "topic": "System Design",
+      "difficulty": "Senior",
+      "title": "Merchants want to sell gift boxes made of three existing products: inventory, pricing, refunds and ad catalogs for bundles",
+      "title_zh": "商家想把三个现有商品组合成礼盒出售：捆绑商品的库存、定价、退款和广告目录",
+      "question": "Merchants ask for bundles: a holiday gift box with two candles, a mug and three packs of tea, all products they already sell individually. The first version created the bundle as a normal product with its own stock count. Within a week, gift boxes were sold while the tea was out of stock, a refund of one broken mug from a box refunded the full box price, and Google rejected the bundle because its price did not match the landing page.\n\nDesign bundles properly.",
+      "question_zh": "商家希望支持捆绑销售：一个节日礼盒，包含两支蜡烛、一个马克杯和三包茶，全都是他们已经在单独售卖的商品。第一版把礼盒做成了一个普通商品，有自己独立的库存数。不到一周就出了问题：茶已经卖完了，礼盒却还在卖；礼盒里一个碎掉的马克杯申请退款，却退了整盒的价格；Google 也因为礼盒价格与落地页不一致而拒绝了它。\n\n正确地设计捆绑商品。",
+      "answer": "**Why the first version failed.** A bundle is not a product with its own stock; it is a recipe over other products. Storing a separate count let it drift from the components the moment either was sold, and the order recorded one line, so nothing downstream knew what was inside.\n\n**Inventory: derive, never store.** Available bundles are computed from component stock, and the scarcest component decides:\n\n```go\n// available is how many bundles can be sold now: the scarcest component\n// decides. It is derived from component stock, never stored as its own count.\nfunc available(components []Component, stock map[string]int) (int, string) {\n\tbest, limiting := -1, \"\"\n\tfor _, c := range components {\n\t\tn := stock[c.SKU] / c.Qty\n\t\tif best == -1 || n < best {\n\t\t\tbest, limiting = n, c.SKU\n\t\t}\n\t}\n\treturn best, limiting\n}\n```\n\n- In a local run, the box showed 10 available, limited by tea; after 12 tea packs sold individually it dropped to 6 without any bundle code running.\n- At checkout, reserve the components, not the bundle, in one transaction, with the same locking or reservation rules as single items.\n- Recompute availability when any component's stock changes, and publish it to storefronts and channels as an event.\n\n**Orders and money.** Store the order as one bundle line with child lines for each component, and allocate the bundle price across the children when the order is placed, for example in proportion to their standalone prices, with the rounding remainder on one line. Refunds, partial returns, tax and revenue reports then work per component: a broken mug refunds the mug's allocated share.\n\n**Channels.** Ad catalogs see the bundle as its own item with its own ID, image, price and a landing page that shows exactly that price, with availability taken from the derived count. Pause it everywhere when it reaches zero, even though no bundle stock row changed.\n\n**Trade-offs.** Derived availability costs a computation per read, so cache it and invalidate on component changes. Price allocation rules affect tax and must be agreed with finance. Letting shoppers swap components (choose your tea) multiplies variants; model it as options with their own component lists rather than as free-form edits.",
+      "answer_zh": "**第一版为什么失败。** 捆绑商品不是一个有自己库存的商品，它是建立在其他商品之上的一份「配方」。单独存一个库存数，只要礼盒或其中任何一个组件被卖出，两者就会对不上；而订单里只记录了一行，下游没有任何环节知道里面装了什么。\n\n**库存：推导出来，绝不单独存。** 可售的礼盒数量由组件库存计算得出，由最稀缺的那个组件决定：\n\n```go\n// available is how many bundles can be sold now: the scarcest component\n// decides. It is derived from component stock, never stored as its own count.\nfunc available(components []Component, stock map[string]int) (int, string) {\n\tbest, limiting := -1, \"\"\n\tfor _, c := range components {\n\t\tn := stock[c.SKU] / c.Qty\n\t\tif best == -1 || n < best {\n\t\t\tbest, limiting = n, c.SKU\n\t\t}\n\t}\n\treturn best, limiting\n}\n```\n\n- 在一次本地运行中，礼盒显示可售 10 个，受限于茶；单独卖出 12 包茶之后，即使没有任何礼盒相关代码执行，可售数量也降到了 6 个。\n- 结账时，在一个事务里预留各个组件，而不是预留礼盒本身，并沿用与单件商品相同的加锁或预留规则。\n- 任何组件的库存变化时，都重新计算可售数量，并以事件的形式发布给店铺前台和各个渠道。\n\n**订单与金额。** 订单存为一行礼盒，下面再挂每个组件对应的子行；下单时把礼盒价格分摊到各个子行，比如按它们单独售卖的价格比例分摊，舍入产生的差额放在其中一行上。这样退款、部分退货、税额和收入报表就都能按组件处理：碎了一个马克杯，就退马克杯分摊到的那部分金额。\n\n**渠道。** 在广告目录里，礼盒是一个独立的商品，有自己的 ID、图片、价格，以及一个显示的价格与之完全一致的落地页；可售状态取自推导出的数量。数量降到零时，要在所有渠道暂停它，尽管并没有哪一行礼盒库存数据发生了变化。\n\n**权衡。** 推导出的可售数量每次读取都要计算一次，所以要缓存，并在组件变化时失效。价格分摊规则会影响税额，必须和财务达成一致。允许顾客替换组件（自选茶叶）会让变体数量成倍增加；要把它建模为各自带有组件清单的选项，而不是任意的自由编辑。",
+      "followups": [
+        "Two shoppers buy the last gift box and the last single tea pack at the same moment. Who gets the tea?",
+        "How would you let a warehouse pre-assemble 50 boxes without breaking the derived count?",
+        "A component product is deleted. What happens to the bundle and to past orders?"
+      ],
+      "followups_zh": [
+        "两位顾客在同一时刻分别买下最后一个礼盒和最后一包单独售卖的茶。茶归谁？",
+        "你会如何让仓库预先组装好 50 个礼盒，又不破坏推导出的库存数？",
+        "某个组件商品被删除了。礼盒和历史订单会怎样？"
+      ],
+      "vocab": [
+        {
+          "en": "bundle",
+          "zh": "捆绑商品"
+        },
+        {
+          "en": "component",
+          "zh": "组件"
+        },
+        {
+          "en": "derived availability",
+          "zh": "推导出的可售数量"
+        },
+        {
+          "en": "price allocation",
+          "zh": "价格分摊"
+        },
+        {
+          "en": "child line",
+          "zh": "子订单行"
+        }
+      ]
+    },
+    {
+      "id": "20261128-3",
+      "topic": "Database",
+      "difficulty": "Hard",
+      "title": "A nightly price job locks a merchant's products, and every checkout for those products waits until the job commits, although checkout never updates products",
+      "title_zh": "夜间改价任务锁住了一个商家的商品，于是这些商品的每一次结账都要等到任务提交，尽管结账根本不会更新商品表",
+      "question": "A large merchant's nightly repricing job opens a transaction, runs `SELECT ... FOR UPDATE` on all 50,000 of their products to stop concurrent edits, recalculates prices, and commits after a few minutes. During that window, checkouts for that merchant hang. Checkout only inserts into `order_items`, which has a foreign key to `products`.\n\nWhy does an insert into another table wait, and how do you fix it?",
+      "question_zh": "一个大商家的夜间调价任务会开启一个事务，对其全部 5 万个商品执行 `SELECT ... FOR UPDATE` 以阻止并发修改，然后重新计算价格，几分钟后提交。在这段时间里，这个商家的结账全都卡住了。结账只会向 `order_items` 插入数据，而这张表有一个指向 `products` 的外键。\n\n为什么往另一张表插入数据也要等待？如何修复？",
+      "answer": "**Why it happens.** To check a foreign key, Postgres locks the referenced parent row with `FOR KEY SHARE`, so the row cannot be deleted or have its key changed until the insert commits. `FOR KEY SHARE` conflicts only with `FOR UPDATE`, the strongest row lock. The job asked for exactly that lock on every product, so each checkout insert queued behind the whole job.\n\nA local Postgres 16 test, with another session holding its locks for 3 seconds, shows the difference:\n\n- Under `SELECT ... FOR UPDATE`, the order-item insert waited about 2.3 seconds.\n- Under `FOR NO KEY UPDATE`, or a plain `UPDATE` of the price column, it did not wait at all.\n- A plain `UPDATE` that changed `sku`, a column with a unique index, also blocked: changing a column that could be a foreign-key target takes the strong lock.\n\n**The fix.**\n\n```sql\n-- The price job (slow): blocks every checkout that references these products\nSELECT id FROM products WHERE merchant_id = 77 FOR UPDATE;\n\n-- Enough to stop concurrent price edits, and compatible with FK checks\nSELECT id FROM products WHERE merchant_id = 77 FOR NO KEY UPDATE;\n```\n\n- Use `FOR NO KEY UPDATE` when you only need to stop other writers. It still blocks concurrent price edits but lets foreign-key checks through.\n- Better, avoid holding locks for minutes: compute new prices outside the transaction, then apply them in small batches, each a short transaction that checks the row has not changed since it was read.\n- Set `lock_timeout` on checkout so it fails fast and visibly instead of hanging, and alert on lock waits.\n\n**Trade-offs.** Batching means a merchant can briefly see some new and some old prices, so publish the change to channels only after the last batch. Do not update unique or key columns in hot jobs unless needed.",
+      "answer_zh": "**原因。** 为了检查外键，Postgres 会用 `FOR KEY SHARE` 锁住被引用的父表行，保证在插入提交之前，这一行不会被删除，它的键也不会被修改。`FOR KEY SHARE` 只与 `FOR UPDATE` 这种最强的行锁冲突。而这个任务恰恰对每个商品都申请了这把锁，于是每一次结账插入都排在整个任务后面。\n\n在本地 Postgres 16 上做的测试（由另一个会话持有锁 3 秒）显示了其中的差别：\n\n- 在 `SELECT ... FOR UPDATE` 下，插入订单行等待了约 2.3 秒。\n- 在 `FOR NO KEY UPDATE` 下，或者只是普通地 `UPDATE` 价格列时，插入完全没有等待。\n- 一个修改了 `sku` 的普通 `UPDATE` 也阻塞了：`sku` 列有唯一索引，修改可能成为外键目标的列，会申请那把强锁。\n\n**修复方案。**\n\n```sql\n-- The price job (slow): blocks every checkout that references these products\nSELECT id FROM products WHERE merchant_id = 77 FOR UPDATE;\n\n-- Enough to stop concurrent price edits, and compatible with FK checks\nSELECT id FROM products WHERE merchant_id = 77 FOR NO KEY UPDATE;\n```\n\n- 如果只是想阻止其他写入者，就用 `FOR NO KEY UPDATE`。它依然会阻止并发的改价，但会放行外键检查。\n- 更好的做法是不要把锁持有几分钟：在事务之外计算新价格，再分成小批量应用，每批都是一个短事务，并检查这一行自读取以来没有被修改过。\n- 给结账设置 `lock_timeout`，让它快速、明显地失败，而不是一直卡住；并对锁等待设置告警。\n\n**权衡。** 分批处理意味着商家可能会短暂地看到一部分新价格、一部分旧价格，所以要等最后一批完成后，再把变更发布到各个渠道。除非确有必要，不要在热点任务里更新唯一列或键列。",
+      "followups": [
+        "How would you find which session is blocking checkout while it is happening?",
+        "Why does Postgres need a lock on the parent row at all for a foreign-key check?"
+      ],
+      "followups_zh": [
+        "在问题发生时，你会如何找出是哪个会话在阻塞结账？",
+        "为什么 Postgres 做外键检查时，非得给父表行加锁不可？"
+      ],
+      "vocab": [
+        {
+          "en": "row-level lock",
+          "zh": "行级锁"
+        },
+        {
+          "en": "foreign key check",
+          "zh": "外键检查"
+        },
+        {
+          "en": "lock conflict",
+          "zh": "锁冲突"
+        },
+        {
+          "en": "lock_timeout",
+          "zh": "锁等待超时"
+        }
+      ]
+    },
+    {
+      "id": "20261128-4",
+      "topic": "Middleware",
+      "difficulty": "Medium",
+      "title": "Deleted products come back in the Google feed after the catalog-sync service rebuilds its cache from a compacted Kafka topic",
+      "title_zh": "目录同步服务从一个开启了压缩的 Kafka topic 重建缓存后，已删除的商品又回到了 Google feed 里",
+      "question": "Product state is published to a Kafka topic keyed by product ID, with log compaction enabled, so the topic keeps the latest state of each product. The catalog-sync service rebuilds its in-memory cache by reading the topic from the beginning on startup. After a redeploy, products that merchants deleted weeks ago appeared again in their Google Merchant Center feeds.\n\nExplain how compaction treats deletes and find the bug.",
+      "question_zh": "商品状态被发布到一个以商品 ID 为 key、开启了日志压缩的 Kafka topic，于是这个 topic 会保留每个商品的最新状态。目录同步服务在启动时从头读取这个 topic，以重建内存缓存。一次重新部署之后，商家几周前删除的商品又出现在了他们的 Google Merchant Center feed 里。\n\n解释日志压缩如何处理删除，并找出 bug。",
+      "answer": "**How compaction works.** A compacted topic keeps at least the latest record for each key and removes older ones in the background. A delete is a record with the key and a null value, called a tombstone. Compaction keeps the tombstone for a configured retention period so consumers can see it, then removes it too. Compaction also never touches the active segment, so readers can see several versions of the same key.\n\n**The bugs.**\n\n- The consumer skipped records with a nil value as \"empty messages\", so tombstones never removed anything from the cache. Rebuilding from a topic that still held an older value and a tombstone left the deleted product in place.\n- One service marked deletes with a JSON body such as `{\"deleted\": true}` instead of a null value. Compaction treats that as an ordinary latest value and keeps it forever, and consumers that did not check the flag kept the product.\n\n**The fix: apply tombstones as deletes.**\n\n```go\n// apply rebuilds the product cache from a compacted topic. A tombstone must\n// delete the key; skipping nil values is what resurrects deleted products.\nfunc apply(cache map[string]string, recs []Record) {\n\tfor _, r := range recs {\n\t\tif r.Value == nil {\n\t\t\tdelete(cache, r.Key)\n\t\t\tcontinue\n\t\t}\n\t\tcache[r.Key] = *r.Value\n\t}\n}\n```\n\n- In a local simulation, four records for two products left one product in the cache, the latest price of the scarf; the deleted mug was gone.\n- Standardize on null-value tombstones for deletes, and make the feed builder treat a missing product as \"remove from the feed\".\n- A consumer that stays offline longer than the tombstone retention can miss a delete entirely. Rebuild such consumers from scratch, or reconcile periodically against the database.\n\n**Trade-offs.** A longer tombstone retention protects slow consumers but keeps more data. A compacted topic is a good change feed, not a database; keep the source of truth in the database and use the topic to propagate it.",
+      "answer_zh": "**日志压缩的工作原理。** 开启压缩的 topic 会为每个 key 至少保留最新的一条记录，并在后台删除更旧的记录。删除操作是一条带有该 key、值为 null 的记录，称为墓碑。压缩会把墓碑保留一段可配置的时间，让消费者有机会看到它，之后再把它也删掉。压缩也从不处理活跃段，所以读取方可能会看到同一个 key 的多个版本。\n\n**bug 所在。**\n\n- 消费者把值为 nil 的记录当作「空消息」跳过了，所以墓碑从未从缓存中删除过任何东西。如果 topic 里同时还保留着旧值和墓碑，从它重建缓存时，被删除的商品就会留下来。\n- 有一个服务用 `{\"deleted\": true}` 这样的 JSON 内容来标记删除，而不是发送 null 值。压缩把它当作一条普通的最新值，永远保留；没有检查这个标记的消费者，就把商品留了下来。\n\n**修复方案：把墓碑当作删除来处理。**\n\n```go\n// apply rebuilds the product cache from a compacted topic. A tombstone must\n// delete the key; skipping nil values is what resurrects deleted products.\nfunc apply(cache map[string]string, recs []Record) {\n\tfor _, r := range recs {\n\t\tif r.Value == nil {\n\t\t\tdelete(cache, r.Key)\n\t\t\tcontinue\n\t\t}\n\t\tcache[r.Key] = *r.Value\n\t}\n}\n```\n\n- 在一次本地模拟中，两个商品的四条记录处理完后，缓存里只剩一个商品，也就是围巾的最新价格；被删除的马克杯已经不在了。\n- 统一用 null 值墓碑表示删除，并让 feed 生成器把缺失的商品视为「从 feed 中移除」。\n- 离线时间超过墓碑保留期的消费者，可能会完全错过一次删除。对这样的消费者要从头重建，或者定期与数据库对账。\n\n**权衡。** 墓碑保留得越久，越能保护慢速消费者，但也会保留更多数据。开启压缩的 topic 是一个很好的变更流，但它不是数据库；真实数据源要放在数据库里，用 topic 来传播变更。",
+      "followups": [
+        "How would you rebuild a consumer's state safely when you suspect it missed tombstones?",
+        "Why might a consumer see two versions of the same product even on a compacted topic?"
+      ],
+      "followups_zh": [
+        "当你怀疑某个消费者错过了墓碑时，你会如何安全地重建它的状态？",
+        "为什么即使在开启了压缩的 topic 上，消费者也可能看到同一个商品的两个版本？"
+      ],
+      "vocab": [
+        {
+          "en": "log compaction",
+          "zh": "日志压缩"
+        },
+        {
+          "en": "tombstone",
+          "zh": "墓碑（删除标记）"
+        },
+        {
+          "en": "active segment",
+          "zh": "活跃段"
+        },
+        {
+          "en": "source of truth",
+          "zh": "真实数据源"
+        }
+      ]
+    },
+    {
+      "id": "20261128-5",
+      "topic": "Java & CS",
+      "difficulty": "Medium",
+      "title": "Vietnamese and Indonesian merchants' products are rejected by an ad platform because prices are sent as \"1.25E7\"",
+      "title_zh": "越南和印尼商家的商品被广告平台拒收，因为价格被发送成了「1.25E7」",
+      "question": "A Java service builds product feeds for ad platforms. Prices are stored as `double` and written into the feed by string concatenation. Feeds from most stores are fine, but stores selling in Vietnamese dong and Indonesian rupiah get rejections for invalid prices, and one feed showed `1.25E7` for a product priced at 12,500,000 VND.\n\nExplain what happened and how money should be formatted.",
+      "question_zh": "一个 Java 服务为广告平台生成商品 feed。价格以 `double` 类型存储，并通过字符串拼接写入 feed。大多数店铺的 feed 都没问题，但以越南盾和印尼盾售卖的店铺会因价格无效而被拒；有一个 feed 里，一件售价 12,500,000 越南盾的商品显示成了 `1.25E7`。\n\n解释发生了什么，以及金额应当如何格式化。",
+      "answer": "**Why it happens.** `Double.toString`, which string concatenation uses, switches to scientific notation for values of 10 million or more and for values below 0.001. Currencies with large unit amounts cross that line with ordinary prices, so only those stores broke. The same trap exists in `BigDecimal`: `toString()` can produce exponent notation after `stripTrailingZeros()`.\n\n```java\ndouble price = 12_500_000.0;              // 12.5 million VND\nString a = \"\" + price;                    // \"1.25E7\"\nString b = BigDecimal.valueOf(price).stripTrailingZeros().toString();      // \"1.25E+7\"\nString c = BigDecimal.valueOf(price).stripTrailingZeros().toPlainString(); // \"12500000\"\n```\n\nAll three results were checked with Java 21. A price of 0.0001 likewise became `1.0E-4`.\n\n**The fix.**\n\n- Do not store money as `double`. Use `BigDecimal` or a `long` count of minor units, and keep the currency next to it.\n- Format for machines with `toPlainString()` after setting the scale the currency needs: zero decimals for VND, two for EUR.\n- Never use locale-dependent formatting for feeds: `String.format` with a German locale writes a comma as the decimal separator. Use `Locale.ROOT` or the plain-string methods.\n- Validate each feed value against the platform's expected pattern before upload, so a bad value fails one product in your system instead of a whole upload at the platform.\n\n**Trade-offs.** Migrating stored `double` prices needs care, because some stored values are already slightly off; round them to the currency's scale during migration and compare totals before and after.",
+      "answer_zh": "**原因。** 字符串拼接用的是 `Double.toString`，而它在数值达到一千万及以上、或小于 0.001 时，会改用科学计数法。单位金额很大的币种，普通价格就会越过这条线，所以只有这些店铺出了问题。`BigDecimal` 里也有同样的陷阱：调用 `stripTrailingZeros()` 之后，`toString()` 可能会输出指数形式。\n\n```java\ndouble price = 12_500_000.0;              // 12.5 million VND\nString a = \"\" + price;                    // \"1.25E7\"\nString b = BigDecimal.valueOf(price).stripTrailingZeros().toString();      // \"1.25E+7\"\nString c = BigDecimal.valueOf(price).stripTrailingZeros().toPlainString(); // \"12500000\"\n```\n\n这三个结果都在 Java 21 上验证过。同理，0.0001 这个价格会变成 `1.0E-4`。\n\n**修复方案。**\n\n- 不要用 `double` 存储金额。使用 `BigDecimal`，或者以最小货币单位计数的 `long`，并把币种和它存在一起。\n- 面向机器的格式化，要先按币种设置所需的小数位数，再调用 `toPlainString()`：越南盾 0 位小数，欧元 2 位。\n- 生成 feed 时绝不要使用依赖地区设置的格式化：在德国地区设置下，`String.format` 会用逗号作为小数分隔符。要用 `Locale.ROOT`，或者使用输出普通字符串的方法。\n- 上传之前，按平台要求的格式逐一校验 feed 里的值，这样一个错误的值只会让你系统里的一个商品失败，而不是让整批上传在平台端失败。\n\n**权衡。** 迁移以 `double` 存储的价格需要小心，因为有些已存储的值本身就略有偏差；迁移时要按币种的小数位数舍入，并比对迁移前后的总额。",
+      "followups": [
+        "Which currencies have zero or three decimal places, and where would you keep that rule?",
+        "How would you find every place in a large codebase that turns a price into a string?"
+      ],
+      "followups_zh": [
+        "哪些币种是 0 位或 3 位小数？你会把这条规则放在哪里？",
+        "在一个大型代码库里，你会如何找出所有把价格转成字符串的地方？"
+      ],
+      "vocab": [
+        {
+          "en": "scientific notation",
+          "zh": "科学计数法"
+        },
+        {
+          "en": "minor unit",
+          "zh": "最小货币单位"
+        },
+        {
+          "en": "scale",
+          "zh": "小数位数"
+        },
+        {
+          "en": "locale-independent",
+          "zh": "与地区设置无关的"
+        }
+      ]
+    }
+  ]
+}
