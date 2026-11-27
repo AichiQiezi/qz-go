@@ -1,0 +1,207 @@
+{
+  "id": "daily-2026-11-28",
+  "order": 20261128,
+  "kind": "daily",
+  "title": "Daily set · Nov 28",
+  "title_zh": "每日新题 · 11 月 28 日",
+  "summary": "Five new agent questions: dependent tool calls made in parallel with an invented ID, ad spend in micros and mixed currencies, duplicate webhooks that start two agent runs, a revoked user still seeing documents through retrieval, and merchant rules that never reached the worker agents.",
+  "summary_zh": "五道新的 Agent 题：带着编造 ID 并行发出的相互依赖的工具调用、以 micros 计的广告花费和混合币种、启动了两次 Agent 运行的重复 webhook、被撤销权限的用户仍能通过检索看到文档，以及没能传达到 worker Agent 的商家规则。",
+  "generatedAt": "2026-11-28T06:56:17+08:00",
+  "questions": [
+    {
+      "id": "agent-daily-20261128-1",
+      "topic": "Agent Loop",
+      "difficulty": "Medium",
+      "title": "The ad-launch agent calls create_campaign and create_ad_set in the same turn, and the ad set points at a campaign ID the model made up",
+      "title_zh": "广告投放 Agent 在同一轮里同时调用 create_campaign 和 create_ad_set，而广告组指向的是一个模型编造出来的广告系列 ID",
+      "question": "The ad-launch agent sets up Meta campaigns for merchants. Logs show that in one turn it often asks for `create_campaign` and `create_ad_set` together. The harness runs a turn's tool calls concurrently, so the ad set call carries a campaign ID such as `cmp_new` that the model invented, and the platform rejects it. Sometimes the model then reports both steps as done.\n\nExplain why this happens and how to fix it without giving up parallel calls everywhere.",
+      "question_zh": "广告投放 Agent 负责为商家搭建 Meta 广告系列。日志显示，它经常在同一轮里同时请求 `create_campaign` 和 `create_ad_set`。框架会并发执行同一轮里的工具调用，于是创建广告组的调用带着一个模型编造出来的广告系列 ID，比如 `cmp_new`，平台随即拒绝了它。有时模型还会接着报告两步都已完成。\n\n解释为什么会这样，以及如何在不全面放弃并行调用的前提下修复它。",
+      "answer": "**The core idea.** Tool calls in one turn are meant to be independent: the model writes all of them before it sees any result. A call that needs another call's output belongs in a later turn. When the model gets this wrong, the tool must make the mistake visible and easy to fix, instead of failing vaguely or succeeding on a guess.\n\n**Why it happens.** Parallel tool use is on by default, which is usually what you want: six independent reports in one turn are much faster than six turns. But nothing told the model that an ad set needs an ID that only exists after `create_campaign` returns, so it filled in a plausible one. And when the error came back as \"invalid parameter\", the model had no clue what to do differently.\n\n**Fix one: make dependencies explicit.** In the tool description, say that `campaign_id` must be an ID returned by `create_campaign` or `list_campaigns`, and that the model must never invent one. Return created IDs prominently in results.\n\n**Fix two: validate references in the tool and say what to do:**\n\n```go\n// createAdSet refuses an ID it has never issued, and says what to do instead,\n// so a guessed or not-yet-created campaign ID becomes a recoverable error.\nfunc (s *Store) createAdSet(campaignID string) Result {\n\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\tif !s.campaigns[campaignID] {\n\t\treturn Result{Content: fmt.Sprintf(\"campaign_id %q does not exist. Use the ID returned by create_campaign; \"+\n\t\t\t\"if you created it in this same turn, call create_ad_set again with that ID.\", campaignID), IsError: true}\n\t}\n\treturn Result{Content: \"ad set created in \" + campaignID}\n}\n```\n\n- In a local run, the first turn created `cmp_001` and rejected the ad set for `cmp_new` with an `is_error` result telling the model to retry with the real ID; the next turn succeeded.\n- Return every result, failures included, in one user message, in the order of the calls. Dropping the failed one is what let the model believe both steps worked.\n\n**Fix three, if needed: limit parallelism for one route.** `disable_parallel_tool_use` still works with `tool_choice: auto` and limits each turn to at most one call. Use it only for a flow made entirely of dependent writes, because it also makes independent reads slower.\n\n**Trade-offs.** A single `launch_campaign` tool that creates the campaign and ad sets in one server-side transaction removes the ordering problem entirely and is easier to roll back, at the cost of a bigger, less flexible tool. For common multi-step setups, that is often the better design.",
+      "answer_zh": "**核心思想。** 同一轮里的工具调用本应彼此独立：模型是在看到任何结果之前，就把它们全部写好的。需要用到另一个调用输出的调用，应当放到下一轮。当模型弄错了这一点时，工具必须让这个错误清晰可见、容易修正，而不是含糊地失败，或者基于一个猜测成功执行。\n\n**原因。** 并行工具调用默认是开启的，这通常也正是你想要的：一轮里拉取六份独立的报表，比分六轮快得多。但没有任何东西告诉模型，广告组需要的 ID 只有在 `create_campaign` 返回后才存在，于是它填了一个看起来说得通的 ID。而当报错只写着「参数无效」时，模型也就不知道该怎么改。\n\n**修复一：把依赖关系写明。** 在工具描述里说明 `campaign_id` 必须是 `create_campaign` 或 `list_campaigns` 返回的 ID，模型绝不能自己编造。在结果里醒目地返回新建的 ID。\n\n**修复二：在工具里校验引用，并说明该怎么做：**\n\n```go\n// createAdSet refuses an ID it has never issued, and says what to do instead,\n// so a guessed or not-yet-created campaign ID becomes a recoverable error.\nfunc (s *Store) createAdSet(campaignID string) Result {\n\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\tif !s.campaigns[campaignID] {\n\t\treturn Result{Content: fmt.Sprintf(\"campaign_id %q does not exist. Use the ID returned by create_campaign; \"+\n\t\t\t\"if you created it in this same turn, call create_ad_set again with that ID.\", campaignID), IsError: true}\n\t}\n\treturn Result{Content: \"ad set created in \" + campaignID}\n}\n```\n\n- 在一次本地运行中，第一轮创建了 `cmp_001`，并以一条 `is_error` 结果拒绝了指向 `cmp_new` 的广告组，告诉模型用真实的 ID 重试；下一轮就成功了。\n- 把所有结果，包括失败的，按调用顺序放在同一条 user 消息里返回。正是因为丢掉了失败的那一条，模型才以为两步都成功了。\n\n**修复三（如有必要）：只对某一条链路限制并行。** `disable_parallel_tool_use` 在 `tool_choice: auto` 下依然有效，会把每一轮限制为最多一次调用。只对一条完全由相互依赖的写操作组成的流程使用它，因为它也会让独立的读操作变慢。\n\n**权衡。** 一个 `launch_campaign` 工具在服务端用一个事务同时创建广告系列和广告组，可以彻底消除顺序问题，也更容易回滚，代价是工具更大、灵活性更低。对于常见的多步骤搭建流程，这往往是更好的设计。",
+      "followups": [
+        "Two independent reads and one write that depends on both are requested in the same turn. What should the harness do?",
+        "How would you write an eval case that catches invented IDs?",
+        "When would you prefer one composite tool over several small ones?"
+      ],
+      "followups_zh": [
+        "同一轮里请求了两个独立的读操作，以及一个依赖这两者的写操作。框架应该怎么做？",
+        "你会如何写一个能抓住编造 ID 的评测用例？",
+        "什么时候你会更倾向于用一个组合工具，而不是几个小工具？"
+      ],
+      "vocab": [
+        {
+          "en": "parallel tool use",
+          "zh": "并行工具调用"
+        },
+        {
+          "en": "dependency",
+          "zh": "依赖"
+        },
+        {
+          "en": "dangling reference",
+          "zh": "悬空引用"
+        },
+        {
+          "en": "composite tool",
+          "zh": "组合工具"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261128-2",
+      "topic": "Tools & MCP",
+      "difficulty": "Hard",
+      "title": "The ad-report tool passes Google's cost_micros and Meta's spend strings straight through, and the agent tells a merchant they spent $4.5 billion",
+      "title_zh": "广告报表工具把 Google 的 cost_micros 和 Meta 的花费字符串原样透传，结果 Agent 告诉商家他们花了 45 亿美元",
+      "question": "The reporting agent answers \"how much did I spend on ads last week?\" with a `get_ad_spend` tool that returns the platforms' raw responses. Google Ads reports cost in micros, Meta returns spend as a decimal string in the ad account's currency, and one merchant runs a Japanese account in yen. The agent told a merchant they spent $4.5 billion on Google, added yen to dollars in a total, and once compared Google's numbers for a day in the account's time zone with Meta's numbers for a different day.\n\nRedesign the tool output so the model cannot make these mistakes.",
+      "question_zh": "报表 Agent 用一个 `get_ad_spend` 工具回答「我上周在广告上花了多少钱？」，这个工具直接返回各平台的原始响应。Google Ads 以 micros 为单位报告花费，Meta 以广告账户币种的十进制字符串返回花费，还有一位商家经营着一个以日元结算的日本账户。Agent 告诉一位商家他们在 Google 上花了 45 亿美元，在合计里把日元和美元直接相加，还有一次拿 Google 某一天（按账户时区）的数据，去和 Meta 另一天的数据做比较。\n\n重新设计工具的输出，让模型无法再犯这些错误。",
+      "answer": "**The core idea.** A tool's result is an interface for a reader that knows nothing about each platform's encoding. Normalize at the tool boundary: every amount carries its unit and currency, arithmetic that needs rules happens in code, and the model reads values that are already correct.\n\n**Why each error happened.**\n\n- `cost_micros` is one millionth of the currency unit. 4,512,340,000 micros is $4,512.34. The model read the integer as dollars, which is a reasonable guess from a field it has no documentation for.\n- Amounts without a currency next to them look addable. The model has no exchange rate and should never invent one.\n- Each ad account reports days in its own time zone, so \"Tuesday\" is a different window on each platform unless the tool says which day and zone it used.\n\n**Normalize amounts in the tool.** Convert every platform's encoding to integer minor units plus an ISO currency code, and include a display string:\n\n```go\n// fromMicros converts Google Ads cost_micros (one millionth of the account\n// currency's unit) to minor units, rounding half away from zero.\nfunc fromMicros(micros int64, cur string) Money {\n\tper := 1_000_000 / pow10(decimals[cur])\n\tminor := (micros + per/2) / per\n\treturn money(minor, cur)\n}\n```\n\nParse decimal strings such as Meta's with exact decimal arithmetic, not `float64`. Then make totals refuse to mix currencies:\n\n```go\n// sum refuses to add different currencies instead of guessing a rate.\nfunc sum(ms ...Money) (Money, error) {\n\tvar t int64\n\tfor _, m := range ms {\n\t\tif m.Currency != ms[0].Currency {\n\t\t\treturn Money{}, fmt.Errorf(\"cannot add %s and %s; convert explicitly\", ms[0].Currency, m.Currency)\n\t\t}\n\t\tt += m.Minor\n\t}\n\treturn money(t, ms[0].Currency), nil\n}\n```\n\n- In a local run, 4,512,340,000 micros became 4512.34 USD, \"1234.5\" became 1234.50 USD, the USD total was 5746.84 USD, and adding JPY failed with a clear message.\n- Return each row with the date range and time zone it covers, and offer a `convert_currency` tool that uses a named rate source and date, so conversions are explicit and auditable.\n\n**Return less.** Raw responses carry dozens of fields the model does not need, each a chance to misread. Select the fields the agent's questions use, name them plainly, such as `spend` instead of `cost_micros`, and put a one-line note in the tool description about units.\n\n**Trade-offs.** Normalizing hides platform details that an expert user occasionally wants; keep the raw response available through a separate debug tool. Every new platform needs its own converter and tests against real payloads.",
+      "answer_zh": "**核心思想。** 工具的结果，是给一个对各平台编码方式一无所知的读者看的接口。要在工具边界上做规范化：每个金额都带上单位和币种，需要规则的运算放在代码里完成，模型读到的是已经正确的值。\n\n**每个错误是怎么发生的。**\n\n- `cost_micros` 表示货币单位的百万分之一。4,512,340,000 micros 就是 4,512.34 美元。模型把这个整数当成了美元，对于一个没有任何说明的字段，这是一个合理的猜测。\n- 旁边没有币种的金额，看起来就是可以相加的。模型没有汇率，也绝不应该编造一个。\n- 每个广告账户都按自己的时区统计日期，所以除非工具说明它用的是哪一天、哪个时区，否则「周二」在每个平台上都是不同的时间窗口。\n\n**在工具里规范化金额。** 把每个平台的编码都转换成以最小货币单位计的整数，加上 ISO 币种代码，再附一个用于显示的字符串：\n\n```go\n// fromMicros converts Google Ads cost_micros (one millionth of the account\n// currency's unit) to minor units, rounding half away from zero.\nfunc fromMicros(micros int64, cur string) Money {\n\tper := 1_000_000 / pow10(decimals[cur])\n\tminor := (micros + per/2) / per\n\treturn money(minor, cur)\n}\n```\n\n解析 Meta 这类十进制字符串时，要用精确的十进制运算，而不是 `float64`。然后让合计拒绝混合币种：\n\n```go\n// sum refuses to add different currencies instead of guessing a rate.\nfunc sum(ms ...Money) (Money, error) {\n\tvar t int64\n\tfor _, m := range ms {\n\t\tif m.Currency != ms[0].Currency {\n\t\t\treturn Money{}, fmt.Errorf(\"cannot add %s and %s; convert explicitly\", ms[0].Currency, m.Currency)\n\t\t}\n\t\tt += m.Minor\n\t}\n\treturn money(t, ms[0].Currency), nil\n}\n```\n\n- 在一次本地运行中，4,512,340,000 micros 变成了 4512.34 USD，「1234.5」变成了 1234.50 USD，美元合计为 5746.84 USD，而加入日元时则以一条清楚的消息失败。\n- 每一行都带上它所覆盖的日期范围和时区返回，并提供一个 `convert_currency` 工具，使用指明来源和日期的汇率，让货币换算明确、可审计。\n\n**少返回一些。** 原始响应里有几十个模型用不到的字段，每一个都是一次误读的机会。只挑出 Agent 的问题会用到的字段，起直白的名字，比如用 `spend` 代替 `cost_micros`，并在工具描述里用一行说明单位。\n\n**权衡。** 规范化会隐藏一些专业用户偶尔需要的平台细节；可以通过一个单独的调试工具保留原始响应。每接入一个新平台，都需要它自己的转换器，以及基于真实数据的测试。",
+      "followups": [
+        "A merchant asks for total spend across a USD and a JPY account. How should the agent answer?",
+        "How would you test the converters so a platform API change is caught before the agent sees it?"
+      ],
+      "followups_zh": [
+        "商家问一个美元账户和一个日元账户的总花费。Agent 应当如何回答？",
+        "你会如何测试这些转换器，让平台 API 的变化在 Agent 看到之前就被发现？"
+      ],
+      "vocab": [
+        {
+          "en": "micros",
+          "zh": "百万分之一单位（micros）"
+        },
+        {
+          "en": "minor unit",
+          "zh": "最小货币单位"
+        },
+        {
+          "en": "normalization",
+          "zh": "规范化"
+        },
+        {
+          "en": "tool boundary",
+          "zh": "工具边界"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261128-3",
+      "topic": "Production",
+      "difficulty": "Medium",
+      "title": "A carrier's delay webhook arrives twice, two agent runs start, and the shopper gets two apology emails with two different discount codes",
+      "title_zh": "承运商的延迟 webhook 到了两次，于是启动了两次 Agent 运行，顾客收到了两封道歉邮件，附带两个不同的折扣码",
+      "question": "When a carrier reports a delayed parcel, a webhook starts an agent run that checks the order, writes an apology and creates a 10% discount code. Carriers deliver webhooks at least once, and some send a second notice for the same delay later. Several shoppers received two apologies with two different codes, and finance found discount codes created for the same order twice.\n\nMake this flow run exactly once per real delay.",
+      "question_zh": "当承运商报告包裹延误时，一个 webhook 会启动一次 Agent 运行：检查订单、撰写道歉信，并创建一个 9 折折扣码。承运商投递 webhook 遵循「至少一次」，有些还会在之后针对同一次延误再发一条通知。好几位顾客收到了两封道歉信、两个不同的折扣码，财务也发现同一个订单被创建了两次折扣码。\n\n让这个流程针对每一次真实的延误只执行一次。",
+      "answer": "**The core idea.** An agent run is a side effect like any other. Deduplicate before starting it, and make each action it takes idempotent, because the trigger, the run and the tools can each repeat.\n\n**Why it happened.** The webhook handler started a run for every delivery. A redelivery carries the same event ID, and a second notice for the same delay carries a new one, so even deduplicating by event ID would not have caught both. And because the model writes each email and code fresh, two runs produced two different results, not two identical ones.\n\n**Fix one: claim the work, not the delivery.** Name the work in business terms and claim it atomically before starting a run:\n\n```go\n// workKey names the work, not the delivery: two different events saying the\n// same order is late are one apology, within a window.\nfunc workKey(ev Event) string {\n\tday := ev.At.UTC().Format(\"2006-01-02\")\n\treturn ev.Kind + \":\" + ev.OrderID + \":\" + day\n}\n\n// Claim returns true only for the first delivery of a piece of work.\nfunc (t *Triggers) Claim(ev Event) bool {\n\tt.mu.Lock()\n\tdefer t.mu.Unlock()\n\tk := workKey(ev)\n\tif _, ok := t.claimed[k]; ok {\n\t\treturn false\n\t}\n\tt.claimed[k] = ev.At\n\treturn true\n}\n```\n\n- In a local run, four deliveries, including a redelivery and a second notice for the same order, started exactly two runs, one per order.\n- In production, the claim is an insert into a table with a unique key on the work key, so it holds across pods. Answer the webhook with success once the claim is stored, and run the agent from a queue.\n\n**Fix two: idempotent tools.** Pass the work key into the run, and have `create_discount` and `send_email` use it as an idempotency key: the second call returns the existing code and does not send again. This also covers retries inside one run.\n\n**Fix three: the agent should see history.** Give the run a tool or context line showing earlier apologies for this order. A third delay a week later is new work, and the agent can write \"we're sorry this order is late again\" instead of starting fresh.\n\n**Watch for it.** Count agent runs per work key and alert when any key has more than one. Log the work key on every email and discount code, so finance can trace a duplicate back to the delivery that caused it.\n\n**Trade-offs.** The work key's window decides what counts as the same delay; too long and a real second delay gets no message. Keep claims long enough to cover the carrier's redelivery period and expire them after. Deduplicating too aggressively is the opposite failure: a shopper who never hears about a real delay is worse off than one who gets two emails, so measure both.",
+      "answer_zh": "**核心思想。** 一次 Agent 运行，和其他副作用没有什么不同。启动之前要先去重，并让它执行的每个动作都具备幂等性，因为触发、运行和工具，每一层都可能重复。\n\n**原因。** webhook 处理程序对每一次投递都启动一次运行。重新投递的事件带着相同的事件 ID，而针对同一次延误的第二条通知带着一个新的 ID，所以即使按事件 ID 去重，也无法同时挡住这两种情况。而且，由于模型每次都会重新撰写邮件、生成折扣码，两次运行产生的是两份不同的结果，而不是两份相同的结果。\n\n**修复一：认领的是工作，而不是投递。** 用业务含义来命名这项工作，并在启动运行之前以原子方式认领它：\n\n```go\n// workKey names the work, not the delivery: two different events saying the\n// same order is late are one apology, within a window.\nfunc workKey(ev Event) string {\n\tday := ev.At.UTC().Format(\"2006-01-02\")\n\treturn ev.Kind + \":\" + ev.OrderID + \":\" + day\n}\n\n// Claim returns true only for the first delivery of a piece of work.\nfunc (t *Triggers) Claim(ev Event) bool {\n\tt.mu.Lock()\n\tdefer t.mu.Unlock()\n\tk := workKey(ev)\n\tif _, ok := t.claimed[k]; ok {\n\t\treturn false\n\t}\n\tt.claimed[k] = ev.At\n\treturn true\n}\n```\n\n- 在一次本地运行中，四次投递，包括一次重新投递和同一订单的第二条通知，只启动了两次运行，每个订单一次。\n- 在生产环境中，认领就是向一张以工作键为唯一键的表插入一行，这样多个 Pod 之间也能生效。认领一旦存下来，就向 webhook 返回成功，再从队列里去运行 Agent。\n\n**修复二：幂等的工具。** 把工作键传入这次运行，让 `create_discount` 和 `send_email` 把它用作幂等键：第二次调用会返回已有的折扣码，也不会重复发送。这同样覆盖了同一次运行内部的重试。\n\n**修复三：让 Agent 看到历史。** 给这次运行提供一个工具或一行上下文，展示这个订单之前的道歉记录。一周后的第三次延误是一项新的工作，Agent 就可以写「很抱歉这个订单又一次延误了」，而不是从头开始。\n\n**持续监控。** 按工作键统计 Agent 运行次数，只要有某个键超过一次就告警。在每封邮件和每个折扣码上都记录工作键，这样财务就能把一个重复项追溯到引发它的那次投递。\n\n**权衡。** 工作键的时间窗口决定了什么算作同一次延误；窗口太长，真正的第二次延误就收不到消息。认领记录的保留时间要足以覆盖承运商的重新投递周期，之后再让它过期。去重过度则是相反的失败：一位对真实延误毫不知情的顾客，比收到两封邮件的顾客处境更糟，所以两种情况都要度量。",
+      "followups": [
+        "The agent run crashes after creating the code but before sending the email. What happens on the next delivery?",
+        "How would you test this flow for duplicate and out-of-order webhooks?"
+      ],
+      "followups_zh": [
+        "Agent 运行在创建折扣码之后、发送邮件之前崩溃了。下一次投递时会发生什么？",
+        "你会如何针对重复和乱序的 webhook 测试这个流程？"
+      ],
+      "vocab": [
+        {
+          "en": "at-least-once delivery",
+          "zh": "至少一次投递"
+        },
+        {
+          "en": "idempotency key",
+          "zh": "幂等键"
+        },
+        {
+          "en": "deduplication",
+          "zh": "去重"
+        },
+        {
+          "en": "work key",
+          "zh": "工作键"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261128-4",
+      "topic": "RAG",
+      "difficulty": "Hard",
+      "title": "A staff member lost access to wholesale price lists yesterday, and the internal assistant still answers with wholesale prices",
+      "title_zh": "一名员工昨天失去了批发价目表的访问权限，内部助手却仍然用批发价回答他",
+      "question": "Large merchants use an internal assistant that answers staff questions from the store's documents: policies, supplier contracts and price lists. Documents have permissions, and the retrieval index stores each chunk's allowed readers so searches can filter by user. A merchant removed one staff member's access to wholesale price lists after a contract dispute. The next morning, that person asked about a coat and the assistant quoted the wholesale price.\n\nExplain the failure and design permission handling for retrieval.",
+      "question_zh": "大商家会使用一个内部助手，根据店铺的文档回答员工的问题：各类政策、供应商合同和价目表。文档带有权限，检索索引为每个分块存了允许读取的人员名单，这样搜索时就能按用户过滤。一位商家在一次合同纠纷之后，撤销了一名员工对批发价目表的访问权限。第二天早上，这个人问起一件大衣，助手报出了批发价。\n\n解释这个故障，并为检索设计权限处理。",
+      "answer": "**The core idea.** Permissions copied into an index are a cache, and caches go stale. The decision that matters is the one made right before text reaches the model, and it must use live permissions. Anything the model has seen, it can repeat.\n\n**Why it happened.** The index stored each chunk's reader list when the document was indexed. Revoking access changed the permission system, not the document, so nothing re-indexed it, and the old list kept the person as a reader. Retrieval filtered by that stale list and handed the wholesale chunk to the model.\n\n**Fix one: authorize after retrieval, with live permissions.**\n\n```go\n// authorize runs after retrieval and before anything reaches the model.\n// The index may filter by a cached permission snapshot for speed, but the\n// final decision is a live check, so a revocation takes effect at once.\nfunc authorize(user string, chunks []Chunk, acl ACL) (kept []Chunk, dropped int) {\n\tfor _, c := range chunks {\n\t\tif acl.CanRead(user, c.DocID) {\n\t\t\tkept = append(kept, c)\n\t\t} else {\n\t\t\tdropped++\n\t\t}\n\t}\n\treturn\n}\n```\n\n- In a local run with a stale index, the live check dropped the wholesale chunk and kept the retail policy.\n- Keep the index filter for speed and recall, but treat it as a hint. Retrieve a few more candidates than you need, because the live check may drop some.\n- Log every dropped chunk with the user and document. A rising count shows the index drifting away from the permission system.\n\n**Fix two: make revocation propagate.** Subscribe to permission-change events and update the reader lists of affected chunks, so the hint is usually right as well. Watch group membership too: removing someone from a group changes access to every document the group can read.\n\n**Fix three: clean what the conversation already holds.** A revoked user's open conversation may already contain wholesale prices from yesterday's answers. On a revocation that affects a user, end their active sessions or start new ones without that content. Do the same for memories and cached answers keyed by question.\n\n**Test it.** Build eval cases from permission changes: revoke a reader, ask questions that only the revoked documents can answer, and assert that the answer contains none of their text and says the information is not available. Run these cases after every change to indexing or permission code.\n\n**Trade-offs.** A live permission check per chunk adds latency; batch the checks and cache them for seconds, not days. Answer caching across users is unsafe unless the cache key includes the permissions that produced the answer.",
+      "answer_zh": "**核心思想。** 复制进索引的权限只是一份缓存，而缓存会过期。真正起作用的决定，是在文本到达模型之前的那一刻做出的，它必须使用实时的权限。模型看到过的任何东西，它都可能说出来。\n\n**原因。** 索引是在文档被索引时，为每个分块存下读者名单的。撤销权限改动的是权限系统，而不是文档本身，所以没有任何东西触发重新索引，旧名单里依然有这个人。检索按这份过期的名单做过滤，把批发价的分块交给了模型。\n\n**修复一：检索之后，用实时权限做授权。**\n\n```go\n// authorize runs after retrieval and before anything reaches the model.\n// The index may filter by a cached permission snapshot for speed, but the\n// final decision is a live check, so a revocation takes effect at once.\nfunc authorize(user string, chunks []Chunk, acl ACL) (kept []Chunk, dropped int) {\n\tfor _, c := range chunks {\n\t\tif acl.CanRead(user, c.DocID) {\n\t\t\tkept = append(kept, c)\n\t\t} else {\n\t\t\tdropped++\n\t\t}\n\t}\n\treturn\n}\n```\n\n- 在一次索引已过期的本地运行中，实时检查丢弃了批发价分块，保留了零售政策。\n- 为了速度和召回率，保留索引上的过滤，但只把它当作参考。多检索几个候选，因为实时检查可能会丢弃其中一些。\n- 记录每一个被丢弃的分块，以及对应的用户和文档。如果这个数量持续上升，说明索引正在与权限系统渐行渐远。\n\n**修复二：让撤销权限能传播出去。** 订阅权限变更事件，更新受影响分块的读者名单，这样作为参考的过滤结果通常也是对的。还要关注用户组的成员变化：把某人移出一个组，会改变他对该组能读取的所有文档的访问权限。\n\n**修复三：清理对话里已有的内容。** 被撤销权限的用户，其正在进行的对话里可能已经包含了昨天回答中的批发价。当权限撤销影响到某个用户时，结束他正在进行的会话，或者开启不含这些内容的新会话。对按问题缓存的答案和记忆也要同样处理。\n\n**测试它。** 根据权限变更来构建评测用例：撤销某位读者的权限，提出只有被撤销的文档才能回答的问题，并断言答案中不包含这些文档的任何文字，且说明该信息不可用。每次修改索引或权限相关的代码后，都要运行这些用例。\n\n**权衡。** 对每个分块做实时权限检查会增加延迟；要批量检查，缓存时间以秒计，而不是以天计。除非缓存键里包含了产生该答案时的权限，否则在不同用户之间共享答案缓存是不安全的。",
+      "followups": [
+        "A document's permissions are \"anyone in Finance\". How do you check that quickly at query time?",
+        "How would you test that no answer ever contains text the asking user cannot read?",
+        "Should the assistant tell a user that some documents were hidden from them?"
+      ],
+      "followups_zh": [
+        "一份文档的权限是「财务部的所有人」。你如何在查询时快速检查这一点？",
+        "你会如何测试，确保任何回答都不会包含提问者无权读取的文本？",
+        "助手是否应该告诉用户，有些文档对他不可见？"
+      ],
+      "vocab": [
+        {
+          "en": "access control list",
+          "zh": "访问控制列表"
+        },
+        {
+          "en": "revocation",
+          "zh": "权限撤销"
+        },
+        {
+          "en": "stale permission",
+          "zh": "过期的权限"
+        },
+        {
+          "en": "post-retrieval filtering",
+          "zh": "检索后过滤"
+        }
+      ]
+    },
+    {
+      "id": "agent-daily-20261128-5",
+      "topic": "Multi-agent",
+      "difficulty": "Senior",
+      "title": "The merchant told the lead agent \"never touch the Black Friday campaigns\", and three of the workers it started paused them anyway",
+      "title_zh": "商家对主 Agent 说「绝不要动黑五的广告系列」，可它启动的 worker 里有三个还是把这些广告系列暂停了",
+      "question": "A campaign-optimization system has a lead agent that talks to the merchant and delegates per-account work to worker agents, each with tools to pause campaigns and change budgets. Early in the chat, the merchant said \"never touch the Black Friday campaigns\". The lead acknowledged it. An hour later, three workers paused Black Friday campaigns that looked unprofitable. The briefs the lead sent them did not mention the rule.\n\nDesign the system so the merchant's constraints hold for every agent.",
+      "question_zh": "一个广告系列优化系统里，主 Agent 负责和商家对话，并把每个账户的工作委派给 worker Agent，每个 worker 都有暂停广告系列和修改预算的工具。对话一开始，商家就说了「绝不要动黑五的广告系列」，主 Agent 也确认了。一个小时后，有三个 worker 暂停了几个看起来不赚钱的黑五广告系列。主 Agent 发给它们的任务说明里，没有提到这条规则。\n\n设计这个系统，让商家的约束对每一个 Agent 都生效。",
+      "answer": "**The core idea.** In a multi-agent system, each worker knows only what it is told. A constraint that lives in the lead's conversation is not a constraint for the system. Merchant rules must be stored as data, resolved to concrete objects, and enforced by the tools every agent uses, with the briefs as a helpful copy, not the only one.\n\n**Why it happened.** In Managed Agents' multi-agent sessions, each agent runs in its own thread with its own conversation history; threads share the filesystem but not the conversation. The guidance is explicit: if a subagent needs to know something, the coordinator must say so in the delegated message or write it to disk. The lead summarized the task and dropped the rule, and the workers' tools had no reason to refuse.\n\n**Store constraints as data and enforce them in tools.**\n\n```go\n// Constraint is something the merchant said that must hold for the whole run.\n// The lead resolves it to concrete IDs once, confirms the list with the\n// merchant, and stores it where every agent's write tools read it.\ntype Constraint struct {\n\tID, Text string\n\tFrozen   map[string]bool // campaign IDs nobody may change\n}\n\ntype Campaign struct{ ID, Name string }\n\n// guard wraps every write tool used by any agent in the session.\nfunc guard(cs []Constraint, action string, c Campaign) (bool, string) {\n\tfor _, k := range cs {\n\t\tif k.Frozen[c.ID] {\n\t\t\treturn false, fmt.Sprintf(\"Refused: %s %s (%s) conflicts with the merchant's instruction %s: %q. Skip it and report it.\",\n\t\t\t\taction, c.ID, c.Name, k.ID, k.Text)\n\t\t}\n\t}\n\treturn true, action + \" \" + c.ID + \" done\"\n}\n```\n\n- When the merchant states a rule, the lead resolves it to concrete objects (\"these two campaigns: BF Boots DE and Black Friday Coats FR\"), confirms the list with the merchant, and saves it. Matching by name at enforcement time is fragile; IDs are not.\n- Every write tool, for every agent, checks the stored constraints. In a local run, both Black Friday campaigns were refused with a message citing the rule, and an evergreen campaign was paused normally.\n- The refusal tells the worker to skip and report, so the lead can tell the merchant what was left alone and why.\n\n**Briefs still matter.** Use a brief template with a constraints section filled from the store, so workers plan around the rules instead of discovering them by hitting refusals. Give each worker only the tools its task needs: an analysis worker gets read tools only.\n\n**Changing and testing rules.** New campaigns created after the rule need a decision: ask the merchant whether the rule covers them. Add eval cases where a constraint is stated early and the profitable move violates it, and check the end state, not the final message.\n\n**Trade-offs.** Tool-level enforcement adds a lookup to every write and needs a clear owner for the constraint store. Resolving rules to IDs needs one extra confirmation turn, but it turns a vague sentence into something the system can actually check.",
+      "answer_zh": "**核心思想。** 在多 Agent 系统里，每个 worker 只知道被告知的东西。一条只存在于主 Agent 对话里的约束，对整个系统来说并不是约束。商家的规则必须以数据的形式保存，解析到具体的对象上，并由每个 Agent 都会使用的工具来强制执行；任务说明只是一份有用的副本，而不是唯一的那一份。\n\n**原因。** 在 Managed Agents 的多 Agent 会话中，每个 Agent 都运行在自己的线程里，有自己的对话历史；线程之间共享文件系统，但不共享对话。指南写得很明确：如果某个子 Agent 需要知道某件事，协调者必须在委派消息里说明，或者把它写到磁盘上。主 Agent 在概括任务时漏掉了这条规则，而 worker 的工具也没有理由拒绝。\n\n**把约束存成数据，并在工具里强制执行。**\n\n```go\n// Constraint is something the merchant said that must hold for the whole run.\n// The lead resolves it to concrete IDs once, confirms the list with the\n// merchant, and stores it where every agent's write tools read it.\ntype Constraint struct {\n\tID, Text string\n\tFrozen   map[string]bool // campaign IDs nobody may change\n}\n\ntype Campaign struct{ ID, Name string }\n\n// guard wraps every write tool used by any agent in the session.\nfunc guard(cs []Constraint, action string, c Campaign) (bool, string) {\n\tfor _, k := range cs {\n\t\tif k.Frozen[c.ID] {\n\t\t\treturn false, fmt.Sprintf(\"Refused: %s %s (%s) conflicts with the merchant's instruction %s: %q. Skip it and report it.\",\n\t\t\t\taction, c.ID, c.Name, k.ID, k.Text)\n\t\t}\n\t}\n\treturn true, action + \" \" + c.ID + \" done\"\n}\n```\n\n- 商家提出一条规则时，主 Agent 把它解析到具体的对象上（「这两个广告系列：BF Boots DE 和 Black Friday Coats FR」），和商家确认这份清单，然后保存下来。在执行时按名称匹配很脆弱，按 ID 则不会。\n- 每个 Agent 的每个写工具，都要检查已保存的约束。在一次本地运行中，两个黑五广告系列的操作都被拒绝，并附上了引用该规则的消息；一个常青广告系列则正常被暂停了。\n- 拒绝消息会告诉 worker 跳过并上报，这样主 Agent 就能告诉商家哪些东西没有动、为什么没有动。\n\n**任务说明依然重要。** 使用一个带有约束部分的任务说明模板，并从存储中自动填充，这样 worker 在规划时就能绕开这些规则，而不是撞上拒绝才发现。每个 worker 只给它的任务所需的工具：做分析的 worker 只给读工具。\n\n**修改和测试规则。** 规则设立之后新建的广告系列需要一个决定：问商家这条规则是否也覆盖它们。加入这样的评测用例：约束在早期提出，而最赚钱的操作恰好违反它；检查的是最终状态，而不是最后一条消息。\n\n**权衡。** 在工具层面强制执行，会让每次写操作多一次查询，而且约束存储需要有明确的负责人。把规则解析成 ID 需要多一轮确认，但它把一句含糊的话变成了系统真正能检查的东西。",
+      "followups": [
+        "The merchant later says \"actually, you can lower the Black Friday budgets, just don't pause them\". How does the system change?",
+        "A worker is a third-party agent you do not control. Where does enforcement live now?",
+        "How would you show the merchant which rules are active in a long session?"
+      ],
+      "followups_zh": [
+        "商家后来又说「其实可以降低黑五的预算，只是别暂停」。系统要怎么改？",
+        "如果某个 worker 是你无法控制的第三方 Agent，强制执行该放在哪里？",
+        "在一个很长的会话里，你会如何向商家展示哪些规则正在生效？"
+      ],
+      "vocab": [
+        {
+          "en": "constraint",
+          "zh": "约束"
+        },
+        {
+          "en": "delegation brief",
+          "zh": "委派任务说明"
+        },
+        {
+          "en": "enforcement",
+          "zh": "强制执行"
+        },
+        {
+          "en": "context isolation",
+          "zh": "上下文隔离"
+        },
+        {
+          "en": "least privilege",
+          "zh": "最小权限"
+        }
+      ]
+    }
+  ]
+}

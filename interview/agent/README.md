@@ -3,7 +3,7 @@
 面向后端工程师的 AI Agent 面试题，中英双语，按模块从 Agent 循环一路讲到生产环境；之后每天追加一组新题。
 每题包含题目、参考答案（默认折叠）、追问和词汇表，中文逐段放在英文下面。
 
-共 51 个模块、239 道题。
+共 52 个模块、244 道题。
 
 - 数据：`interview/agent/data/<模块 id>.json`（与 Agent 面试速成页面的 `modules` 集合结构一致）
 - 重新生成 Markdown：在仓库根目录执行 `go run ./interview/render -dir interview/agent -kind modules`
@@ -705,3 +705,17 @@ Five new agent questions: memory that overrules the merchant's current request, 
 | 3 | Tools & MCP | Medium | [The catalog-export tool takes eight minutes, the tool call times out after 60 seconds, and the agent starts the same export three more times](modules/daily-2026-11-27.md#q3) | 目录导出工具需要 8 分钟，工具调用在 60 秒后超时，于是 Agent 又把同一个导出任务启动了三次 |
 | 4 | RAG | Hard | ["Does this jacket run small?" The assistant quotes three angry reviews, while 700 of 800 reviewers say the fit is true to size](modules/daily-2026-11-27.md#q4) | 「这件夹克偏小吗？」助手引用了三条愤怒的评论，而 800 位评论者中有 700 位说尺码标准 |
 | 5 | Production | Senior | [Black Friday is three weeks away: capacity planning for the shopper chat agent, from token forecasts and rate limits to what to switch off first](modules/daily-2026-11-27.md#q5) | 距离黑五还有三周：为顾客聊天 Agent 做容量规划，从 token 预测、速率限制，到先关掉哪些功能 |
+
+## [Daily set · Nov 28 · 每日新题 · 11 月 28 日](modules/daily-2026-11-28.md)
+
+Five new agent questions: dependent tool calls made in parallel with an invented ID, ad spend in micros and mixed currencies, duplicate webhooks that start two agent runs, a revoked user still seeing documents through retrieval, and merchant rules that never reached the worker agents.
+
+> 五道新的 Agent 题：带着编造 ID 并行发出的相互依赖的工具调用、以 micros 计的广告花费和混合币种、启动了两次 Agent 运行的重复 webhook、被撤销权限的用户仍能通过检索看到文档，以及没能传达到 worker Agent 的商家规则。
+
+| # | Topic | Difficulty | Title | 标题 |
+| --- | --- | --- | --- | --- |
+| 1 | Agent Loop | Medium | [The ad-launch agent calls create_campaign and create_ad_set in the same turn, and the ad set points at a campaign ID the model made up](modules/daily-2026-11-28.md#q1) | 广告投放 Agent 在同一轮里同时调用 create_campaign 和 create_ad_set，而广告组指向的是一个模型编造出来的广告系列 ID |
+| 2 | Tools & MCP | Hard | [The ad-report tool passes Google's cost_micros and Meta's spend strings straight through, and the agent tells a merchant they spent $4.5 billion](modules/daily-2026-11-28.md#q2) | 广告报表工具把 Google 的 cost_micros 和 Meta 的花费字符串原样透传，结果 Agent 告诉商家他们花了 45 亿美元 |
+| 3 | Production | Medium | [A carrier's delay webhook arrives twice, two agent runs start, and the shopper gets two apology emails with two different discount codes](modules/daily-2026-11-28.md#q3) | 承运商的延迟 webhook 到了两次，于是启动了两次 Agent 运行，顾客收到了两封道歉邮件，附带两个不同的折扣码 |
+| 4 | RAG | Hard | [A staff member lost access to wholesale price lists yesterday, and the internal assistant still answers with wholesale prices](modules/daily-2026-11-28.md#q4) | 一名员工昨天失去了批发价目表的访问权限，内部助手却仍然用批发价回答他 |
+| 5 | Multi-agent | Senior | [The merchant told the lead agent "never touch the Black Friday campaigns", and three of the workers it started paused them anyway](modules/daily-2026-11-28.md#q5) | 商家对主 Agent 说「绝不要动黑五的广告系列」，可它启动的 worker 里有三个还是把这些广告系列暂停了 |
